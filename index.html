@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>H3 Stride-Calibrated Flow Engine</title>
+    <link href="src/style/main.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="panel">
+      <h2>Optimized H3 Flow Engine</h2>
+      <p>
+        Fixed stroke artifact engine displaying border-free pedestrian
+        simulations.
+      </p>
+
+      <div id="scan-loader">🔄 Synchronizing ground layers...</div>
+      <div id="mode-status" class="mode-indicator mode-origin">
+        Mode: Place Origins (A)
+      </div>
+
+      <div class="btn-group">
+        <button class="btn" id="btn-toggle-mode">Cycle Role Pass</button>
+        <button class="btn btn-accent" id="btn-compute">Simulate Flows</button>
+      </div>
+      <div id="max-flow-readout" class="density-readout">
+        Peak Flow Intensity: 0
+      </div>
+      <button class="btn" style="background: #dc3545" id="btn-clear">
+        Reset Simulation Grid
+      </button>
+    </div>
+
+    <div class="legend">
+      <div style="font-weight: bold; margin-bottom: 6px">
+        Friction Resistance Map
+      </div>
+      <div class="legend-item">
+        <span
+          class="legend-color"
+          style="background: rgba(231, 76, 60, 0.75)"
+        ></span>
+        Hard Structure (Cost: ∞)
+      </div>
+      <div class="legend-item">
+        <span
+          class="legend-color"
+          style="background: rgba(39, 174, 96, 0.55)"
+        ></span>
+        Thick Vegetation (Cost: 3.5)
+      </div>
+      <div class="legend-item">
+        <span
+          class="legend-color"
+          style="background: rgba(166, 216, 84, 0.45)"
+        ></span>
+        Permeable Greenspace (Cost: 1.8)
+      </div>
+      <div class="legend-item">
+        <span
+          class="legend-color"
+          style="background: rgba(0, 150, 255, 0.15)"
+        ></span>
+        Walkable Canvas Baseline
+      </div>
+
+      <div style="font-weight: bold; margin-top: 10px">
+        Continuous Flow Network
+      </div>
+      <div class="legend-gradient"></div>
+      <div class="legend-labels">
+        <span>0 Paths</span>
+        <span id="legend-max-label">Max Flow</span>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>
