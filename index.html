@@ -25,68 +25,108 @@
     </div>
 
     <div class="panel">
-      <h2>Optimized H3 Flow Engine</h2>
-      <p>
-        Fixed stroke artifact engine displaying border-free pedestrian
-        simulations.
-      </p>
-
-      <div id="scan-loader">🔄 Synchronizing ground layers...</div>
-      <div id="mode-status" class="mode-indicator mode-origin">
-        Placement: Origin nodes
+      <div class="panel-header">
+        <div>
+          <div class="panel-kicker">Cartographic flow lab</div>
+          <h2>Desire Paths</h2>
+          <p>
+            Place origin and destination nodes on walkable ground, then read the
+            friction field as it forms.
+          </p>
+        </div>
+        <div class="panel-orb" aria-hidden="true"></div>
       </div>
 
-      <div class="btn-group">
-        <button class="btn" id="btn-toggle-mode">Switch to Destination</button>
-        <button class="btn btn-ghost" id="btn-toggle-friction">
-          Hide Friction Mesh
-        </button>
+      <div class="panel-meta">
+        <div id="mode-status" class="mode-indicator mode-origin">
+          Placement: Origin nodes
+        </div>
+        <div class="status-chip">Live map</div>
       </div>
-      <div class="btn-group">
-        <button class="btn btn-accent" id="btn-compute">Simulate Flows</button>
-        <button class="btn btn-danger" id="btn-clear">Reset Simulation Grid</button>
+
+      <div class="panel-section">
+        <div class="section-label">Placement</div>
+        <div class="placement-mode-group" role="group" aria-label="Placement mode">
+          <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin" aria-pressed="true">Origin</button>
+          <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination" aria-pressed="false">Destination</button>
+          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="both" aria-pressed="false">Dual</button>
+        </div>
+        <div class="weight-control">
+          <div class="weight-control-head">
+            <span>Node weight</span>
+            <output id="node-weight-readout" for="node-weight">1</output>
+          </div>
+          <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
+          <div class="weight-scale" aria-hidden="true">
+            <span>1</span>
+            <span>10</span>
+          </div>
+        </div>
       </div>
-      <div id="max-flow-readout" class="density-readout">
-        Peak Flow Intensity: 0
+
+      <div class="panel-section">
+        <div class="section-label">Simulation</div>
+        <div class="btn-group">
+          <button class="btn btn-ghost" id="btn-build-mapping" type="button">Build Mapping</button>
+          <button class="btn btn-accent" id="btn-compute">Simulate Flows</button>
+          <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
+        </div>
+      </div>
+
+      <div class="panel-footer">
+        <div id="scan-loader">Sampling walkable surfaces...</div>
+        <div id="max-flow-readout" class="density-readout">
+          Peak flow intensity: 0
+        </div>
       </div>
     </div>
 
     <div class="legend">
-      <div style="font-weight: bold; margin-bottom: 6px">
-        Friction Resistance Map
+      <div class="legend-title-row">
+        <div class="legend-title">Friction resistance map</div>
+        <button
+          id="btn-toggle-friction"
+          class="legend-icon-button"
+          type="button"
+          aria-label="Hide friction legend"
+          aria-pressed="true"
+          title="Hide friction legend"
+        >
+          ⊖
+        </button>
       </div>
-      <div class="legend-item">
-        <span
-          class="legend-color"
-          style="background: rgba(231, 76, 60, 0.75)"
-        ></span>
-        Hard Structure (Cost: ∞)
-      </div>
-      <div class="legend-item">
-        <span
-          class="legend-color"
-          style="background: rgba(39, 174, 96, 0.55)"
-        ></span>
-        Thick Vegetation (Cost: 3.5)
-      </div>
-      <div class="legend-item">
-        <span
-          class="legend-color"
-          style="background: rgba(166, 216, 84, 0.45)"
-        ></span>
-        Permeable Greenspace (Cost: 1.8)
-      </div>
-      <div class="legend-item">
-        <span
-          class="legend-color"
-          style="background: rgba(0, 150, 255, 0.15)"
-        ></span>
-        Walkable Canvas Baseline
+      <div id="friction-legend-body">
+        <div class="legend-item">
+          <span
+            class="legend-color"
+            style="background: rgba(231, 76, 60, 0.75)"
+          ></span>
+          Hard structure (Cost: ∞)
+        </div>
+        <div class="legend-item">
+          <span
+            class="legend-color"
+            style="background: rgba(39, 174, 96, 0.55)"
+          ></span>
+          Dense vegetation (Cost: 3.5)
+        </div>
+        <div class="legend-item">
+          <span
+            class="legend-color"
+            style="background: rgba(166, 216, 84, 0.45)"
+          ></span>
+          Permeable greenspace (Cost: 1.8)
+        </div>
+        <div class="legend-item">
+          <span
+            class="legend-color"
+            style="background: rgba(0, 150, 255, 0.15)"
+          ></span>
+          Walkable baseline
+        </div>
       </div>
 
-      <div style="font-weight: bold; margin-top: 10px">
-        Continuous Flow Network
-      </div>
+      <div class="legend-title legend-title-spaced">Continuous flow network</div>
       <div class="legend-gradient"></div>
       <div class="legend-labels">
         <span>0 Paths</span>

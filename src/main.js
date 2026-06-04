@@ -45,12 +45,14 @@ const init = () => {
   map.globalPeakFlow = 1;
   map.simulationNodes = {};
   map.showFrictionMesh = true;
+  map.mappingReady = false;
   map.deckOverlayInstance = new MapboxOverlay({
     interleaved: true,
     layers: [],
   });
   map.targetLabelLayerId = undefined;
   map.placementMode = 'origin';
+  map.placementWeight = 1;
   map.aoi = undefined;
   map.readyToCompute = false;
 
@@ -88,9 +90,10 @@ const init = () => {
   map.on('click', (e) => {
     if (!document.getElementById('map')) return; // Safeguard
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    let structureChanged = false;
 
     if (!isAccessible(e)) {
-      e.target.showAlertCard('This location is not accessible by foot. Please select a different location.', {
+      e.target.showAlertCard('This spot is blocked. Pick a walkable location instead.', {
         title: 'Placement blocked',
         tone: 'warning',
       });
@@ -102,21 +105,30 @@ const init = () => {
         e.target.simulationNodes[cell].weight += 1;
       } else {
         e.target.simulationNodes[cell].type = e.target.placementMode;
+        structureChanged = true;
       }
     } else {
       e.target.simulationNodes[cell] = {
         type: e.target.placementMode,
-        weight: 1,
+        weight: Math.min(10, Math.max(1, Math.round(e.target.placementWeight || 1))),
       };
+      structureChanged = true;
     }
 
     e.target.renderInterfacePins();
 
     if (isReadyToCompute(e.target)) {
       e.target.readyToCompute = true;
-      e.target.triggerFastScan();
     } else {
       e.target.readyToCompute = false;
+    }
+
+    if (structureChanged) {
+      e.target.mappingReady = false;
+    }
+
+    if (e.target.syncSimulationUI) {
+      e.target.syncSimulationUI();
     }
   });
 
@@ -132,9 +144,13 @@ const init = () => {
     }
     if (e.target.simulationNodes[cell] && e.target.simulationNodes[cell].weight <= 0) {
       delete e.target.simulationNodes[cell];
+      e.target.mappingReady = false;
     }
     e.target.renderInterfacePins();
     e.target.readyToCompute = isReadyToCompute(e.target);
+    if (e.target.syncSimulationUI) {
+      e.target.syncSimulationUI();
+    }
   });
 
   setupUI(map);

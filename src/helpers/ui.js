@@ -1,7 +1,11 @@
 export function setupUI(map) {
   const panel = document.querySelector('.panel');
-  const modeButton = document.getElementById('btn-toggle-mode');
+  const modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
   const frictionButton = document.getElementById('btn-toggle-friction');
+  const frictionLegendBody = document.getElementById('friction-legend-body');
+  const weightInput = document.getElementById('node-weight');
+  const weightReadout = document.getElementById('node-weight-readout');
+  const buildButton = document.getElementById('btn-build-mapping');
   const computeButton = document.getElementById('btn-compute');
   const clearButton = document.getElementById('btn-clear');
   const modeLabel = document.getElementById('mode-status');
@@ -13,33 +17,45 @@ export function setupUI(map) {
   const alertDismiss = document.getElementById('app-alert-dismiss');
   let alertTimer;
 
+  const clampWeight = (value) => Math.min(10, Math.max(1, Number.parseInt(value, 10) || 1));
+
   const syncModeUI = () => {
+    for (const button of modeButtons) {
+      const active = button.dataset.placementMode === map.placementMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+
     if (map.placementMode === 'origin') {
       modeLabel.innerText = 'Placement: Origin nodes';
       modeLabel.className = 'mode-indicator mode-origin';
-      modeButton.innerText = 'Switch to Destination';
-      modeButton.dataset.nextMode = 'destination';
       return;
     }
 
     if (map.placementMode === 'destination') {
       modeLabel.innerText = 'Placement: Destination nodes';
       modeLabel.className = 'mode-indicator mode-destination';
-      modeButton.innerText = 'Switch to Dual Mode';
-      modeButton.dataset.nextMode = 'both';
       return;
     }
 
     modeLabel.innerText = 'Placement: Dual nodes';
     modeLabel.className = 'mode-indicator mode-both';
-    modeButton.innerText = 'Switch to Origin';
-    modeButton.dataset.nextMode = 'origin';
+  };
+
+  const syncWeightUI = () => {
+    const weight = clampWeight(map.placementWeight);
+    map.placementWeight = weight;
+    if (weightInput) weightInput.value = String(weight);
+    if (weightReadout) weightReadout.value = String(weight);
   };
 
   const syncFrictionUI = () => {
     const enabled = map.showFrictionMesh !== false;
-    frictionButton.innerText = enabled ? 'Hide Friction Mesh' : 'Show Friction Mesh';
+    frictionButton.innerText = enabled ? '⊖' : '⊕';
     frictionButton.setAttribute('aria-pressed', String(enabled));
+    frictionButton.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
+    frictionButton.setAttribute('title', enabled ? 'Hide friction legend' : 'Show friction legend');
+    if (frictionLegendBody) frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
       map.updateLayers();
     }
@@ -48,6 +64,21 @@ export function setupUI(map) {
   const syncFlowReadout = () => {
     const peak = Math.max(0, Math.round(map.globalPeakFlow || 0));
     flowReadout.innerText = `Peak Flow Intensity: ${peak}`;
+  };
+
+  const syncSimulationUI = () => {
+    const busy = map.isComputing === true;
+    const mappingReady = map.mappingReady === true;
+    const readyToRun = map.readyToCompute === true;
+    const hasGrid = Object.keys(map.simulationNodes || {}).length > 0;
+
+    if (buildButton) buildButton.disabled = busy;
+    clearButton.disabled = busy || !hasGrid;
+    computeButton.disabled = busy || !mappingReady || !readyToRun;
+    computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    if (loader && !busy) {
+      loader.style.display = 'none';
+    }
   };
 
   const hideAlertCard = () => {
@@ -69,12 +100,15 @@ export function setupUI(map) {
     }
   };
 
-  const setBusyState = (busy) => {
+  const setBusyState = (busy, message = 'Sampling walkable surfaces...') => {
     map.isComputing = busy;
-    modeButton.disabled = busy;
+    for (const button of modeButtons) button.disabled = busy;
     frictionButton.disabled = busy;
+    if (weightInput) weightInput.disabled = busy;
+    if (buildButton) buildButton.disabled = busy;
     computeButton.disabled = busy;
     clearButton.disabled = busy;
+    loader.innerText = message;
     loader.style.display = busy ? 'block' : 'none';
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     panel.setAttribute('aria-busy', String(busy));
@@ -89,6 +123,7 @@ export function setupUI(map) {
     map.multiFrictionMap.clear();
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
+    map.mappingReady = false;
     map.aoi = undefined;
     map.aoi_px = undefined;
     map.aoi_polygon = undefined;
@@ -114,19 +149,64 @@ export function setupUI(map) {
     }
     map.clearLayers();
     syncFlowReadout();
+    syncSimulationUI();
   };
 
-  modeButton.addEventListener('click', () => {
-    map.placementMode = modeButton.dataset.nextMode || 'origin';
-    syncModeUI();
-  });
+  for (const button of modeButtons) {
+    button.addEventListener('click', () => {
+      map.placementMode = button.dataset.placementMode || 'origin';
+      syncModeUI();
+    });
+  }
+
+  if (weightInput) {
+    weightInput.addEventListener('input', () => {
+      map.placementWeight = clampWeight(weightInput.value);
+      syncWeightUI();
+    });
+  }
 
   frictionButton.addEventListener('click', () => {
     map.showFrictionMesh = map.showFrictionMesh === false;
     syncFrictionUI();
   });
 
+  if (buildButton) {
+    buildButton.addEventListener('click', async () => {
+      if (!map.simulationNodes || Object.keys(map.simulationNodes).length === 0) {
+        showAlertCard('Place at least one node before building the mapping.', {
+          title: 'Nothing to build',
+          tone: 'warning',
+        });
+        return;
+      }
+
+      setBusyState(true, 'Building mapping...');
+      try {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        map.triggerFastScan();
+        map.mappingReady = map.cellFrictionMap.size > 0;
+        if (!map.mappingReady) {
+          showAlertCard('The current layout did not produce a mapping. Add more nodes and try again.', {
+            title: 'Mapping unavailable',
+            tone: 'warning',
+          });
+        }
+      } catch (err) {
+        console.error('Mapping build failed:', err);
+        showAlertCard('Mapping build failed. Please try again.', {
+          title: 'Build failed',
+          tone: 'error',
+        });
+      } finally {
+        setBusyState(false);
+        syncSimulationUI();
+      }
+    });
+  }
+
   computeButton.addEventListener('click', async () => {
+    if (!map.mappingReady) return;
     setBusyState(true);
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -140,6 +220,7 @@ export function setupUI(map) {
     } finally {
       syncFlowReadout();
       setBusyState(false);
+      syncSimulationUI();
     }
   });
 
@@ -152,8 +233,12 @@ export function setupUI(map) {
   }
 
   map.showAlertCard = showAlertCard;
+  map.syncSimulationUI = syncSimulationUI;
 
+  map.placementWeight = clampWeight(map.placementWeight || 1);
   syncModeUI();
+  syncWeightUI();
   syncFrictionUI();
   syncFlowReadout();
+  syncSimulationUI();
 }
