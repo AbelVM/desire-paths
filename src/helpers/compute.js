@@ -229,8 +229,19 @@ export function computeDesirePaths() {
     this._cellState[k] = { friction: fr, affordance: aff, desire, multi };
   }
 
+  // Reuse cached per-target gradients when possible to avoid recomputing
+  // the full Dijkstra result for every run. Cache is keyed by target cell id
+  // and stores the plain-object distances returned by computeDijkstraGradient.
+  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
   const goalGradients = new Map();
-  destinations.forEach((d) => goalGradients.set(d, computeDijkstraGradient.call(this, d)));
+  for (const d of destinations) {
+    let g = this._gradientCacheObj[d];
+    if (!g) {
+      g = computeDijkstraGradient.call(this, d);
+      this._gradientCacheObj[d] = g;
+    }
+    goalGradients.set(d, g);
+  }
   const frictionLookup = this._frictionObj || this.cellFrictionMap;
   const frictionIsMap = typeof frictionLookup.get === 'function';
 
@@ -241,6 +252,9 @@ export function computeDesirePaths() {
   // Batch affordance updates so earlier agents don't deterministically bias later agents
   const affordanceDeltas = new Map();
   const pathDesireDeltas = new Map();
+  // Per-target contribution and assignment snapshots for incremental updates
+  const perTargetContribs = Object.create(null);
+  const assignedCountsTmp = Object.create(null);
 
   for (const o of agents) {
     const originCell = o;
@@ -287,10 +301,13 @@ export function computeDesirePaths() {
       for (let k = 0; k < leftover; k++) assigned[frac[k].i] += 1;
     }
 
+    // Record assigned counts for this origin (used for incremental diffs)
+    assignedCountsTmp[originCell] = Object.create(null);
     // For each destination, run its assigned simulations
     for (let idx = 0; idx < destCandidates.length; idx++) {
       const destCell = destCandidates[idx].dest;
       const count = assigned[idx] || 0;
+      assignedCountsTmp[originCell][destCell] = count;
       if (count <= 0) continue;
       const destGradient = goalGradients.get(destCell);
       if (!destGradient) continue;
@@ -308,6 +325,8 @@ export function computeDesirePaths() {
         if (typeof destGradientObj[originCell] !== 'number') continue;
       }
 
+      // ensure per-target contrib object exists for this run
+      if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
         let simCurrent = originCell;
@@ -365,6 +384,7 @@ export function computeDesirePaths() {
         for (let cell of uniqueSim) {
           pathDesireDeltas.set(cell, (pathDesireDeltas.get(cell) || 0) + 1);
           affordanceDeltas.set(cell, (affordanceDeltas.get(cell) || 0) + 1);
+          perTargetContribs[destCell][cell] = (perTargetContribs[destCell][cell] || 0) + 1;
         }
       }
     }
@@ -389,6 +409,12 @@ export function computeDesirePaths() {
   for (let [cell, v] of affordanceDeltas) {
     updateAffordance.call(this, cell, v);
   }
+
+  // Persist per-target contribution and assignment snapshots for incremental APIs
+  this._perTargetContribs = perTargetContribs;
+  this._assignedCounts = assignedCountsTmp;
+  this._targetWeights = Object.create(null);
+  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
 
   // Decay affordance using _cellState keys when available to avoid Map iteration hotspots
   if (this._cellState) {
@@ -905,4 +931,328 @@ export function getComputeCacheStats(ctx = {}) {
     visibilityCacheHits: ctx._visibilityCacheHits || 0,
     visibilityCacheMisses: ctx._visibilityCacheMisses || 0,
   };
+}
+
+// Gradient cache helpers: compute, inspect, and clear per-target gradients.
+export function computeAndCacheGradient(targetCell) {
+  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  const g = computeDijkstraGradient.call(this, targetCell);
+  this._gradientCacheObj[targetCell] = g;
+  return g;
+}
+
+export function getCachedGradient(targetCell) {
+  return this._gradientCacheObj ? this._gradientCacheObj[targetCell] : undefined;
+}
+
+export function clearGradientCache() {
+  this._gradientCacheObj = Object.create(null);
+}
+
+// --- Incremental assignment & contribution helpers ---
+function _computeAssignedCounts() {
+  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
+  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+
+  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  // ensure gradients exist for reachability checks
+  for (const d of destinations) {
+    if (!this._gradientCacheObj[d]) computeAndCacheGradient.call(this, d);
+  }
+
+  const assigned = Object.create(null);
+  for (const o of origins) {
+    assigned[o] = Object.create(null);
+    const totalVolume = Math.max(1, Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION));
+
+    const destCandidates = [];
+    let destWeightSum = 0;
+    for (const d of destinations) {
+      if (d === o) continue;
+      const grad = this._gradientCacheObj[d];
+      if (!grad) continue;
+      const hasOrigin = (typeof grad.has === 'function') ? grad.has(o) : (typeof grad[o] === 'number');
+      if (!hasOrigin) continue;
+      const w = (this.simulationNodes[d]?.weight) || 1;
+      destCandidates.push({ dest: d, weight: w });
+      destWeightSum += w;
+    }
+    if (destCandidates.length === 0) continue;
+
+    const floats = destCandidates.map((c) => ((c.weight / destWeightSum) * totalVolume));
+    const floors = floats.map((f) => Math.floor(f));
+    const assignedArr = floors.slice();
+    let allocated = floors.reduce((a, b) => a + b, 0);
+    let leftover = totalVolume - allocated;
+    if (leftover > 0) {
+      const frac = floats.map((f, i) => ({ i, frac: f - floors[i], weight: destCandidates[i].weight }));
+      frac.sort((a, b) => {
+        if (b.frac !== a.frac) return b.frac - a.frac;
+        return destCandidates[b.i].weight - destCandidates[a.i].weight;
+      });
+      for (let k = 0; k < leftover; k++) assignedArr[frac[k].i] += 1;
+    }
+
+    for (let i = 0; i < destCandidates.length; i++) {
+      assigned[o][destCandidates[i].dest] = assignedArr[i] || 0;
+    }
+  }
+  return assigned;
+}
+
+function _recomputeTargetContribs(targetCell, newAssignedCounts) {
+  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  if (!this._gradientCacheObj[targetCell]) computeAndCacheGradient.call(this, targetCell);
+  const destGradient = this._gradientCacheObj[targetCell];
+  let destGradientObj = destGradient;
+  if (typeof destGradient.get === 'function') {
+    destGradientObj = Object.create(null);
+    for (const [k, v] of destGradient) destGradientObj[k] = v;
+  }
+
+  // Ensure snapshot state exists for safe inner-loop reads
+  if (!this._frictionObj) {
+    this._frictionObj = Object.create(null);
+    for (const [k, v] of this.cellFrictionMap) this._frictionObj[k] = v;
+  }
+  if (!this._affordanceObj) {
+    this._affordanceObj = Object.create(null);
+    for (const [k, v] of this.affordanceMap) this._affordanceObj[k] = v;
+  }
+  if (!this._cellState) {
+    this._cellState = Object.create(null);
+    for (const k in this._frictionObj) {
+      const fr = this._frictionObj[k];
+      const aff = (this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined') ? this._affordanceObj[k] : 0.1;
+      const desire = (this.pathDesireScores && this.pathDesireScores.get) ? (this.pathDesireScores.get(k) || 0) : (this.pathDesireScores ? (this.pathDesireScores[k] || 0) : 0);
+      this._cellState[k] = { friction: fr, affordance: aff, desire, multi: null };
+    }
+  }
+
+  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+  const perTarget = Object.create(null);
+  const frictionLookup = this._frictionObj || this.cellFrictionMap;
+  const frictionIsMap = typeof frictionLookup.get === 'function';
+
+  const ticks = Math.max(5000, 2 * Math.ceil(Math.sqrt((this.cellFrictionMap.size || 1) * Math.PI)));
+
+  for (const o of origins) {
+    const count = (newAssignedCounts[o] && newAssignedCounts[o][targetCell]) || 0;
+    if (!count || count <= 0) continue;
+    for (let sim = 0; sim < count; sim++) {
+      const simAgentId = `${o}:${targetCell}:${sim}`;
+      let simCurrent = o;
+      const simTarget = targetCell;
+      let simDirection = getBearing(simCurrent, simTarget);
+      let simPath = [];
+
+      for (let tick = 0; tick < ticks; tick++) {
+        if (gridDistance(simCurrent, simTarget) <= 1) {
+          simPath.push(simTarget);
+          simCurrent = simTarget;
+          break;
+        }
+
+        const nextStep = getBestNextStep.call(this, simCurrent, destGradientObj, simDirection, simAgentId);
+        if (!nextStep || nextStep === simCurrent) break;
+
+        const line = _getCachedPathCells(this, simCurrent, nextStep);
+        let hitTarget = false;
+        for (let i = 1; i < line.length; i++) {
+          const stepCell = line[i];
+          const f = frictionIsMap ? frictionLookup.get(stepCell) : frictionLookup[stepCell];
+          if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) break;
+          simPath.push(stepCell);
+          if (stepCell === simTarget) {
+            hitTarget = true;
+            break;
+          }
+        }
+        if (hitTarget) {
+          simCurrent = simTarget;
+          break;
+        }
+        simDirection = getBearing(simCurrent, nextStep);
+        simCurrent = nextStep;
+        if (simCurrent === simTarget) break;
+      }
+
+      const uniqueSim = new Set(simPath);
+      for (let cell of uniqueSim) {
+        perTarget[cell] = (perTarget[cell] || 0) + 1;
+      }
+    }
+  }
+
+  return perTarget;
+}
+
+function _applyTargetContribDelta(targetCell, newContribs) {
+  const oldContribs = this._perTargetContribs && this._perTargetContribs[targetCell] ? this._perTargetContribs[targetCell] : Object.create(null);
+  const keys = new Set([...Object.keys(newContribs || {}), ...Object.keys(oldContribs || {})]);
+  const affected = new Set();
+
+  for (const cell of keys) {
+    const oldV = oldContribs[cell] || 0;
+    const newV = (newContribs && newContribs[cell]) || 0;
+    const delta = newV - oldV;
+    if (delta === 0) continue;
+    affected.add(cell);
+
+    if (this._cellState && this._cellState[cell]) {
+      this._cellState[cell].desire = (this._cellState[cell].desire || 0) + delta;
+      const newDes = this._cellState[cell].desire;
+      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') this.pathDesireScores.set(cell, newDes);
+      else this.pathDesireScores[cell] = newDes;
+    } else {
+      const cur = (this.pathDesireScores && typeof this.pathDesireScores.get === 'function') ? (this.pathDesireScores.get(cell) || 0) : (this.pathDesireScores ? (this.pathDesireScores[cell] || 0) : 0);
+      const updated = cur + delta;
+      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') this.pathDesireScores.set(cell, updated);
+      else this.pathDesireScores[cell] = updated;
+    }
+  }
+
+  // persist new contrib snapshot (or remove if empty)
+  if (newContribs && Object.keys(newContribs).length > 0) this._perTargetContribs[targetCell] = newContribs;
+  else if (this._perTargetContribs) delete this._perTargetContribs[targetCell];
+
+  return affected;
+}
+
+function _recomputeAffordanceForCells(cells) {
+  if (!cells || cells.size === 0) return;
+  const frictionLookup = this._frictionObj || this.cellFrictionMap;
+  const frictionIsMap = typeof frictionLookup.get === 'function';
+  const cellState = this._cellState || null;
+  const stateEnabled = !!cellState;
+
+  for (const cell of cells) {
+    // aggregate totalVolume across all targets
+    let totalVolume = 0;
+    if (this._perTargetContribs) {
+      for (const t in this._perTargetContribs) {
+        if (this._perTargetContribs[t] && this._perTargetContribs[t][cell]) totalVolume += this._perTargetContribs[t][cell];
+      }
+    }
+
+    let friction;
+    if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined') friction = cellState[cell].friction;
+    else friction = frictionIsMap ? frictionLookup.get(cell) : frictionLookup[cell];
+
+    if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) continue;
+    const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
+    const wear = (totalVolume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor);
+    const newVal = Math.min(SOFT_CAP, 0.1 + wear);
+
+    if (stateEnabled) {
+      if (!cellState[cell]) cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
+      else cellState[cell].affordance = newVal;
+    }
+
+    if (this.affordanceMap && typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    else this.affordanceMap[cell] = newVal;
+  }
+}
+
+function _recomputeGlobalPeakFlow() {
+  let peak = 0;
+  if (this.pathDesireScores) {
+    if (typeof this.pathDesireScores.values === 'function') {
+      for (const v of this.pathDesireScores.values()) if (typeof v === 'number' && v > peak) peak = v;
+    } else {
+      for (const k in this.pathDesireScores) {
+        const v = this.pathDesireScores[k];
+        if (typeof v === 'number' && v > peak) peak = v;
+      }
+    }
+  }
+  this.globalPeakFlow = peak > 0 ? peak : 1;
+}
+
+export function addDestination(targetCell, weight = 1) {
+  if (!this.simulationNodes) this.simulationNodes = Object.create(null);
+  if (!this.simulationNodes[targetCell]) this.simulationNodes[targetCell] = { type: 'destination', weight };
+  else {
+    if (this.simulationNodes[targetCell].type === 'origin') this.simulationNodes[targetCell].type = 'both';
+    else this.simulationNodes[targetCell].type = 'destination';
+    this.simulationNodes[targetCell].weight = weight;
+  }
+
+  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  if (!this._gradientCacheObj[targetCell]) computeAndCacheGradient.call(this, targetCell);
+
+  const newAssigned = _computeAssignedCounts.call(this);
+  const oldAssigned = this._assignedCounts || Object.create(null);
+
+  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
+  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+
+  const changed = new Set();
+  changed.add(targetCell);
+  for (const o of origins) {
+    for (const d of destinations) {
+      const oOld = (oldAssigned[o] && oldAssigned[o][d]) || 0;
+      const oNew = (newAssigned[o] && newAssigned[o][d]) || 0;
+      if (oOld !== oNew) changed.add(d);
+    }
+  }
+
+  const allAffected = new Set();
+  for (const d of changed) {
+    const newContribs = _recomputeTargetContribs.call(this, d, newAssigned);
+    const affected = _applyTargetContribDelta.call(this, d, newContribs);
+    for (const c of affected) allAffected.add(c);
+  }
+
+  _recomputeAffordanceForCells.call(this, allAffected);
+  this._assignedCounts = newAssigned;
+  this._targetWeights = Object.create(null);
+  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
+  _recomputeGlobalPeakFlow.call(this);
+  if (this.updateLayers) this.updateLayers();
+  return { changed: Array.from(changed), affectedCells: allAffected.size };
+}
+
+export function updateDestinationWeight(targetCell, newWeight) {
+  if (!this.simulationNodes || !this.simulationNodes[targetCell]) return addDestination.call(this, targetCell, newWeight);
+  this.simulationNodes[targetCell].weight = newWeight;
+  // delegate to addDestination path which computes diffs
+  return addDestination.call(this, targetCell, newWeight);
+}
+
+export function removeDestination(targetCell) {
+  if (!this.simulationNodes || !this.simulationNodes[targetCell]) return { removed: false };
+  if (this.simulationNodes[targetCell].type === 'both') this.simulationNodes[targetCell].type = 'origin';
+  else delete this.simulationNodes[targetCell];
+
+  const newAssigned = _computeAssignedCounts.call(this);
+  const oldAssigned = this._assignedCounts || Object.create(null);
+
+  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
+  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+
+  const changed = new Set();
+  changed.add(targetCell);
+  for (const o of origins) {
+    for (const d of destinations) {
+      const oOld = (oldAssigned[o] && oldAssigned[o][d]) || 0;
+      const oNew = (newAssigned[o] && newAssigned[o][d]) || 0;
+      if (oOld !== oNew) changed.add(d);
+    }
+  }
+
+  const allAffected = new Set();
+  for (const d of changed) {
+    const newContribs = _recomputeTargetContribs.call(this, d, newAssigned);
+    const affected = _applyTargetContribDelta.call(this, d, newContribs);
+    for (const c of affected) allAffected.add(c);
+  }
+
+  _recomputeAffordanceForCells.call(this, allAffected);
+  this._assignedCounts = newAssigned;
+  this._targetWeights = Object.create(null);
+  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
+  _recomputeGlobalPeakFlow.call(this);
+  if (this.updateLayers) this.updateLayers();
+  return { removed: true, changed: Array.from(changed), affectedCells: allAffected.size };
 }
