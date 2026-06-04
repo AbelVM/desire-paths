@@ -43,7 +43,8 @@ import { FRICTION_COSTS, VISUAL_DEPTH, VISUAL_ANGLE, WEIGHTS } from '../src/help
 
   // Compute gradient and simulate a small manual run to trace decisions
   const gradient = _computeDijkstraGradient.call(sim, dest);
-  console.log('Gradient distance origin:', gradient.get(origin));
+  const gradGet = (g, k) => (typeof g.get === 'function' ? g.get(k) : g[k]);
+  console.log('Gradient distance origin:', gradGet(gradient, origin));
 
   let current = origin;
   let direction = _getBearing(current, dest);
@@ -58,8 +59,8 @@ import { FRICTION_COSTS, VISUAL_DEPTH, VISUAL_ANGLE, WEIGHTS } from '../src/help
     const scores = [];
     for (let n of candidates) {
       const aff = sim.affordanceMap.get(n) ?? 0.1;
-      const gN = grad.get(n);
-      const gCurr = grad.get(curr);
+      const gN = gradGet(grad, n);
+      const gCurr = gradGet(grad, curr);
       const friction = sim.cellFrictionMap.get(n);
       const S_ij = WEIGHTS.w_a * aff - WEIGHTS.w_f * (friction || 0) - WEIGHTS.w_d * (gN - gCurr);
       scores.push({ n, S_ij, aff, gN, gCurr, friction });

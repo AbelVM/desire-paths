@@ -83,14 +83,22 @@ export function renderInterfacePins() {
 
 export function updateLayers() {
   const flatData = [];
-  const viewHexes = Array.from(this.cellFrictionMap.keys());
+  // Prefer AOI-ordered hexes when available, fall back to map keys
+  const viewHexes = this.getHexes() || Array.from(this.cellFrictionMap.keys());
+
+  // Snapshot Maps to plain objects for faster hot-loop property access
+  const frictionObj = Object.create(null);
+  for (const [k, v] of this.cellFrictionMap) frictionObj[k] = v;
+  const pathObj = Object.create(null);
+  for (const [k, v] of this.pathDesireScores) pathObj[k] = v;
+
   const len = viewHexes.length;
   for (let i = 0; i < len; i++) {
     const h = viewHexes[i];
     flatData.push({
       hex: h,
-      f: this.cellFrictionMap.get(h),
-      s: this.pathDesireScores.get(h),
+      f: frictionObj[h],
+      s: pathObj[h] || 0,
     });
   }
 
@@ -124,17 +132,31 @@ export function updateLayers() {
     filled: true,
     getHexagon: (d) => d.hex,
     getFillColor: (d) => {
-      // FIX: Logarithmic distribution formula handles weight outliers beautifully
+      // Use logarithmic scaling for perceptual compression, then map into
+      // the same purple ramp used by the legend via linear interpolation
       const logScore = Math.log1p(d.s);
       const logMax = Math.log1p(this.globalPeakFlow);
-      const ratio = logMax > 0 ? logScore / logMax : 0;
+      const ratio = logMax > 0 ? Math.min(1, logScore / logMax) : 0;
 
-      return [
-        Math.floor(135 + 120 * ratio),
-        0,
-        Math.floor(236 * ratio),
-        Math.floor(140 + 115 * ratio),
+      // Legend stops (from CSS): #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049
+      const stops = [
+        [235, 210, 236],
+        [198, 153, 201],
+        [156, 95, 160],
+        [129, 15, 124],
+        [77, 0, 73],
       ];
+      const n = stops.length;
+      const pos = ratio * (n - 1);
+      const idx = Math.floor(pos);
+      const t = pos - idx;
+      const c1 = stops[idx];
+      const c2 = stops[Math.min(idx + 1, n - 1)];
+      const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
+      const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
+      const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
+      const a = Math.floor(140 + 115 * ratio);
+      return [r, g, b, a];
     },
     updateTriggers: { getFillColor: [flatData, this.globalPeakFlow] },
   });
