@@ -13,6 +13,7 @@ import {
   SOFT_CAP,
   TEMPERATURE,
 } from './constants.js';
+import { runGradientBatches } from './spatialWorker.js';
 
 // Local cache bounds for compute-heavy H3 calls (tuned from instrumentation)
 const COMPUTE_PATH_CACHE_MAX = 256;
@@ -191,7 +192,7 @@ function _getCachedVisibility(ctx, a, b) {
 /**
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
-export function computeDesirePaths() {
+export async function computeDesirePaths() {
 
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
     ['destination', 'both'].includes(this.simulationNodes[k].type)
@@ -233,14 +234,20 @@ export function computeDesirePaths() {
   // the full Dijkstra result for every run. Cache is keyed by target cell id
   // and stores the plain-object distances returned by computeDijkstraGradient.
   if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  const missingDestinations = [];
+  for (const d of destinations) {
+    if (!this._gradientCacheObj[d]) missingDestinations.push(d);
+  }
+  if (missingDestinations.length > 0) {
+    const gradients = await runGradientBatches(missingDestinations, this._frictionObj || this.cellFrictionMap);
+    for (const d of missingDestinations) {
+      this._gradientCacheObj[d] = gradients[d] || Object.create(null);
+    }
+  }
+
   const goalGradients = new Map();
   for (const d of destinations) {
-    let g = this._gradientCacheObj[d];
-    if (!g) {
-      g = computeDijkstraGradient.call(this, d);
-      this._gradientCacheObj[d] = g;
-    }
-    goalGradients.set(d, g);
+    goalGradients.set(d, this._gradientCacheObj[d]);
   }
   const frictionLookup = this._frictionObj || this.cellFrictionMap;
   const frictionIsMap = typeof frictionLookup.get === 'function';

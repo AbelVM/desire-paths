@@ -184,7 +184,7 @@ export function setupUI(map) {
       setBusyState(true, 'Building mapping...');
       try {
         await new Promise((resolve) => requestAnimationFrame(resolve));
-        map.triggerFastScan();
+        await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
         if (!map.mappingReady) {
           showAlertCard('The current layout did not produce a mapping. Add more nodes and try again.', {
@@ -210,7 +210,7 @@ export function setupUI(map) {
     setBusyState(true);
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      map.computeDesirePaths();
+      await map.computeDesirePaths();
     } catch (err) {
       console.error('Desire path computation failed:', err);
       showAlertCard('Simulation error. Please try again.', {
