@@ -8,9 +8,8 @@ export function renderInterfacePins() {
   const bounds = new maplibregl.LngLatBounds();
   const mapSE = this.project(this.getBounds().getSouthEast());
 
-  const feats = Object.keys(this.simulationNodes).map((k) => {
+  const feats = Object.entries(this.simulationNodes).map(([k, node]) => {
     const pt = cellToLatLng(k);
-    const node = this.simulationNodes[k];
     bounds.extend([pt[1], pt[0]]);
     return {
       type: 'Feature',
@@ -18,6 +17,20 @@ export function renderInterfacePins() {
       geometry: { type: 'Point', coordinates: [pt[1], pt[0]] },
     };
   });
+
+  if (feats.length === 0) {
+    this.aoi_px = undefined;
+    this.aoi_polygon = undefined;
+    this._cachedViewHexes = undefined;
+    this._cachedAoiKey = undefined;
+    this._lastViewHexesKey = undefined;
+    this._multiFrictionObj = undefined;
+    if (this.getSource('pins')) {
+      this.getSource('pins').setData({ type: 'FeatureCollection', features: [] });
+    }
+    this.clearLayers();
+    return;
+  }
 
   let nw = this.project(bounds.getNorthWest());
   let se = this.project(bounds.getSouthEast());
@@ -161,12 +174,19 @@ export function updateLayers() {
     updateTriggers: { getFillColor: [flatData, this.globalPeakFlow] },
   });
 
+  const layers = this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
   this.deckOverlayInstance.setProps({
-    layers: [this.baseLayer, this.flowLayer],
+    layers: layers.filter(Boolean),
   });
 }
 
 export function clearLayers() {
-  if (this.flowLayer) this.flowLayer = null;
-  this.deckOverlayInstance.setProps({ layers: [this.baseLayer] });
+  this.baseLayer = null;
+  this.flowLayer = null;
+  if (this.deckOverlayInstance) {
+    this.deckOverlayInstance.setProps({ layers: [] });
+  }
+  if (this.getCanvas) {
+    this.getCanvas().style.cursor = 'crosshair';
+  }
 }

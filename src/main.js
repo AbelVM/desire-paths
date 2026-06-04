@@ -15,6 +15,14 @@ import { setupUI } from './helpers/ui.js';
 import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
 
 const init = () => {
+  const setMapCursor = (mapInstance, cursor) => {
+    const target = mapInstance.getContainer();
+    target.classList.toggle('map-cursor-pointer', cursor === 'pointer');
+    target.classList.toggle('map-cursor-crosshair', cursor === 'crosshair');
+  };
+
+  const pointLayerIds = ['pin-circles', 'pin-labels'];
+
   maplibregl.Map.prototype.getHexes = getHexes;
   maplibregl.Map.prototype.triggerFastScan = triggerFastScan;
   maplibregl.Map.prototype.mapPolygonCells = mapPolygonCells;
@@ -36,6 +44,7 @@ const init = () => {
   map.affordanceMap = new Map();
   map.globalPeakFlow = 1;
   map.simulationNodes = {};
+  map.showFrictionMesh = true;
   map.deckOverlayInstance = new MapboxOverlay({
     interleaved: true,
     layers: [],
@@ -46,6 +55,7 @@ const init = () => {
   map.readyToCompute = false;
 
   map.addControl(map.deckOverlayInstance);
+  setMapCursor(map, 'crosshair');
 
   map.on('load', (e) => {
     const layers = e.target.getStyle().layers;
@@ -56,13 +66,34 @@ const init = () => {
     //e.target.triggerFastScan();
   });
 
+  map.on('mousemove', (e) => {
+    const availablePointLayerIds = pointLayerIds.filter((layerId) => e.target.getLayer(layerId));
+    if (availablePointLayerIds.length === 0) {
+      setMapCursor(map, 'crosshair');
+      return;
+    }
+
+    const features = e.target.queryRenderedFeatures(e.point, {
+      layers: availablePointLayerIds,
+    });
+    setMapCursor(map, features.length > 0 ? 'pointer' : 'crosshair');
+  });
+
+  map.on('mouseout', () => {
+    setMapCursor(map, 'crosshair');
+  });
+
   //map.on('moveend', e => { e.target.triggerFastScan(); });
 
   map.on('click', (e) => {
+    if (!document.getElementById('map')) return; // Safeguard
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
 
-    if (!isAccesible(e)) {
-      alert('This location is not accessible by foot. Please select a different location.');
+    if (!isAccessible(e)) {
+      e.target.showAlertCard('This location is not accessible by foot. Please select a different location.', {
+        title: 'Placement blocked',
+        tone: 'warning',
+      });
       return;
     }
 
@@ -109,35 +140,35 @@ const init = () => {
   setupUI(map);
 };
 
-// if there are at least one source and one sink, we can compute desire paths and update the visualization
-const isReadyToCompute = function (mapInstance) {
+// Check if there are at least one source and one sink to compute desire paths
+const isReadyToCompute = (mapInstance) => {
   const nodes = Object.values(mapInstance.simulationNodes);
   const hasEnoughNodes = nodes.filter((n) => n.weight > 0).length >= 2;
-  const hasOrigin = nodes.filter((n) => n.type === 'origin' || n.type === 'both').length > 0;
-  const hasDestination =
-    nodes.filter((n) => n.type === 'destination' || n.type === 'both').length > 0;
+  const hasOrigin = nodes.some((n) => n.type === 'origin' || n.type === 'both');
+  const hasDestination = nodes.some((n) => n.type === 'destination' || n.type === 'both');
   return hasEnoughNodes && hasOrigin && hasDestination;
 };
 
-// check if the added node is accessible by foot, and if not, alert the user and remove it
-const isAccesible = function (e) {
+// Check if the added node is accessible by foot, and if not, alert the user and remove it
+const isAccessible = (e) => {
   const bbox = [
     [e.point.x - 5, e.point.y - 5],
     [e.point.x + 5, e.point.y + 5],
   ];
-  const features = e.target.queryRenderedFeatures(bbox);
+  let features = e.target.queryRenderedFeatures(bbox);
+  features = features.filter(f => ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer));
   const f = {};
   for (const feat of features) {
-    if (!feat.geometry) continue;
+    if (!feat?.geometry) continue;
     const surface = getSurface(feat);
-    if (f[surface.layer] === undefined) f[surface.layer] = surface.cost;
-    else if (surface.cost < f[surface.layer]) f[surface.layer] = surface.cost;
+    const c = FRICTION_COSTS[surface.cost];
+    if (f[surface.layer] === undefined) f[surface.layer] = c;
+    else if (c > f[surface.layer]) f[surface.layer] = c;
   }
-  const minCost = Math.min(...Object.values(f));
-  if (minCost >= FRICTION_COSTS.IMPASSABLE) {
-    return false;
-  }
-  return true;
+  const costs = Object.values(f);
+  if (costs.length === 0) return true; // No features found; allow placement
+  const groundCost = f['0']; // We use ground level
+  return groundCost < FRICTION_COSTS.IMPASSABLE;
 };
 
 document.addEventListener('DOMContentLoaded', init);
