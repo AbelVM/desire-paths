@@ -1,46 +1,67 @@
-// --- Binary Min-Heap Priority Queue for O(1) Fetch / O(log N) Insert ---
+// --- Binary Min-Heap Priority Queue (zero-allocation variant) ---
+// Uses parallel arrays to avoid {node, score} object churn in Dijkstra hot paths.
+// Nodes stored as strings (H3 cell IDs), scores as Float64Array for cache locality.
 export class MinHeap {
-  constructor() {
-    this.data = [];
+  constructor(capacityHint = 256) {
+    this._nodes = new Array(capacityHint);
+    this._scores = new Float64Array(capacityHint);
+    this._size = 0;
   }
   insert(node, score) {
-    this.data.push({ node, score });
-    this.up(this.data.length - 1);
+    if (this._size >= this._nodes.length) {
+      const cap = this._nodes.length * 2;
+      const n = new Array(cap);
+      const s = new Float64Array(cap);
+      for (let i = 0; i < this._size; i++) { n[i] = this._nodes[i]; s[i] = this._scores[i]; }
+      this._nodes = n;
+      this._scores = s;
+    }
+    this._nodes[this._size] = node;
+    this._scores[this._size] = score;
+    this._up(this._size);
+    this._size++;
   }
   extractMin() {
-    if (this.data.length === 0) return null;
-    const min = this.data[0];
-    const end = this.data.pop();
-    if (this.data.length > 0) {
-      this.data[0] = end;
-      this.down(0);
+    if (this._size === 0) return null;
+    const minNode = this._nodes[0];
+    this._size--;
+    if (this._size > 0) {
+      this._nodes[0] = this._nodes[this._size];
+      this._scores[0] = this._scores[this._size];
+      this._down(0);
     }
-    return min.node;
+    return minNode;
   }
   size() {
-    return this.data.length;
+    return this._size;
   }
-  up(i) {
+  _up(i) {
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (this.data[i].score >= this.data[p].score) break;
-      const tmp = this.data[i];
-      this.data[i] = this.data[p];
-      this.data[p] = tmp;
+      if (this._scores[i] >= this._scores[p]) break;
+      const tn = this._nodes[i];
+      const ts = this._scores[i];
+      this._nodes[i] = this._nodes[p];
+      this._scores[i] = this._scores[p];
+      this._nodes[p] = tn;
+      this._scores[p] = ts;
       i = p;
     }
   }
-  down(i) {
-    const len = this.data.length;
+  _down(i) {
+    const len = this._size;
     while ((i << 1) + 1 < len) {
-      let left = (i << 1) + 1,
-        right = left + 1,
-        best = left;
-      if (right < len && this.data[right].score < this.data[left].score) best = right;
-      if (this.data[i].score <= this.data[best].score) break;
-      const tmp = this.data[i];
-      this.data[i] = this.data[best];
-      this.data[best] = tmp;
+      let left = (i << 1) + 1;
+      let right = left + 1;
+      let best = left;
+      if (right < len && this._scores[right] < this._scores[left]) best = right;
+      if (this._scores[i] <= this._scores[best]) break;
+      const tn = this._nodes[i];
+      const ts = this._scores[i];
+      this._nodes[i] = this._nodes[best];
+      this._scores[i] = this._scores[best];
+      this._nodes[best] = tn;
+      this._scores[best] = ts;
       i = best;
     }
   }

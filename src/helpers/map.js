@@ -95,7 +95,6 @@ export function renderInterfacePins() {
 }
 
 export function updateLayers() {
-  const flatData = [];
   // Prefer AOI-ordered hexes when available, fall back to map keys
   const viewHexes = this.getHexes() || Array.from(this.cellFrictionMap.keys());
 
@@ -105,14 +104,27 @@ export function updateLayers() {
   const pathObj = Object.create(null);
   for (const [k, v] of this.pathDesireScores) pathObj[k] = v;
 
+  // Pre-compute logMax once instead of per-hex in getFillColor callback
+  const logMax = Math.log1p(this.globalPeakFlow || 1);
+  const invLogMax = logMax > 0 ? 1 / logMax : 0;
+
+  // Legend stops (from CSS): #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049
+  // Pre-declare to avoid per-call allocation
+  const _stopsR = [235, 198, 156, 129, 77];
+  const _stopsG = [210, 153, 95, 15, 0];
+  const _stopsB = [236, 201, 160, 124, 73];
+  const stopsN = 5;
+
+  // Build flatData and flowData in a single pass to avoid filter() allocation
+  const flatData = [];
+  const flowData = [];
   const len = viewHexes.length;
   for (let i = 0; i < len; i++) {
     const h = viewHexes[i];
-    flatData.push({
-      hex: h,
-      f: frictionObj[h],
-      s: pathObj[h] || 0,
-    });
+    const s = pathObj[h] || 0;
+    const entry = { hex: h, f: frictionObj[h], s };
+    flatData.push(entry);
+    if (s > 0) flowData.push(entry);
   }
 
   this.baseLayer = new H3HexagonLayer({
@@ -136,7 +148,7 @@ export function updateLayers() {
 
   this.flowLayer = new H3HexagonLayer({
     id: 'flow-mesh',
-    data: flatData.filter((d) => d.s > 0),
+    data: flowData,
     extruded: false,
     pickable: true,
     beforeId: this.targetLabelLayerId,
@@ -145,39 +157,27 @@ export function updateLayers() {
     filled: true,
     getHexagon: (d) => d.hex,
     getFillColor: (d) => {
-      // Use logarithmic scaling for perceptual compression, then map into
-      // the same purple ramp used by the legend via linear interpolation
-      const logScore = Math.log1p(d.s);
-      const logMax = Math.log1p(this.globalPeakFlow);
-      const ratio = logMax > 0 ? Math.min(1, logScore / logMax) : 0;
-
-      // Legend stops (from CSS): #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049
-      const stops = [
-        [235, 210, 236],
-        [198, 153, 201],
-        [156, 95, 160],
-        [129, 15, 124],
-        [77, 0, 73],
-      ];
-      const n = stops.length;
-      const pos = ratio * (n - 1);
-      const idx = Math.floor(pos);
+      const ratio = invLogMax > 0 ? Math.min(1, Math.log1p(d.s) * invLogMax) : 0;
+      const pos = ratio * (stopsN - 1);
+      const idx = pos | 0;
       const t = pos - idx;
-      const c1 = stops[idx];
-      const c2 = stops[Math.min(idx + 1, n - 1)];
-      const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
-      const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
-      const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
-      const a = Math.floor(140 + 115 * ratio);
+      const c1r = _stopsR[idx];
+      const c1g = _stopsG[idx];
+      const c1b = _stopsB[idx];
+      const c2i = idx + 1 < stopsN ? idx + 1 : idx;
+      const r = c1r + ((_stopsR[c2i] - c1r) * t) | 0;
+      const g = c1g + ((_stopsG[c2i] - c1g) * t) | 0;
+      const b = c1b + ((_stopsB[c2i] - c1b) * t) | 0;
+      const a = 140 + (115 * ratio) | 0;
       return [r, g, b, a];
     },
-    updateTriggers: { getFillColor: [flatData, this.globalPeakFlow] },
+    updateTriggers: { getFillColor: [flowData, this.globalPeakFlow] },
   });
 
   const layers =
     this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
   this.deckOverlayInstance.setProps({
-    layers: layers.filter(Boolean),
+    layers,
   });
 }
 

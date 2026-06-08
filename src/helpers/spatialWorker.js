@@ -144,7 +144,11 @@ function runWorker(kind, payload) {
 export async function runGradientBatches(targets, frictionSource) {
   if (!targets || targets.length === 0) return Object.create(null);
 
-  const frictionEntries = normalizeFrictionEntries(frictionSource);
+  // Skip normalization when source is already a plain object (from computeDesirePaths snapshots)
+  const frictionEntries =
+    frictionSource && typeof frictionSource.entries !== 'function'
+      ? frictionSource
+      : normalizeFrictionEntries(frictionSource);
   const workerCount = Math.min(2, targets.length);
   if (workerCount <= 1) return runLocally('gradient-batch', { targets, frictionEntries });
 
@@ -200,6 +204,9 @@ export async function runFastScanTask(viewHexes, features) {
 }
 
 export async function runImpassableBlurTask(frictionSource, options = {}) {
-  const frictionEntries = normalizeFrictionEntries(frictionSource);
+  const frictionEntries =
+    frictionSource && typeof frictionSource.entries !== 'function'
+      ? frictionSource
+      : normalizeFrictionEntries(frictionSource);
   return runWorker('impassable-blur', { frictionEntries, ...options });
 }

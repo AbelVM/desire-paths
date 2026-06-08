@@ -145,7 +145,7 @@ function _getCachedDisk(ctx, center, r) {
   return arr;
 }
 
-function _getCachedVisibility(ctx, a, b) {
+function _getCachedVisibility(ctx, a, b, frictionLookup, frictionIsMap) {
   // Use plain-object nested cache keyed by a then b for fast boolean lookup
   if (!ctx._visibilityCacheObj) {
     ctx._visibilityCacheObj = Object.create(null);
@@ -165,8 +165,6 @@ function _getCachedVisibility(ctx, a, b) {
   }
   const path = _getCachedPathCells(ctx, a, b);
   let visible = true;
-  const frictionLookup = ctx._frictionObj || ctx.cellFrictionMap;
-  const frictionIsMap = typeof frictionLookup.get === 'function';
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
     const f = frictionIsMap ? frictionLookup.get(c) : frictionLookup[c];
@@ -205,39 +203,68 @@ export async function computeDesirePaths() {
 
   // Snapshot frequently-read Maps to plain objects for hot-path loops to avoid
   // repeated Map.get calls (reduces FindOrderedHashMapEntry overhead).
-  this._frictionObj = Object.create(null);
-  for (const [k, v] of this.cellFrictionMap) this._frictionObj[k] = v;
-  this._affordanceObj = Object.create(null);
-  for (const [k, v] of this.affordanceMap) this._affordanceObj[k] = v;
-  // Snapshot multiFrictionMap to a plain object for hot-loop reads
-  this._multiFrictionObj = Object.create(null);
-  if (this.multiFrictionMap && typeof this.multiFrictionMap.entries === 'function') {
-    for (const [k, v] of this.multiFrictionMap) this._multiFrictionObj[k] = v;
-  } else if (this.multiFrictionMap) {
-    for (const k in this.multiFrictionMap) this._multiFrictionObj[k] = this.multiFrictionMap[k];
+  // Reuse existing snapshots when possible — friction is stable between runs,
+  // so we only build these once in triggerFastScan and skip re-iteration here.
+  if (!this._frictionObj || typeof this._frictionObj.entries !== 'function') {
+    if (!this._frictionObj) this._frictionObj = Object.create(null);
+    for (const [k, v] of this.cellFrictionMap) this._frictionObj[k] = v;
+  }
+  if (!this._multiFrictionObj || typeof this._multiFrictionObj.entries !== 'function') {
+    if (!this._multiFrictionObj) this._multiFrictionObj = Object.create(null);
+    if (this.multiFrictionMap && typeof this.multiFrictionMap.entries === 'function') {
+      for (const [k, v] of this.multiFrictionMap) this._multiFrictionObj[k] = v;
+    } else if (this.multiFrictionMap) {
+      for (const k in this.multiFrictionMap) this._multiFrictionObj[k] = this.multiFrictionMap[k];
+    }
   }
 
   // Consolidated per-cell state object for hot-path reads/writes.
   // Populate once per compute run to avoid repeated Map lookups inside inner loops.
+  // Reuse existing _cellState structure when possible to avoid object churn.
+  const existingState = this._cellState;
   this._cellState = Object.create(null);
   for (const k in this._frictionObj) {
     const fr = this._frictionObj[k];
-    // Prefer snapshot _affordanceObj populated above; default to 0.1 when missing
-    const aff =
-      this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
-        ? this._affordanceObj[k]
-        : 0.1;
-    const desire =
-      this.pathDesireScores && this.pathDesireScores.get
-        ? this.pathDesireScores.get(k) || 0
-        : this.pathDesireScores
-          ? this.pathDesireScores[k] || 0
-          : 0;
-    const multi =
-      this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
-        ? this._multiFrictionObj[k]
-        : null;
-    this._cellState[k] = { friction: fr, affordance: aff, desire, multi };
+    // Reuse existing cell state object to reduce GC pressure
+    let es = existingState && existingState[k];
+    if (es) {
+      es.friction = fr;
+      // Prefer snapshot _affordanceObj populated above; default to 0.1 when missing
+      const aff =
+        this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
+          ? this._affordanceObj[k]
+          : 0.1;
+      const desire =
+        this.pathDesireScores && this.pathDesireScores.get
+          ? this.pathDesireScores.get(k) || 0
+          : this.pathDesireScores
+            ? this.pathDesireScores[k] || 0
+            : 0;
+      const multi =
+        this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
+          ? this._multiFrictionObj[k]
+          : null;
+      es.affordance = aff;
+      es.desire = desire;
+      es.multi = multi;
+      this._cellState[k] = es;
+    } else {
+      const aff =
+        this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
+          ? this._affordanceObj[k]
+          : 0.1;
+      const desire =
+        this.pathDesireScores && this.pathDesireScores.get
+          ? this.pathDesireScores.get(k) || 0
+          : this.pathDesireScores
+            ? this.pathDesireScores[k] || 0
+            : 0;
+      const multi =
+        this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
+          ? this._multiFrictionObj[k]
+          : null;
+      this._cellState[k] = { friction: fr, affordance: aff, desire, multi };
+    }
   }
 
   // Reuse cached per-target gradients when possible to avoid recomputing
@@ -394,7 +421,9 @@ export async function computeDesirePaths() {
           let hitTarget = false;
           for (let i = 1; i < line.length; i++) {
             const stepCell = line[i];
-            const f = frictionIsMap ? frictionLookup.get(stepCell) : frictionLookup[stepCell];
+            // Inline friction lookup via _cellState to avoid branching
+            const stepState = cellState && cellState[stepCell];
+            const f = stepState ? stepState.friction : (frictionIsMap ? frictionLookup.get(stepCell) : frictionLookup[stepCell]);
             if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) break;
             simPath.push(stepCell);
             if (stepCell === simTarget) {
@@ -523,16 +552,24 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
 
   // 1. Tactical BDI Logic (use cached disk + visibility checks)
   const disk = _getCachedDisk(this, curr, VISUAL_DEPTH);
-  const candidatesObj = []; // objects: { cell, friction, angle, gN?, aff }
   // hoist current lat/lng to avoid repeated cache lookups and trig
   const sLatLng = _getCachedLatLng(curr);
   // Precompute whether we can use gradient comparisons. Accept either a Map
   // or a plain-object gradient (we pass plain objects from computeDesirePaths).
   const gCurr = gradient ? (gradientIsMap ? gradient.get(curr) : gradient[curr]) : undefined;
   const useGradient = typeof gCurr === 'number';
+
+  // Use parallel numeric arrays from the start to avoid intermediate object allocation
+  const cellsArr = [];
+  const anglesArr = [];
+  const affsArr = [];
+  const frictionArr = [];
+  const gNsArr = []; // only populated when useGradient
+
   for (let i = 0; i < disk.length; i++) {
     const n = disk[i];
     if (n === curr) continue;
+    // Inline friction lookup via _cellState for hot-path speed
     let f;
     if (stateEnabled) {
       const s = cellState[n];
@@ -541,63 +578,69 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       f = frictionIsMap ? frictionLookup.get(n) : frictionLookup[n];
     }
     if (f === undefined || f >= impassableVal) continue;
-    if (!_getCachedVisibility(this, curr, n)) continue;
+    if (!_getCachedVisibility(this, curr, n, frictionLookup, frictionIsMap)) continue;
     // compute bearing/angle once and reuse
     const eLatLng = _getCachedLatLng(n);
     const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-    // Prefetch gradient and affordance to avoid repeated Map lookups later
+    // Inline affordance lookup
+    const aff = stateEnabled
+      ? (cellState[n]?.affordance ?? 0.1)
+      : affordanceIsMap
+        ? (affordanceLookup.get(n) ?? 0.1)
+        : (affordanceLookup[n] ?? 0.1);
+
     if (useGradient) {
       const gN = gradientIsMap ? gradient.get(n) : gradient[n];
       if (typeof gN !== 'number') continue;
-      const aff = stateEnabled
-        ? (cellState[n]?.affordance ?? 0.1)
-        : affordanceIsMap
-          ? (affordanceLookup.get(n) ?? 0.1)
-          : (affordanceLookup[n] ?? 0.1);
-      candidatesObj.push({ cell: n, friction: f, angle: ang, gN, aff });
+      cellsArr.push(n);
+      anglesArr.push(ang);
+      affsArr.push(aff);
+      frictionArr.push(f);
+      gNsArr.push(gN);
     } else {
-      const aff = stateEnabled
-        ? (cellState[n]?.affordance ?? 0.1)
-        : affordanceIsMap
-          ? (affordanceLookup.get(n) ?? 0.1)
-          : (affordanceLookup[n] ?? 0.1);
-      candidatesObj.push({ cell: n, friction: f, angle: ang, aff });
+      cellsArr.push(n);
+      anglesArr.push(ang);
+      affsArr.push(aff);
+      frictionArr.push(f);
     }
   }
 
-  const candidates_hard = [];
-  for (let i = 0; i < candidatesObj.length; i++) {
-    const c = candidatesObj[i];
-    if (c.angle <= visualAngleHalf) candidates_hard.push(c);
+  // Filter by visual angle in-place: move hard candidates to front
+  let hardCount = 0;
+  for (let i = 0; i < cellsArr.length; i++) {
+    if (anglesArr[i] <= visualAngleHalf) {
+      if (hardCount !== i) {
+        const swap = (arr) => { const t = arr[i]; arr[i] = arr[hardCount]; arr[hardCount] = t; };
+        swap(cellsArr);
+        swap(anglesArr);
+        swap(affsArr);
+        swap(frictionArr);
+        if (useGradient) swap(gNsArr);
+      }
+      hardCount++;
+    }
   }
-  const candidates = candidates_hard.length > 0 ? candidates_hard : candidatesObj;
+  const origLen = cellsArr.length;
 
-  // Use parallel numeric arrays for candidates to reduce object churn
-  const cellsArr = [];
-  const scores = [];
-  const stepCostsArr = [];
-  const gNsArr = [];
+  // Fall back to all candidates if none within visual angle
+  const cLen = hardCount > 0 ? hardCount : origLen;
+
+  const scores = new Array(cLen);
 
   // If gradient at current cell is not available, skip candidate scoring and fall back later
   if (useGradient) {
-    for (let i = 0; i < candidates.length; i++) {
-      const cand = candidates[i];
-      const n = cand.cell;
-      const gN = cand.gN; // prefetched
-      const aff = cand.aff; // prefetched
-      const stepCost = cand.friction || 0;
+    for (let i = 0; i < cLen; i++) {
+      const gN = gNsArr[i];
+      const aff = affsArr[i];
+      const stepCost = frictionArr[i] || 0;
 
       // Compute delta and score as per paper
       const delta = stepCost + gN - gCurr;
       let S_ij = weightsObj.w_a * aff - weightsObj.w_d * delta;
 
-      S_ij -= (weightsObj.w_theta || 0) * (cand.angle / 180);
+      S_ij -= (weightsObj.w_theta || 0) * (anglesArr[i] / 180);
 
-      // push into numeric buffers instead of creating objects
-      cellsArr.push(n);
-      scores.push(S_ij);
-      stepCostsArr.push(stepCost);
-      gNsArr.push(gN);
+      scores[i] = S_ij;
     }
   }
 
@@ -685,14 +728,14 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
   // Deterministic fallback: choose best using index-based tie-breaker
   let bestScore = -Infinity;
   let bestIndex = -1;
-  for (let i = 0; i < cellsArr.length; i++) {
+  for (let i = 0; i < cLen; i++) {
     const S_ij = scores[i];
     if (S_ij > bestScore) {
       bestScore = S_ij;
       bestIndex = i;
     } else if (Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost = (stepCostsArr[bestIndex] || 0) + (gNsArr[bestIndex] || Infinity);
-      const candidateCost = (stepCostsArr[i] || 0) + (gNsArr[i] || Infinity);
+      const currentBestCost = (frictionArr[bestIndex] || 0) + (gNsArr[bestIndex] || Infinity);
+      const candidateCost = (frictionArr[i] || 0) + (gNsArr[i] || Infinity);
       if (candidateCost < currentBestCost) {
         bestIndex = i;
       } else if (candidateCost === currentBestCost) {
@@ -765,7 +808,9 @@ function computeDijkstraGradient(targetCell) {
  * Geometric Helpers (Visibility & Bearing)
  */
 function isVisible(start, end) {
-  return _getCachedVisibility(this, start, end);
+  const frictionLookup = this._frictionObj || this.cellFrictionMap;
+  const frictionIsMap = typeof frictionLookup.get === 'function';
+  return _getCachedVisibility(this, start, end, frictionLookup, frictionIsMap);
   // const path = gridPathCells(start, end);
   // // Count how many cells in the line are impassable
   // const blockedCount = path.filter(
@@ -794,52 +839,22 @@ function angleDiff(a, b) {
  * LIGHT_PARK is easily worn (more wear)
  */
 function updateAffordance(cell, volume = 1) {
-  const frictionLookup = this._frictionObj || this.cellFrictionMap;
-  const frictionIsMap = typeof frictionLookup.get === 'function';
-  const cellState = this._cellState || null;
-  const stateEnabled = !!cellState;
-
-  let friction;
-  if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined') {
-    friction = cellState[cell].friction;
-  } else {
-    friction = frictionIsMap ? frictionLookup.get(cell) : frictionLookup[cell];
-  }
+  // Prefer consolidated _cellState as authoritative source
+  const cs = this._cellState && this._cellState[cell];
+  const friction = cs ? cs.friction : (this._frictionObj && this._frictionObj[cell]);
 
   // Skip update for permanent infrastructure
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
-  // Define resistance factors: Higher value = more resistance (slower path formation)
   const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
+  const current = cs ? cs.affordance : (this._affordanceObj && this._affordanceObj[cell]) || 0.1;
+  const newVal = Math.min(SOFT_CAP, current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor));
 
-  // Prefer consolidated _cellState as authoritative source for affordance
-  let current = 0.1;
-  if (stateEnabled && cellState[cell] && typeof cellState[cell].affordance === 'number') {
-    current = cellState[cell].affordance;
-  } else if (this._affordanceObj && typeof this._affordanceObj[cell] !== 'undefined') {
-    // Prefer plain-object snapshot when available to avoid Map.get hotspots
-    current = this._affordanceObj[cell];
-  } else {
-    // Fallback default when no snapshot/state available
-    current = 0.1;
-  }
-
-  // Adjust wear calculation: resistanceFactor divides the impact
-  let wear = (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor);
-  const newVal = Math.min(SOFT_CAP, current + wear);
-
-  // Update consolidated state first
-  if (stateEnabled) {
-    if (!cellState[cell])
-      cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
-    else cellState[cell].affordance = newVal;
-  }
-
-  // Keep Map in sync for external consumers (non-hot paths)
-  if (this.affordanceMap && typeof this.affordanceMap.set === 'function') {
-    this.affordanceMap.set(cell, newVal);
+  if (cs) {
+    cs.affordance = newVal;
   } else if (this.affordanceMap) {
-    this.affordanceMap[cell] = newVal;
+    if (typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    else this.affordanceMap[cell] = newVal;
   }
 }
 
@@ -849,48 +864,20 @@ function updateAffordance(cell, volume = 1) {
  * LIGHT_PARK recovers faster (path fades quickly)
  */
 function decayAffordance(cell) {
-  const frictionLookup = this._frictionObj || this.cellFrictionMap;
-  const frictionIsMap = typeof frictionLookup.get === 'function';
-  const cellState = this._cellState || null;
-  const stateEnabled = !!cellState;
+  const cs = this._cellState && this._cellState[cell];
+  const friction = cs ? cs.friction : (this._frictionObj && this._frictionObj[cell]);
 
-  let friction;
-  if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined') {
-    friction = cellState[cell].friction;
-  } else {
-    friction = frictionIsMap ? frictionLookup.get(cell) : frictionLookup[cell];
-  }
+  if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
-  // Only decay if it's NOT a permanent sidewalk/pavement
-  if (friction !== FRICTION_COSTS.PAVEMENT && friction !== FRICTION_COSTS.IMPASSABLE) {
-    // Define recovery factors: Higher value = faster regrowth (faster decay of path)
-    const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
+  const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
+  const current = cs ? cs.affordance : (this._affordanceObj && this._affordanceObj[cell]) || 0.1;
+  const newVal = Math.max(0.1, current - DECAY_RATE * recoveryFactor);
 
-    // Prefer consolidated _cellState as authoritative source for affordance
-    let current = 0.1;
-    if (stateEnabled && cellState[cell] && typeof cellState[cell].affordance === 'number') {
-      current = cellState[cell].affordance;
-    } else if (this._affordanceObj && typeof this._affordanceObj[cell] !== 'undefined') {
-      current = this._affordanceObj[cell];
-    } else {
-      // Fallback default when no snapshot/state available
-      current = 0.1;
-    }
-
-    const actualDecay = DECAY_RATE * recoveryFactor;
-    const newVal = Math.max(0.1, current - actualDecay);
-
-    if (stateEnabled) {
-      if (!cellState[cell])
-        cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
-      else cellState[cell].affordance = newVal;
-    }
-
-    if (this.affordanceMap && typeof this.affordanceMap.set === 'function') {
-      this.affordanceMap.set(cell, newVal);
-    } else if (this.affordanceMap) {
-      this.affordanceMap[cell] = newVal;
-    }
+  if (cs) {
+    cs.affordance = newVal;
+  } else if (this.affordanceMap) {
+    if (typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    else this.affordanceMap[cell] = newVal;
   }
 }
 
