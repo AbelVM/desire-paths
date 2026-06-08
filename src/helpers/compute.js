@@ -47,10 +47,10 @@ function _lcg(seed) {
 }
 
 function _bearingFromLatLngs(s, e) {
-  const lat1 = (s[2] !== undefined) ? s[2] : (s[0] * Math.PI) / 180;
-  const lon1 = (s[3] !== undefined) ? s[3] : (s[1] * Math.PI) / 180;
-  const lat2 = (e[2] !== undefined) ? e[2] : (e[0] * Math.PI) / 180;
-  const lon2 = (e[3] !== undefined) ? e[3] : (e[1] * Math.PI) / 180;
+  const lat1 = s[2] !== undefined ? s[2] : (s[0] * Math.PI) / 180;
+  const lon1 = s[3] !== undefined ? s[3] : (s[1] * Math.PI) / 180;
+  const lat2 = e[2] !== undefined ? e[2] : (e[0] * Math.PI) / 180;
+  const lon2 = e[3] !== undefined ? e[3] : (e[1] * Math.PI) / 180;
   let y = Math.sin(lon2 - lon1) * Math.cos(lat2);
   let x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
@@ -193,7 +193,6 @@ function _getCachedVisibility(ctx, a, b) {
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
 export async function computeDesirePaths() {
-
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
     ['destination', 'both'].includes(this.simulationNodes[k].type)
   );
@@ -224,9 +223,20 @@ export async function computeDesirePaths() {
   for (const k in this._frictionObj) {
     const fr = this._frictionObj[k];
     // Prefer snapshot _affordanceObj populated above; default to 0.1 when missing
-    const aff = (this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined') ? this._affordanceObj[k] : 0.1;
-    const desire = (this.pathDesireScores && this.pathDesireScores.get) ? (this.pathDesireScores.get(k) || 0) : (this.pathDesireScores ? (this.pathDesireScores[k] || 0) : 0);
-    const multi = (this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined') ? this._multiFrictionObj[k] : null;
+    const aff =
+      this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
+        ? this._affordanceObj[k]
+        : 0.1;
+    const desire =
+      this.pathDesireScores && this.pathDesireScores.get
+        ? this.pathDesireScores.get(k) || 0
+        : this.pathDesireScores
+          ? this.pathDesireScores[k] || 0
+          : 0;
+    const multi =
+      this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
+        ? this._multiFrictionObj[k]
+        : null;
     this._cellState[k] = { friction: fr, affordance: aff, desire, multi };
   }
 
@@ -239,7 +249,10 @@ export async function computeDesirePaths() {
     if (!this._gradientCacheObj[d]) missingDestinations.push(d);
   }
   if (missingDestinations.length > 0) {
-    const gradients = await runGradientBatches(missingDestinations, this._frictionObj || this.cellFrictionMap);
+    const gradients = await runGradientBatches(
+      missingDestinations,
+      this._frictionObj || this.cellFrictionMap
+    );
     for (const d of missingDestinations) {
       this._gradientCacheObj[d] = gradients[d] || Object.create(null);
     }
@@ -266,41 +279,58 @@ export async function computeDesirePaths() {
   for (const o of agents) {
     const originCell = o;
     // Determine total discrete simulated agents for this origin
-    const totalVolume = Math.max(1, Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION));
+    const totalVolume = Math.max(
+      1,
+      Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
+    );
 
     // Build list of reachable destination candidates (exclude self-targeting)
     const destCandidates = [];
     let destWeightSum = 0;
-      for (let d of destinations) {
-        if (d === originCell) continue; // avoid self-targeting when origin is also a destination
-        const grad = goalGradients.get(d);
-        if (!grad) continue;
-        // support both Map and plain-object gradients
-        const hasOrigin = (typeof grad.has === 'function') ? grad.has(originCell) : (typeof grad[originCell] === 'number');
-        if (!hasOrigin) continue; // unreachable
-        const w = (this.simulationNodes[d]?.weight) || 1;
-        destCandidates.push({ dest: d, weight: w });
-        destWeightSum += w;
-      }
+    for (let d of destinations) {
+      if (d === originCell) continue; // avoid self-targeting when origin is also a destination
+      const grad = goalGradients.get(d);
+      if (!grad) continue;
+      // support both Map and plain-object gradients
+      const hasOrigin =
+        typeof grad.has === 'function'
+          ? grad.has(originCell)
+          : typeof grad[originCell] === 'number';
+      if (!hasOrigin) continue; // unreachable
+      const w = this.simulationNodes[d]?.weight || 1;
+      destCandidates.push({ dest: d, weight: w });
+      destWeightSum += w;
+    }
 
     if (destCandidates.length === 0) continue;
 
     if (this.debugCompute) {
       try {
-        console.groupCollapsed && console.groupCollapsed(`computeDesirePaths: origin ${originCell} -> distribute ${totalVolume} sims`);
-        console.log('computeDesirePaths:start', { origin: originCell, totalVolume, candidates: destCandidates.map((c) => ({ d: c.dest, w: c.weight })) });
+        console.groupCollapsed &&
+          console.groupCollapsed(
+            `computeDesirePaths: origin ${originCell} -> distribute ${totalVolume} sims`
+          );
+        console.log('computeDesirePaths:start', {
+          origin: originCell,
+          totalVolume,
+          candidates: destCandidates.map((c) => ({ d: c.dest, w: c.weight })),
+        });
       } catch (e) {}
     }
 
     // Compute float allocations then convert to integer counts deterministically
-    const floats = destCandidates.map((c) => ((c.weight / destWeightSum) * totalVolume));
+    const floats = destCandidates.map((c) => (c.weight / destWeightSum) * totalVolume);
     const floors = floats.map((f) => Math.floor(f));
     const assigned = floors.slice();
     let allocated = floors.reduce((a, b) => a + b, 0);
     let leftover = totalVolume - allocated;
 
     if (leftover > 0) {
-      const frac = floats.map((f, i) => ({ i, frac: f - floors[i], weight: destCandidates[i].weight }));
+      const frac = floats.map((f, i) => ({
+        i,
+        frac: f - floors[i],
+        weight: destCandidates[i].weight,
+      }));
       frac.sort((a, b) => {
         if (b.frac !== a.frac) return b.frac - a.frac;
         return destCandidates[b.i].weight - destCandidates[a.i].weight;
@@ -351,7 +381,13 @@ export async function computeDesirePaths() {
           }
 
           // pass plain-object gradient to avoid Map.get inside sampling loop
-          let nextStep = getBestNextStep.call(this, simCurrent, destGradientObj, simDirection, simAgentId);
+          let nextStep = getBestNextStep.call(
+            this,
+            simCurrent,
+            destGradientObj,
+            simDirection,
+            simAgentId
+          );
           if (!nextStep || nextStep === simCurrent) break;
 
           const line = _getCachedPathCells(this, simCurrent, nextStep);
@@ -381,9 +417,19 @@ export async function computeDesirePaths() {
         if (this.debugCompute) {
           try {
             if (simPath.length <= 1) {
-              console.warn('computeDesirePaths: short sim path', { origin: originCell, dest: destCell, sim, simPathLength: simPath.length });
+              console.warn('computeDesirePaths: short sim path', {
+                origin: originCell,
+                dest: destCell,
+                sim,
+                simPathLength: simPath.length,
+              });
             }
-            console.log('computeDesirePaths:simPath', { origin: originCell, dest: destCell, sim, simPath });
+            console.log('computeDesirePaths:simPath', {
+              origin: originCell,
+              dest: destCell,
+              sim,
+              simPath,
+            });
           } catch (e) {}
         }
 
@@ -405,7 +451,10 @@ export async function computeDesirePaths() {
       newDesire = (this._cellState[cell].desire || 0) + v;
       this._cellState[cell].desire = newDesire;
     } else {
-      newDesire = (this.pathDesireScores.get ? (this.pathDesireScores.get(cell) || 0) : (this.pathDesireScores[cell] || 0)) + v;
+      newDesire =
+        (this.pathDesireScores.get
+          ? this.pathDesireScores.get(cell) || 0
+          : this.pathDesireScores[cell] || 0) + v;
     }
     if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') {
       this.pathDesireScores.set(cell, newDesire);
@@ -421,7 +470,7 @@ export async function computeDesirePaths() {
   this._perTargetContribs = perTargetContribs;
   this._assignedCounts = assignedCountsTmp;
   this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
+  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
 
   // Decay affordance using _cellState keys when available to avoid Map iteration hotspots
   if (this._cellState) {
@@ -497,13 +546,21 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     const eLatLng = _getCachedLatLng(n);
     const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
     // Prefetch gradient and affordance to avoid repeated Map lookups later
-      if (useGradient) {
+    if (useGradient) {
       const gN = gradientIsMap ? gradient.get(n) : gradient[n];
       if (typeof gN !== 'number') continue;
-      const aff = stateEnabled ? (cellState[n]?.affordance ?? 0.1) : (affordanceIsMap ? (affordanceLookup.get(n) ?? 0.1) : (affordanceLookup[n] ?? 0.1));
+      const aff = stateEnabled
+        ? (cellState[n]?.affordance ?? 0.1)
+        : affordanceIsMap
+          ? (affordanceLookup.get(n) ?? 0.1)
+          : (affordanceLookup[n] ?? 0.1);
       candidatesObj.push({ cell: n, friction: f, angle: ang, gN, aff });
     } else {
-      const aff = stateEnabled ? (cellState[n]?.affordance ?? 0.1) : (affordanceIsMap ? (affordanceLookup.get(n) ?? 0.1) : (affordanceLookup[n] ?? 0.1));
+      const aff = stateEnabled
+        ? (cellState[n]?.affordance ?? 0.1)
+        : affordanceIsMap
+          ? (affordanceLookup.get(n) ?? 0.1)
+          : (affordanceLookup[n] ?? 0.1);
       candidatesObj.push({ cell: n, friction: f, angle: ang, aff });
     }
   }
@@ -531,7 +588,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       const stepCost = cand.friction || 0;
 
       // Compute delta and score as per paper
-      const delta = (stepCost + gN) - gCurr;
+      const delta = stepCost + gN - gCurr;
       let S_ij = weightsObj.w_a * aff - weightsObj.w_d * delta;
 
       S_ij -= (weightsObj.w_theta || 0) * (cand.angle / 180);
@@ -561,18 +618,18 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       let bestCandidate = null;
 
       for (let i = 0; i < neighbors.length; i++) {
-          const n = neighbors[i];
-          if (n === curr) continue;
-          const f = frictionIsMap ? frictionLookup.get(n) : frictionLookup[n];
-          if (f === undefined) continue;
-          if (f >= FRICTION_COSTS.IMPASSABLE) continue;
+        const n = neighbors[i];
+        if (n === curr) continue;
+        const f = frictionIsMap ? frictionLookup.get(n) : frictionLookup[n];
+        if (f === undefined) continue;
+        if (f >= FRICTION_COSTS.IMPASSABLE) continue;
 
-          const g = gradientIsMap ? (gradient.get(n) ?? Infinity) : (gradient[n] ?? Infinity);
-          if (g < bestGrad) {
-            bestGrad = g;
-            bestCandidate = n;
-          }
+        const g = gradientIsMap ? (gradient.get(n) ?? Infinity) : (gradient[n] ?? Infinity);
+        if (g < bestGrad) {
+          bestGrad = g;
+          bestCandidate = n;
         }
+      }
       if (bestCandidate) {
         if (this.debugCompute) {
           try {
@@ -727,7 +784,7 @@ function getBearing(start, end) {
 // Smallest absolute angular difference between two bearings (degrees)
 function angleDiff(a, b) {
   // normalize to [0,360), then compute minimal signed diff
-  const diff = Math.abs((((a - b + 540) % 360) - 180));
+  const diff = Math.abs(((a - b + 540) % 360) - 180);
   return diff;
 }
 
@@ -773,7 +830,8 @@ function updateAffordance(cell, volume = 1) {
 
   // Update consolidated state first
   if (stateEnabled) {
-    if (!cellState[cell]) cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
+    if (!cellState[cell])
+      cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
     else cellState[cell].affordance = newVal;
   }
 
@@ -823,7 +881,8 @@ function decayAffordance(cell) {
     const newVal = Math.max(0.1, current - actualDecay);
 
     if (stateEnabled) {
-      if (!cellState[cell]) cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
+      if (!cellState[cell])
+        cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
       else cellState[cell].affordance = newVal;
     }
 
@@ -841,9 +900,9 @@ function getNearestDest(agentCell, dests, gradients, agentId = '') {
   for (let d of dests) {
     if (d === agentCell) continue;
     // gradients may be a Map of Maps or a Map of plain-objects (after migration)
-    const grad = (typeof gradients.get === 'function') ? gradients.get(d) : gradients[d];
+    const grad = typeof gradients.get === 'function' ? gradients.get(d) : gradients[d];
     if (!grad) continue;
-    const dist = (typeof grad.get === 'function') ? grad.get(agentCell) : grad[agentCell];
+    const dist = typeof grad.get === 'function' ? grad.get(agentCell) : grad[agentCell];
     const dVal = typeof dist === 'number' ? dist : Infinity;
     if (!isFinite(dVal)) continue;
     candidates.push({ dest: d, dist: dVal });
@@ -894,25 +953,49 @@ export function initializeAffordanceMap() {
     if (friction >= FRICTION_COSTS.IMPASSABLE) {
       this.affordanceMap.set(cell, AFFORDANCE.IMPASSABLE);
       if (this._cellState) {
-        if (!this._cellState[cell]) this._cellState[cell] = { friction: friction, affordance: AFFORDANCE.IMPASSABLE, desire: 0, multi: null };
+        if (!this._cellState[cell])
+          this._cellState[cell] = {
+            friction: friction,
+            affordance: AFFORDANCE.IMPASSABLE,
+            desire: 0,
+            multi: null,
+          };
         else this._cellState[cell].affordance = AFFORDANCE.IMPASSABLE;
       }
     } else if (friction < midPL) {
       this.affordanceMap.set(cell, AFFORDANCE.PAVEMENT);
       if (this._cellState) {
-        if (!this._cellState[cell]) this._cellState[cell] = { friction: friction, affordance: AFFORDANCE.PAVEMENT, desire: 0, multi: null };
+        if (!this._cellState[cell])
+          this._cellState[cell] = {
+            friction: friction,
+            affordance: AFFORDANCE.PAVEMENT,
+            desire: 0,
+            multi: null,
+          };
         else this._cellState[cell].affordance = AFFORDANCE.PAVEMENT;
       }
     } else if (friction < midLH) {
       this.affordanceMap.set(cell, AFFORDANCE.LIGHT_PARK);
       if (this._cellState) {
-        if (!this._cellState[cell]) this._cellState[cell] = { friction: friction, affordance: AFFORDANCE.LIGHT_PARK, desire: 0, multi: null };
+        if (!this._cellState[cell])
+          this._cellState[cell] = {
+            friction: friction,
+            affordance: AFFORDANCE.LIGHT_PARK,
+            desire: 0,
+            multi: null,
+          };
         else this._cellState[cell].affordance = AFFORDANCE.LIGHT_PARK;
       }
     } else {
       this.affordanceMap.set(cell, AFFORDANCE.HEAVY_GRASS);
       if (this._cellState) {
-        if (!this._cellState[cell]) this._cellState[cell] = { friction: friction, affordance: AFFORDANCE.HEAVY_GRASS, desire: 0, multi: null };
+        if (!this._cellState[cell])
+          this._cellState[cell] = {
+            friction: friction,
+            affordance: AFFORDANCE.HEAVY_GRASS,
+            desire: 0,
+            multi: null,
+          };
         else this._cellState[cell].affordance = AFFORDANCE.HEAVY_GRASS;
       }
     }
@@ -920,7 +1003,13 @@ export function initializeAffordanceMap() {
 }
 
 // Expose some internals for debugging and testing
-export { getBestNextStep as _getBestNextStep, computeDijkstraGradient as _computeDijkstraGradient, getBearing as _getBearing, angleDiff as _angleDiff, isVisible as _isVisible };
+export {
+  getBestNextStep as _getBestNextStep,
+  computeDijkstraGradient as _computeDijkstraGradient,
+  getBearing as _getBearing,
+  angleDiff as _angleDiff,
+  isVisible as _isVisible,
+};
 
 // Diagnostic helper to inspect cache instrumentation
 export function getComputeCacheStats(ctx = {}) {
@@ -928,13 +1017,25 @@ export function getComputeCacheStats(ctx = {}) {
     cellLatLngCacheSize: Object.keys(_cellLatLngCacheObj).length,
     cellLatLngCacheHits: _cellLatLngCacheHits,
     cellLatLngCacheMisses: _cellLatLngCacheMisses,
-    computePathCacheSize: ctx._computePathCacheObj ? Object.keys(ctx._computePathCacheObj).length : (ctx._computePathCache ? ctx._computePathCache.size : 0),
+    computePathCacheSize: ctx._computePathCacheObj
+      ? Object.keys(ctx._computePathCacheObj).length
+      : ctx._computePathCache
+        ? ctx._computePathCache.size
+        : 0,
     computePathCacheHits: ctx._computePathCacheHits || 0,
     computePathCacheMisses: ctx._computePathCacheMisses || 0,
-    computeDiskCacheSize: ctx._computeDiskCacheObj ? Object.keys(ctx._computeDiskCacheObj).length : (ctx._computeDiskCache ? ctx._computeDiskCache.size : 0),
+    computeDiskCacheSize: ctx._computeDiskCacheObj
+      ? Object.keys(ctx._computeDiskCacheObj).length
+      : ctx._computeDiskCache
+        ? ctx._computeDiskCache.size
+        : 0,
     computeDiskCacheHits: ctx._computeDiskCacheHits || 0,
     computeDiskCacheMisses: ctx._computeDiskCacheMisses || 0,
-    visibilityCacheSize: ctx._visibilityCacheObj ? Object.keys(ctx._visibilityCacheObj).length : (ctx._visibilityCache ? ctx._visibilityCache.size : 0),
+    visibilityCacheSize: ctx._visibilityCacheObj
+      ? Object.keys(ctx._visibilityCacheObj).length
+      : ctx._visibilityCache
+        ? ctx._visibilityCache.size
+        : 0,
     visibilityCacheHits: ctx._visibilityCacheHits || 0,
     visibilityCacheMisses: ctx._visibilityCacheMisses || 0,
   };
@@ -958,8 +1059,12 @@ export function clearGradientCache() {
 
 // --- Incremental assignment & contribution helpers ---
 function _computeAssignedCounts() {
-  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
-  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+  const destinations = Object.keys(this.simulationNodes).filter((k) =>
+    ['destination', 'both'].includes(this.simulationNodes[k].type)
+  );
+  const origins = Object.keys(this.simulationNodes).filter((k) =>
+    ['origin', 'both'].includes(this.simulationNodes[k].type)
+  );
 
   if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
   // ensure gradients exist for reachability checks
@@ -970,7 +1075,10 @@ function _computeAssignedCounts() {
   const assigned = Object.create(null);
   for (const o of origins) {
     assigned[o] = Object.create(null);
-    const totalVolume = Math.max(1, Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION));
+    const totalVolume = Math.max(
+      1,
+      Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
+    );
 
     const destCandidates = [];
     let destWeightSum = 0;
@@ -978,21 +1086,25 @@ function _computeAssignedCounts() {
       if (d === o) continue;
       const grad = this._gradientCacheObj[d];
       if (!grad) continue;
-      const hasOrigin = (typeof grad.has === 'function') ? grad.has(o) : (typeof grad[o] === 'number');
+      const hasOrigin = typeof grad.has === 'function' ? grad.has(o) : typeof grad[o] === 'number';
       if (!hasOrigin) continue;
-      const w = (this.simulationNodes[d]?.weight) || 1;
+      const w = this.simulationNodes[d]?.weight || 1;
       destCandidates.push({ dest: d, weight: w });
       destWeightSum += w;
     }
     if (destCandidates.length === 0) continue;
 
-    const floats = destCandidates.map((c) => ((c.weight / destWeightSum) * totalVolume));
+    const floats = destCandidates.map((c) => (c.weight / destWeightSum) * totalVolume);
     const floors = floats.map((f) => Math.floor(f));
     const assignedArr = floors.slice();
     let allocated = floors.reduce((a, b) => a + b, 0);
     let leftover = totalVolume - allocated;
     if (leftover > 0) {
-      const frac = floats.map((f, i) => ({ i, frac: f - floors[i], weight: destCandidates[i].weight }));
+      const frac = floats.map((f, i) => ({
+        i,
+        frac: f - floors[i],
+        weight: destCandidates[i].weight,
+      }));
       frac.sort((a, b) => {
         if (b.frac !== a.frac) return b.frac - a.frac;
         return destCandidates[b.i].weight - destCandidates[a.i].weight;
@@ -1030,18 +1142,31 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
     this._cellState = Object.create(null);
     for (const k in this._frictionObj) {
       const fr = this._frictionObj[k];
-      const aff = (this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined') ? this._affordanceObj[k] : 0.1;
-      const desire = (this.pathDesireScores && this.pathDesireScores.get) ? (this.pathDesireScores.get(k) || 0) : (this.pathDesireScores ? (this.pathDesireScores[k] || 0) : 0);
+      const aff =
+        this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
+          ? this._affordanceObj[k]
+          : 0.1;
+      const desire =
+        this.pathDesireScores && this.pathDesireScores.get
+          ? this.pathDesireScores.get(k) || 0
+          : this.pathDesireScores
+            ? this.pathDesireScores[k] || 0
+            : 0;
       this._cellState[k] = { friction: fr, affordance: aff, desire, multi: null };
     }
   }
 
-  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+  const origins = Object.keys(this.simulationNodes).filter((k) =>
+    ['origin', 'both'].includes(this.simulationNodes[k].type)
+  );
   const perTarget = Object.create(null);
   const frictionLookup = this._frictionObj || this.cellFrictionMap;
   const frictionIsMap = typeof frictionLookup.get === 'function';
 
-  const ticks = Math.max(5000, 2 * Math.ceil(Math.sqrt((this.cellFrictionMap.size || 1) * Math.PI)));
+  const ticks = Math.max(
+    5000,
+    2 * Math.ceil(Math.sqrt((this.cellFrictionMap.size || 1) * Math.PI))
+  );
 
   for (const o of origins) {
     const count = (newAssignedCounts[o] && newAssignedCounts[o][targetCell]) || 0;
@@ -1060,7 +1185,13 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
           break;
         }
 
-        const nextStep = getBestNextStep.call(this, simCurrent, destGradientObj, simDirection, simAgentId);
+        const nextStep = getBestNextStep.call(
+          this,
+          simCurrent,
+          destGradientObj,
+          simDirection,
+          simAgentId
+        );
         if (!nextStep || nextStep === simCurrent) break;
 
         const line = _getCachedPathCells(this, simCurrent, nextStep);
@@ -1095,7 +1226,10 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
 }
 
 function _applyTargetContribDelta(targetCell, newContribs) {
-  const oldContribs = this._perTargetContribs && this._perTargetContribs[targetCell] ? this._perTargetContribs[targetCell] : Object.create(null);
+  const oldContribs =
+    this._perTargetContribs && this._perTargetContribs[targetCell]
+      ? this._perTargetContribs[targetCell]
+      : Object.create(null);
   const keys = new Set([...Object.keys(newContribs || {}), ...Object.keys(oldContribs || {})]);
   const affected = new Set();
 
@@ -1109,18 +1243,26 @@ function _applyTargetContribDelta(targetCell, newContribs) {
     if (this._cellState && this._cellState[cell]) {
       this._cellState[cell].desire = (this._cellState[cell].desire || 0) + delta;
       const newDes = this._cellState[cell].desire;
-      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') this.pathDesireScores.set(cell, newDes);
+      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function')
+        this.pathDesireScores.set(cell, newDes);
       else this.pathDesireScores[cell] = newDes;
     } else {
-      const cur = (this.pathDesireScores && typeof this.pathDesireScores.get === 'function') ? (this.pathDesireScores.get(cell) || 0) : (this.pathDesireScores ? (this.pathDesireScores[cell] || 0) : 0);
+      const cur =
+        this.pathDesireScores && typeof this.pathDesireScores.get === 'function'
+          ? this.pathDesireScores.get(cell) || 0
+          : this.pathDesireScores
+            ? this.pathDesireScores[cell] || 0
+            : 0;
       const updated = cur + delta;
-      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') this.pathDesireScores.set(cell, updated);
+      if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function')
+        this.pathDesireScores.set(cell, updated);
       else this.pathDesireScores[cell] = updated;
     }
   }
 
   // persist new contrib snapshot (or remove if empty)
-  if (newContribs && Object.keys(newContribs).length > 0) this._perTargetContribs[targetCell] = newContribs;
+  if (newContribs && Object.keys(newContribs).length > 0)
+    this._perTargetContribs[targetCell] = newContribs;
   else if (this._perTargetContribs) delete this._perTargetContribs[targetCell];
 
   return affected;
@@ -1138,12 +1280,14 @@ function _recomputeAffordanceForCells(cells) {
     let totalVolume = 0;
     if (this._perTargetContribs) {
       for (const t in this._perTargetContribs) {
-        if (this._perTargetContribs[t] && this._perTargetContribs[t][cell]) totalVolume += this._perTargetContribs[t][cell];
+        if (this._perTargetContribs[t] && this._perTargetContribs[t][cell])
+          totalVolume += this._perTargetContribs[t][cell];
       }
     }
 
     let friction;
-    if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined') friction = cellState[cell].friction;
+    if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined')
+      friction = cellState[cell].friction;
     else friction = frictionIsMap ? frictionLookup.get(cell) : frictionLookup[cell];
 
     if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) continue;
@@ -1152,11 +1296,13 @@ function _recomputeAffordanceForCells(cells) {
     const newVal = Math.min(SOFT_CAP, 0.1 + wear);
 
     if (stateEnabled) {
-      if (!cellState[cell]) cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
+      if (!cellState[cell])
+        cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
       else cellState[cell].affordance = newVal;
     }
 
-    if (this.affordanceMap && typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    if (this.affordanceMap && typeof this.affordanceMap.set === 'function')
+      this.affordanceMap.set(cell, newVal);
     else this.affordanceMap[cell] = newVal;
   }
 }
@@ -1165,7 +1311,8 @@ function _recomputeGlobalPeakFlow() {
   let peak = 0;
   if (this.pathDesireScores) {
     if (typeof this.pathDesireScores.values === 'function') {
-      for (const v of this.pathDesireScores.values()) if (typeof v === 'number' && v > peak) peak = v;
+      for (const v of this.pathDesireScores.values())
+        if (typeof v === 'number' && v > peak) peak = v;
     } else {
       for (const k in this.pathDesireScores) {
         const v = this.pathDesireScores[k];
@@ -1178,9 +1325,11 @@ function _recomputeGlobalPeakFlow() {
 
 export function addDestination(targetCell, weight = 1) {
   if (!this.simulationNodes) this.simulationNodes = Object.create(null);
-  if (!this.simulationNodes[targetCell]) this.simulationNodes[targetCell] = { type: 'destination', weight };
+  if (!this.simulationNodes[targetCell])
+    this.simulationNodes[targetCell] = { type: 'destination', weight };
   else {
-    if (this.simulationNodes[targetCell].type === 'origin') this.simulationNodes[targetCell].type = 'both';
+    if (this.simulationNodes[targetCell].type === 'origin')
+      this.simulationNodes[targetCell].type = 'both';
     else this.simulationNodes[targetCell].type = 'destination';
     this.simulationNodes[targetCell].weight = weight;
   }
@@ -1191,8 +1340,12 @@ export function addDestination(targetCell, weight = 1) {
   const newAssigned = _computeAssignedCounts.call(this);
   const oldAssigned = this._assignedCounts || Object.create(null);
 
-  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
-  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+  const destinations = Object.keys(this.simulationNodes).filter((k) =>
+    ['destination', 'both'].includes(this.simulationNodes[k].type)
+  );
+  const origins = Object.keys(this.simulationNodes).filter((k) =>
+    ['origin', 'both'].includes(this.simulationNodes[k].type)
+  );
 
   const changed = new Set();
   changed.add(targetCell);
@@ -1214,14 +1367,15 @@ export function addDestination(targetCell, weight = 1) {
   _recomputeAffordanceForCells.call(this, allAffected);
   this._assignedCounts = newAssigned;
   this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
+  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
   _recomputeGlobalPeakFlow.call(this);
   if (this.updateLayers) this.updateLayers();
   return { changed: Array.from(changed), affectedCells: allAffected.size };
 }
 
 export function updateDestinationWeight(targetCell, newWeight) {
-  if (!this.simulationNodes || !this.simulationNodes[targetCell]) return addDestination.call(this, targetCell, newWeight);
+  if (!this.simulationNodes || !this.simulationNodes[targetCell])
+    return addDestination.call(this, targetCell, newWeight);
   this.simulationNodes[targetCell].weight = newWeight;
   // delegate to addDestination path which computes diffs
   return addDestination.call(this, targetCell, newWeight);
@@ -1229,14 +1383,19 @@ export function updateDestinationWeight(targetCell, newWeight) {
 
 export function removeDestination(targetCell) {
   if (!this.simulationNodes || !this.simulationNodes[targetCell]) return { removed: false };
-  if (this.simulationNodes[targetCell].type === 'both') this.simulationNodes[targetCell].type = 'origin';
+  if (this.simulationNodes[targetCell].type === 'both')
+    this.simulationNodes[targetCell].type = 'origin';
   else delete this.simulationNodes[targetCell];
 
   const newAssigned = _computeAssignedCounts.call(this);
   const oldAssigned = this._assignedCounts || Object.create(null);
 
-  const destinations = Object.keys(this.simulationNodes).filter((k) => ['destination', 'both'].includes(this.simulationNodes[k].type));
-  const origins = Object.keys(this.simulationNodes).filter((k) => ['origin', 'both'].includes(this.simulationNodes[k].type));
+  const destinations = Object.keys(this.simulationNodes).filter((k) =>
+    ['destination', 'both'].includes(this.simulationNodes[k].type)
+  );
+  const origins = Object.keys(this.simulationNodes).filter((k) =>
+    ['origin', 'both'].includes(this.simulationNodes[k].type)
+  );
 
   const changed = new Set();
   changed.add(targetCell);
@@ -1258,7 +1417,7 @@ export function removeDestination(targetCell) {
   _recomputeAffordanceForCells.call(this, allAffected);
   this._assignedCounts = newAssigned;
   this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = (this.simulationNodes[d]?.weight) || 1;
+  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
   _recomputeGlobalPeakFlow.call(this);
   if (this.updateLayers) this.updateLayers();
   return { removed: true, changed: Array.from(changed), affectedCells: allAffected.size };

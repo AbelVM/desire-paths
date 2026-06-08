@@ -53,7 +53,10 @@ export function setupUI(map) {
     const enabled = map.showFrictionMesh !== false;
     frictionButton.innerText = enabled ? '⊖' : '⊕';
     frictionButton.setAttribute('aria-pressed', String(enabled));
-    frictionButton.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
+    frictionButton.setAttribute(
+      'aria-label',
+      enabled ? 'Hide friction legend' : 'Show friction legend'
+    );
     frictionButton.setAttribute('title', enabled ? 'Hide friction legend' : 'Show friction legend');
     if (frictionLegendBody) frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
@@ -187,10 +190,13 @@ export function setupUI(map) {
         await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
         if (!map.mappingReady) {
-          showAlertCard('The current layout did not produce a mapping. Add more nodes and try again.', {
-            title: 'Mapping unavailable',
-            tone: 'warning',
-          });
+          showAlertCard(
+            'The current layout did not produce a mapping. Add more nodes and try again.',
+            {
+              title: 'Mapping unavailable',
+              tone: 'warning',
+            }
+          );
         }
       } catch (err) {
         console.error('Mapping build failed:', err);

@@ -6,14 +6,24 @@ import {
   normalizeFrictionEntries,
 } from './spatialTasks.js';
 
-const MAX_WORKERS = Math.min(4, Math.max(2, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4));
+const MAX_WORKERS = Math.min(
+  4,
+  Math.max(
+    2,
+    typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+      ? navigator.hardwareConcurrency
+      : 4
+  )
+);
 
 const workerPool = [];
 const idleWorkers = [];
 const waitingAcquires = [];
 
 function createWorkerSlot() {
-  const worker = new Worker(new URL('../workers/spatial.worker.js', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('../workers/spatial.worker.js', import.meta.url), {
+    type: 'module',
+  });
   return { worker };
 }
 
@@ -64,7 +74,8 @@ function mergeFastScanEntries(target, source) {
     const sourceLayerMap = source[cell];
     for (const layer in sourceLayerMap) {
       const nextValue = sourceLayerMap[layer];
-      if (targetLayerMap[layer] === undefined || nextValue > targetLayerMap[layer]) targetLayerMap[layer] = nextValue;
+      if (targetLayerMap[layer] === undefined || nextValue > targetLayerMap[layer])
+        targetLayerMap[layer] = nextValue;
     }
   }
 }
@@ -94,37 +105,40 @@ function runWorker(kind, payload) {
     return Promise.resolve(runLocally(kind, payload));
   }
 
-  return slotPromise.then((slot) => new Promise((resolve, reject) => {
-    const { worker } = slot;
+  return slotPromise.then(
+    (slot) =>
+      new Promise((resolve, reject) => {
+        const { worker } = slot;
 
-    const handleMessage = (event) => {
-      const data = event.data || {};
-      worker.removeEventListener('message', handleMessage);
-      worker.removeEventListener('error', handleError);
-      releaseWorkerSlot(slot);
-      if (data.ok) resolve(data.result);
-      else reject(new Error(data.error || 'Spatial worker task failed'));
-    };
+        const handleMessage = (event) => {
+          const data = event.data || {};
+          worker.removeEventListener('message', handleMessage);
+          worker.removeEventListener('error', handleError);
+          releaseWorkerSlot(slot);
+          if (data.ok) resolve(data.result);
+          else reject(new Error(data.error || 'Spatial worker task failed'));
+        };
 
-    const handleError = (event) => {
-      worker.removeEventListener('message', handleMessage);
-      worker.removeEventListener('error', handleError);
-      retireWorkerSlot(slot);
-      reject(event.error || new Error(event.message || 'Spatial worker error'));
-    };
+        const handleError = (event) => {
+          worker.removeEventListener('message', handleMessage);
+          worker.removeEventListener('error', handleError);
+          retireWorkerSlot(slot);
+          reject(event.error || new Error(event.message || 'Spatial worker error'));
+        };
 
-    worker.addEventListener('message', handleMessage);
-    worker.addEventListener('error', handleError);
+        worker.addEventListener('message', handleMessage);
+        worker.addEventListener('error', handleError);
 
-    try {
-      worker.postMessage({ kind, payload });
-    } catch (error) {
-      worker.removeEventListener('message', handleMessage);
-      worker.removeEventListener('error', handleError);
-      retireWorkerSlot(slot);
-      reject(error);
-    }
-  }));
+        try {
+          worker.postMessage({ kind, payload });
+        } catch (error) {
+          worker.removeEventListener('message', handleMessage);
+          worker.removeEventListener('error', handleError);
+          retireWorkerSlot(slot);
+          reject(error);
+        }
+      })
+  );
 }
 
 export async function runGradientBatches(targets, frictionSource) {
@@ -135,7 +149,9 @@ export async function runGradientBatches(targets, frictionSource) {
   if (workerCount <= 1) return runLocally('gradient-batch', { targets, frictionEntries });
 
   const chunks = splitIntoChunks(targets, workerCount);
-  const results = await Promise.all(chunks.map((chunk) => runWorker('gradient-batch', { targets: chunk, frictionEntries })));
+  const results = await Promise.all(
+    chunks.map((chunk) => runWorker('gradient-batch', { targets: chunk, frictionEntries }))
+  );
 
   const merged = Object.create(null);
   for (let i = 0; i < results.length; i++) {
@@ -163,7 +179,7 @@ export async function runFastScanTask(viewHexes, features) {
   if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features });
 
   const results = await Promise.all(
-    chunks.map((chunk) => runWorker('fast-scan-chunk', { viewHexes, features: chunk })),
+    chunks.map((chunk) => runWorker('fast-scan-chunk', { viewHexes, features: chunk }))
   );
 
   const multiFrictionEntries = Object.create(null);

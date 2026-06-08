@@ -172,7 +172,9 @@ const isAccessible = (e) => {
     [e.point.x + 5, e.point.y + 5],
   ];
   let features = e.target.queryRenderedFeatures(bbox);
-  features = features.filter(f => ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer));
+  features = features.filter((f) =>
+    ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer)
+  );
   const f = {};
   for (const feat of features) {
     if (!feat?.geometry) continue;

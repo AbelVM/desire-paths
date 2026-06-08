@@ -174,7 +174,8 @@ export function updateLayers() {
     updateTriggers: { getFillColor: [flatData, this.globalPeakFlow] },
   });
 
-  const layers = this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
+  const layers =
+    this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
   this.deckOverlayInstance.setProps({
     layers: layers.filter(Boolean),
   });

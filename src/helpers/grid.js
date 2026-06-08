@@ -14,7 +14,10 @@ import { runFastScanTask, runImpassableBlurTask } from './spatialWorker.js';
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
   if (!poly || !poly.length) return '';
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
   for (let i = 0; i < poly.length; i++) {
     const ring = poly[i] || [];
     for (let j = 0; j < ring.length; j++) {
@@ -34,9 +37,15 @@ function _aoiKey(poly) {
 // Low-allocation polygon key: bounding box + point count + endpoints
 function _polyKey(coords) {
   if (!coords || !coords.length) return '';
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
   let points = 0;
-  let firstLng = 0, firstLat = 0, lastLng = 0, lastLat = 0;
+  let firstLng = 0,
+    firstLat = 0,
+    lastLng = 0,
+    lastLat = 0;
   for (let i = 0; i < coords.length; i++) {
     const ring = coords[i] || [];
     points += ring.length;
@@ -49,9 +58,11 @@ function _polyKey(coords) {
       if (lat < miny) miny = lat;
       if (lat > maxy) maxy = lat;
       if (i === 0 && j === 0) {
-        firstLng = lng; firstLat = lat;
+        firstLng = lng;
+        firstLat = lat;
       }
-      lastLng = lng; lastLat = lat;
+      lastLng = lng;
+      lastLat = lat;
     }
   }
   if (!isFinite(minx)) return '';
@@ -162,8 +173,14 @@ export async function triggerFastScan() {
   const midLH = (l + hg) / 2;
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];
-    const fr = (this._frictionObj && typeof this._frictionObj[cell] !== 'undefined') ? this._frictionObj[cell] : 0;
-    const multi = (this._multiFrictionObj && typeof this._multiFrictionObj[cell] !== 'undefined') ? this._multiFrictionObj[cell] : null;
+    const fr =
+      this._frictionObj && typeof this._frictionObj[cell] !== 'undefined'
+        ? this._frictionObj[cell]
+        : 0;
+    const multi =
+      this._multiFrictionObj && typeof this._multiFrictionObj[cell] !== 'undefined'
+        ? this._multiFrictionObj[cell]
+        : null;
     let aff;
     if (fr >= FRICTION_COSTS.IMPASSABLE) aff = impassable;
     else if (fr < midPL) aff = pavement;

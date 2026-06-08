@@ -101,7 +101,8 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
 
         let layerMap = multiFrictionEntries[cell];
         if (!layerMap) layerMap = multiFrictionEntries[cell] = Object.create(null);
-        if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey]) layerMap[layerKey] = layerVal;
+        if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
+          layerMap[layerKey] = layerVal;
       }
     };
 
@@ -124,7 +125,10 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
 }
 
 export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) {
-  const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({ features, viewHexes });
+  const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({
+    features,
+    viewHexes,
+  });
 
   const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
   return {
@@ -178,7 +182,10 @@ export function computeImpassableBlurSnapshot({
   const updates = [];
   const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
   for (const cell in blurWeights) {
-    const nextFriction = Math.min(impassableLimit, (frictionLookup[cell] || 0) + blurWeights[cell] * addFactor);
+    const nextFriction = Math.min(
+      impassableLimit,
+      (frictionLookup[cell] || 0) + blurWeights[cell] * addFactor
+    );
     updates.push([cell, nextFriction]);
   }
 
