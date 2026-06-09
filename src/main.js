@@ -128,13 +128,13 @@ class DesireMap {
   syncSimulationUI(...args) { return this._syncSimulationUI(...args); }
 }
 
-const init = () => {
-  const setMapCursor = (mapInstance, cursor) => {
-    const target = mapInstance.getContainer();
-    target.classList.toggle('map-cursor-pointer', cursor === 'pointer');
-    target.classList.toggle('map-cursor-crosshair', cursor === 'crosshair');
-  };
+export function setMapCursor(mapInstance, cursor) {
+  const target = mapInstance.getContainer();
+  target.classList.toggle('map-cursor-pointer', cursor === 'pointer');
+  target.classList.toggle('map-cursor-crosshair', cursor === 'crosshair');
+}
 
+const init = () => {
   const pointLayerIds = ['pin-circles', 'pin-labels'];
 
   const map = new maplibregl.Map(MAP_OPTIONS);
@@ -285,5 +285,7 @@ const isAccessible = (mapInstance, clickEvent) => {
   const groundCost = layerCosts['0']; // We use ground level
   return groundCost < FRICTION_COSTS.IMPASSABLE;
 };
+
+export { DesireMap, isReadyToCompute, isAccessible };
 
 document.addEventListener('DOMContentLoaded', init);

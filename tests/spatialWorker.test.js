@@ -9,6 +9,11 @@ import {
   computeFastScanSnapshot,
   computeFastScanChunkSnapshot,
 } from '../src/helpers/spatialTasks.js';
+import {
+  runGradientBatches,
+  runFastScanTask,
+  runImpassableBlurTask,
+} from '../src/helpers/spatialWorker.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 
 const h3Cell = latLngToCell(40.4169, -3.7035, 15);
@@ -223,5 +228,176 @@ describe('computeFastScanChunkSnapshot', () => {
     const features = [null];
     const result = computeFastScanChunkSnapshot({ features, viewHexes });
     expect(result.multiFrictionEntries).toBeDefined();
+  });
+});
+
+describe('runGradientBatches', () => {
+  it('should return empty object for null targets', async () => {
+    const result = await runGradientBatches(null, {});
+    expect(Object.keys(result).length).toBe(0);
+  });
+
+  it('should return empty object for empty targets array', async () => {
+    const result = await runGradientBatches([], {});
+    expect(Object.keys(result).length).toBe(0);
+  });
+
+  it('should return empty object for undefined targets', async () => {
+    const result = await runGradientBatches(undefined, {});
+    expect(Object.keys(result).length).toBe(0);
+  });
+
+  it('should return empty object for empty friction entries', async () => {
+    const result = await runGradientBatches([h3Cell], {});
+    expect(Object.keys(result).length).toBe(0);
+  });
+
+  it('should handle Map friction source', async () => {
+    const neighbors = gridDisk(h3Cell, 1);
+    const neighborCell = neighbors[1] || h3Cell;
+    const frictionMap = new Map([
+      [h3Cell, 1],
+      [neighborCell, 1],
+    ]);
+    const result = await runGradientBatches([h3Cell], frictionMap);
+    expect(result[h3Cell]).toBeDefined();
+    expect(result[h3Cell][h3Cell]).toBe(0);
+  });
+
+  it('should handle plain object friction source', async () => {
+    const frictionObj = {
+      [h3Cell]: 1,
+    };
+    const result = await runGradientBatches([h3Cell], frictionObj);
+    expect(result[h3Cell]).toBeDefined();
+    expect(result[h3Cell][h3Cell]).toBe(0);
+  });
+
+  it('should compute gradients for single target', async () => {
+    const frictionObj = {
+      [h3Cell]: 1,
+    };
+    const result = await runGradientBatches([h3Cell], frictionObj);
+    expect(result[h3Cell]).toBeDefined();
+    expect(result[h3Cell][h3Cell]).toBe(0);
+  });
+
+  it('should compute gradients for multiple targets', async () => {
+    const h3_2 = latLngToCell(40.417, -3.7035, 15);
+    const frictionObj = {
+      [h3Cell]: 1,
+      [h3_2]: 1,
+    };
+    const result = await runGradientBatches([h3Cell, h3_2], frictionObj);
+    expect(result[h3Cell]).toBeDefined();
+    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(result[h3_2]).toBeDefined();
+    expect(result[h3_2][h3_2]).toBe(0);
+  });
+});
+
+describe('runFastScanTask', () => {
+  it('should return empty results for null viewHexes', async () => {
+    const result = await runFastScanTask(null, []);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+    expect(result.blurWeights).toBeDefined();
+    expect(result.blurUpdates).toEqual([]);
+  });
+
+  it('should return empty results for empty viewHexes', async () => {
+    const result = await runFastScanTask([], []);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+
+  it('should handle undefined viewHexes', async () => {
+    const result = await runFastScanTask(undefined, []);
+    expect(result.multiFrictionEntries).toBeDefined();
+  });
+
+  it('should handle empty features by treating as empty', async () => {
+    const result = await runFastScanTask([h3Cell], []);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+
+  it('should handle undefined features', async () => {
+    const result = await runFastScanTask([h3Cell], undefined);
+    expect(result.multiFrictionEntries).toBeDefined();
+  });
+
+  it('should handle single feature (run locally)', async () => {
+    const features = [
+      {
+        sourceLayer: 'transportation',
+        properties: { class: 'secondary' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [[-3.704, 40.416], [-3.703, 40.417]],
+        },
+      },
+    ];
+    const result = await runFastScanTask([h3Cell], features);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+
+  it('should handle multiple features', async () => {
+    const features = [
+      {
+        sourceLayer: 'transportation',
+        properties: { class: 'secondary' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [[-3.704, 40.416], [-3.703, 40.417]],
+        },
+      },
+      {
+        sourceLayer: 'building',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[[-3.704, 40.416], [-3.703, 40.416], [-3.703, 40.417], [-3.704, 40.417], [-3.704, 40.416]]],
+        },
+      },
+    ];
+    const result = await runFastScanTask([h3Cell], features);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+
+  it('should handle features with null geometry entries', async () => {
+    const features = [
+      {
+        sourceLayer: 'transportation',
+        properties: { class: 'secondary' },
+        geometry: null,
+      },
+    ];
+    const result = await runFastScanTask([h3Cell], features);
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+});
+
+describe('runImpassableBlurTask', () => {
+  it('should handle Map friction source', async () => {
+    const frictionMap = new Map([[h3Cell, 999999]]);
+    const result = await runImpassableBlurTask(frictionMap, {});
+    expect(result).toBeDefined();
+  });
+
+  it('should handle plain object friction source', async () => {
+    const frictionObj = {
+      [h3Cell]: 999999,
+    };
+    const result = await runImpassableBlurTask(frictionObj, {});
+    expect(result).toBeDefined();
+  });
+
+  it('should handle empty friction source', async () => {
+    const result = await runImpassableBlurTask({}, {});
+    expect(result).toBeDefined();
   });
 });

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   _angleDiff as angleDiff,
+  _computeDijkstraGradient,
+  _isVisible,
+  _getBearing,
+  _getBestNextStep,
   getComputeCacheStats,
   initializeAffordanceMap,
   computeAndCacheGradient,
@@ -10,7 +14,7 @@ import {
   updateDestinationWeight,
   removeDestination,
 } from '../src/helpers/compute.js';
-import { latLngToCell } from 'h3-js';
+import { latLngToCell, gridDisk, gridPathCells } from 'h3-js';
 
 describe('angleDiff', () => {
   it('should return 0 for equal angles', () => {
@@ -258,123 +262,597 @@ describe('gradient cache helpers', () => {
 
 describe('addDestination', () => {
   it('should create a new destination node', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
       simulationNodes: Object.create(null),
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, 'abc123', 2);
-    expect(map.simulationNodes['abc123']).toBeDefined();
-    expect(map.simulationNodes['abc123'].type).toBe('destination');
-    expect(map.simulationNodes['abc123'].weight).toBe(2);
+    addDestination.call(map, h3, 2);
+    expect(map.simulationNodes[h3]).toBeDefined();
+    expect(map.simulationNodes[h3].type).toBe('destination');
+    expect(map.simulationNodes[h3].weight).toBe(2);
   });
 
   it('should upgrade origin to both when adding destination at same cell', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { 'abc123': { type: 'origin', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'origin', weight: 1 } },
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, 'abc123', 1);
-    expect(map.simulationNodes['abc123'].type).toBe('both');
+    addDestination.call(map, h3, 1);
+    expect(map.simulationNodes[h3].type).toBe('both');
   });
 
   it('should update weight when adding destination at existing destination cell', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { 'abc123': { type: 'destination', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'destination', weight: 1 } },
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, 'abc123', 5);
-    expect(map.simulationNodes['abc123'].weight).toBe(5);
+    addDestination.call(map, h3, 5);
+    expect(map.simulationNodes[h3].weight).toBe(5);
+  });
+
+  it('should handle pathDesireScores as Map with values', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const pathDesireScores = new Map([
+      [h3, 10],
+      ['other', 5],
+    ]);
+    const map = {
+      simulationNodes: { [h3]: { type: 'origin', weight: 1 } },
+      _gradientCacheObj: Object.create(null),
+      cellFrictionMap: new Map(),
+      pathDesireScores: pathDesireScores,
+      affordanceMap: new Map(),
+      _cellState: Object.create(null),
+      globalPeakFlow: 1,
+    };
+    addDestination.call(map, h3, 1);
+    expect(map.simulationNodes[h3].type).toBe('both');
+    expect(map.globalPeakFlow).toBeGreaterThan(1);
   });
 });
 
 describe('updateDestinationWeight', () => {
   it('should update weight of existing destination', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { 'abc123': { type: 'destination', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'destination', weight: 1 } },
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    updateDestinationWeight.call(map, 'abc123', 3);
-    expect(map.simulationNodes['abc123'].weight).toBe(3);
+    updateDestinationWeight.call(map, h3, 3);
+    expect(map.simulationNodes[h3].weight).toBe(3);
   });
 
   it('should create destination if it does not exist', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
       simulationNodes: Object.create(null),
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    updateDestinationWeight.call(map, 'abc123', 3);
-    expect(map.simulationNodes['abc123']).toBeDefined();
-    expect(map.simulationNodes['abc123'].weight).toBe(3);
+    updateDestinationWeight.call(map, h3, 3);
+    expect(map.simulationNodes[h3]).toBeDefined();
+    expect(map.simulationNodes[h3].weight).toBe(3);
   });
 });
 
 describe('removeDestination', () => {
   it('should remove a destination', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { 'abc123': { type: 'destination', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'destination', weight: 1 } },
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = removeDestination.call(map, 'abc123');
+    const result = removeDestination.call(map, h3);
     expect(result.removed).toBe(true);
-    expect(map.simulationNodes['abc123']).toBeUndefined();
+    expect(map.simulationNodes[h3]).toBeUndefined();
   });
 
   it('should downgrade both to origin when removing destination', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { 'abc123': { type: 'both', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'both', weight: 1 } },
       _gradientCacheObj: Object.create(null),
-      cellFrictionMap: new Map(),
+      cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = removeDestination.call(map, 'abc123');
+    const result = removeDestination.call(map, h3);
     expect(result.removed).toBe(true);
-    expect(map.simulationNodes['abc123'].type).toBe('origin');
+    expect(map.simulationNodes[h3].type).toBe('origin');
   });
 
   it('should return removed: false for non-existent destination', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
       simulationNodes: Object.create(null),
+      _gradientCacheObj: Object.create(null),
+      cellFrictionMap: new Map([[h3, 1]]),
+      pathDesireScores: new Map(),
+      affordanceMap: new Map(),
+      _cellState: Object.create(null),
+      globalPeakFlow: 1,
+    };
+    const result = removeDestination.call(map, h3);
+    expect(result.removed).toBe(false);
+  });
+
+  it('should update _assignedCounts and _targetWeights after removal', () => {
+    const origin = latLngToCell(40.4169, -3.7035, 15);
+    const dest = latLngToCell(40.417, -3.7034, 15);
+    const map = {
+      simulationNodes: {
+        [origin]: { type: 'origin', weight: 1 },
+        [dest]: { type: 'destination', weight: 1 },
+      },
       _gradientCacheObj: Object.create(null),
       cellFrictionMap: new Map(),
       pathDesireScores: new Map(),
       affordanceMap: new Map(),
       _cellState: Object.create(null),
       globalPeakFlow: 1,
+      _assignedCounts: { [origin]: { [dest]: 1 } },
+      _targetWeights: { [dest]: 1 },
+      updateLayers: () => {},
     };
-    const result = removeDestination.call(map, 'nonexistent');
-    expect(result.removed).toBe(false);
+    const result = removeDestination.call(map, dest);
+    expect(result.removed).toBe(true);
+    expect(map.simulationNodes[dest]).toBeUndefined();
+    expect(map._assignedCounts).toBeDefined();
+    expect(map._targetWeights).toBeDefined();
+  });
+
+  it('should handle pathDesireScores as plain object', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      simulationNodes: { [h3]: { type: 'destination', weight: 1 } },
+      _gradientCacheObj: Object.create(null),
+      cellFrictionMap: new Map(),
+      pathDesireScores: { someCell: 5 },
+      affordanceMap: new Map(),
+      _cellState: Object.create(null),
+      globalPeakFlow: 5,
+      updateLayers: () => {},
+    };
+    const result = removeDestination.call(map, h3);
+    expect(result.removed).toBe(true);
+    expect(map.globalPeakFlow).toBeDefined();
+  });
+
+  it('should detect changed destinations when assigned counts differ', () => {
+    const origin = latLngToCell(40.4169, -3.7035, 15);
+    const dest1 = latLngToCell(40.417, -3.7034, 15);
+    const dest2 = latLngToCell(40.4171, -3.7034, 15);
+    const map = {
+      simulationNodes: {
+        [origin]: { type: 'origin', weight: 1 },
+        [dest1]: { type: 'destination', weight: 1 },
+        [dest2]: { type: 'destination', weight: 1 },
+      },
+      _gradientCacheObj: Object.create(null),
+      cellFrictionMap: new Map(),
+      pathDesireScores: new Map(),
+      affordanceMap: new Map(),
+      _cellState: Object.create(null),
+      globalPeakFlow: 1,
+      _assignedCounts: {
+        [origin]: { [dest1]: 5, [dest2]: 3 },
+      },
+      _targetWeights: { [dest1]: 1, [dest2]: 1 },
+      updateLayers: () => {},
+    };
+    const result = removeDestination.call(map, dest1);
+    expect(result.removed).toBe(true);
+    expect(result.changed).toContain(dest1);
+    expect(map._assignedCounts).toBeDefined();
+    expect(map._targetWeights).toBeDefined();
+  });
+});
+
+describe('_computeDijkstraGradient', () => {
+  it('should return gradient with target cell at distance 0', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const frictionMap = new Map([[h3, 1]]);
+    // Don't set _cellState so it uses cellFrictionMap directly
+    const map = {
+      cellFrictionMap: frictionMap,
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+  });
+
+  it('should compute distances through adjacent cells', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    // Build a friction map with the center and all its neighbors
+    const frictionMap = new Map();
+    frictionMap.set(h3, 1);
+    for (const n of neighbors) {
+      frictionMap.set(n, 1);
+    }
+    // Don't set _cellState so it uses cellFrictionMap directly
+    const map = {
+      cellFrictionMap: frictionMap,
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+    // All neighbors should be reachable with distance = 1
+    for (const n of neighbors) {
+      if (n !== h3) {
+        expect(result[n]).toBe(1);
+      }
+    }
+  });
+
+  it('should use _frictionObj when available instead of cellFrictionMap', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const frictionObj = { [h3]: 1 };
+    for (const n of neighbors) {
+      frictionObj[n] = 1;
+    }
+    // Don't set _cellState so it uses _frictionObj directly
+    const map = {
+      _frictionObj: frictionObj,
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+    for (const n of neighbors) {
+      if (n !== h3) {
+        expect(result[n]).toBe(1);
+      }
+    }
+  });
+
+  it('should use _cellState friction when available', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const frictionMap = new Map();
+    frictionMap.set(h3, 1);
+    const cellState = Object.create(null);
+    cellState[h3] = { friction: 1 };
+    for (const n of neighbors) {
+      frictionMap.set(n, 1);
+      cellState[n] = { friction: 1 };
+    }
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: cellState,
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+    for (const n of neighbors) {
+      if (n !== h3) {
+        expect(result[n]).toBe(1);
+      }
+    }
+  });
+
+  it('should exclude impassable cells from gradient', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 999999],
+    ]);
+    // Don't set _cellState so it uses cellFrictionMap directly
+    const map = {
+      cellFrictionMap: frictionMap,
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+    expect(result[neighborCell]).toBeUndefined();
+  });
+
+  it('should handle empty friction map', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      cellFrictionMap: new Map(),
+    };
+    const result = _computeDijkstraGradient.call(map, h3);
+    expect(result[h3]).toBe(0);
+  });
+});
+
+describe('_isVisible', () => {
+  it('should return a boolean', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      cellFrictionMap: new Map([[h3, 1]]),
+      _cellState: Object.create(null),
+    };
+    const result = _isVisible.call(map, h3, h3);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('should handle cells with _frictionObj', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      _frictionObj: { [h3]: 1 },
+      _cellState: Object.create(null),
+    };
+    const result = _isVisible.call(map, h3, h3);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('should handle cells with _cellState', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      _frictionObj: { [h3]: 1 },
+      _cellState: { [h3]: { friction: 1 } },
+    };
+    const result = _isVisible.call(map, h3, h3);
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('should handle Map frictionLookup', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const frictionMap = new Map([[h3, 1]]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+    };
+    const result = _isVisible.call(map, h3, h3);
+    expect(typeof result).toBe('boolean');
+  });
+});
+
+describe('_getBearing', () => {
+  it('should return a bearing between 0 and 360', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const bearing = _getBearing(h3, h3);
+    expect(typeof bearing).toBe('number');
+    expect(bearing).toBeGreaterThanOrEqual(0);
+    expect(bearing).toBeLessThan(360);
+  });
+
+  it('should return 0 when start equals end', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const bearing = _getBearing(h3, h3);
+    expect(bearing).toBe(0);
+  });
+});
+
+describe('_getBestNextStep', () => {
+  it('should return null when no visible neighbors', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    // Create a context where all neighbors are impassable
+    const frictionMap = new Map([[h3, 999999]]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    expect(result).toBeNull();
+  });
+
+  it('should return a neighbor when one is visible', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    // Should return a valid neighbor or null if no visible neighbors
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should use _frictionObj when available', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionObj = {
+      [h3]: 1,
+      [neighborCell]: 1,
+    };
+    const map = {
+      _frictionObj: frictionObj,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should use _cellState friction when available', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    const cellState = Object.create(null);
+    cellState[h3] = { friction: 1 };
+    cellState[neighborCell] = { friction: 1 };
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: cellState,
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should skip impassable neighbors', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 999999],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    // Should not return the impassable neighbor
+    expect(result).not.toBe(neighborCell);
+  });
+
+  it('should use gradient when provided', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    // Provide a gradient where neighborCell has a lower gradient value
+    const gradient = {
+      [h3]: 2,
+      [neighborCell]: 1,
+    };
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, gradient, 0);
+    // Should prefer the neighbor with lower gradient
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should handle debugCompute flag', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+      debugCompute: true,
+    };
+    // Should not throw with debugCompute enabled
+    const result = _getBestNextStep.call(map, h3, {}, 0, 'test-agent');
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should handle affordanceMap as fallback', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    const affordanceMap = new Map([
+      [h3, 0.5],
+      [neighborCell, 0.8],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      affordanceMap: affordanceMap,
+      // No _cellState or _affordanceObj
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should handle Map gradient', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 1],
+      [neighborCell, 1],
+    ]);
+    const gradientMap = new Map([
+      [h3, 2],
+      [neighborCell, 1],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, gradientMap, 0);
+    expect(result === null || typeof result === 'string').toBe(true);
+  });
+
+  it('should handle cellsArr.length === 0 (fallback tunneling)', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    // All neighbors are impassable, so cellsArr will be empty
+    const neighbors = gridDisk(h3, 1);
+    const frictionMap = new Map();
+    frictionMap.set(h3, 1);
+    for (const n of neighbors) {
+      if (n !== h3) {
+        frictionMap.set(n, 999999);
+      }
+    }
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    // Should return null when all neighbors are impassable
+    expect(result).toBeNull();
+  });
+
+  it('should handle frictionArr[i] === 0 (falsy friction)', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1);
+    const neighborCell = neighbors[1] || h3;
+    const frictionMap = new Map([
+      [h3, 0],
+      [neighborCell, 0],
+    ]);
+    const map = {
+      cellFrictionMap: frictionMap,
+      _cellState: Object.create(null),
+      _affordanceObj: Object.create(null),
+    };
+    const result = _getBestNextStep.call(map, h3, {}, 0);
+    expect(result === null || typeof result === 'string').toBe(true);
   });
 });

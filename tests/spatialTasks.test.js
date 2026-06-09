@@ -222,4 +222,68 @@ describe('computeFastScanChunkSnapshot', () => {
     const result = computeFastScanChunkSnapshot({ features, viewHexes });
     expect(result.multiFrictionEntries).toBeDefined();
   });
+
+  it('should handle Polygon geometry with coordinates near the H3 cell', () => {
+    const viewHexes = [h3Cell];
+    // Coordinates near Madrid (40.4169, -3.7035)
+    const features = [
+      {
+        sourceLayer: 'landuse',
+        properties: { class: 'residential' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [-3.704, 40.416],
+            [-3.703, 40.416],
+            [-3.703, 40.417],
+            [-3.704, 40.417],
+            [-3.704, 40.416],
+          ],
+        },
+      },
+    ];
+    const result = computeFastScanChunkSnapshot({ features, viewHexes });
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+
+  it('should handle MultiPolygon geometry with coordinates near the H3 cell', () => {
+    const viewHexes = [h3Cell];
+    const features = [
+      {
+        sourceLayer: 'landuse',
+        properties: { class: 'residential' },
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: [
+            [
+              [-3.704, 40.416],
+              [-3.703, 40.416],
+              [-3.703, 40.417],
+              [-3.704, 40.417],
+              [-3.704, 40.416],
+            ],
+          ],
+        },
+      },
+    ];
+    const result = computeFastScanChunkSnapshot({ features, viewHexes });
+    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
+  });
+});
+
+describe('computeImpassableBlurSnapshot error handling', () => {
+  it('should handle gridRing errors gracefully', () => {
+    // Create a friction map where gridRing might throw for certain cells
+    // by using an extremely large or invalid cell ID
+    const result = computeImpassableBlurSnapshot({
+      frictionEntries: { invalid_cell_id: 999999 },
+      radius: 1,
+      sigma: 1.0,
+      addFactor: 3.0,
+    });
+    expect(result.blurWeights).toBeDefined();
+    expect(Array.isArray(result.updates)).toBe(true);
+  });
 });
