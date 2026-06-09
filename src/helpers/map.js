@@ -8,7 +8,7 @@ export function renderInterfacePins() {
   const bounds = new maplibregl.LngLatBounds();
   const mapSE = this.project(this.getBounds().getSouthEast());
 
-  const feats = Object.entries(this.simulationNodes).map(([k, node]) => {
+  const feats = Object.entries(this.simulationNodes ?? {}).map(([k, node]) => {
     const pt = cellToLatLng(k);
     bounds.extend([pt[1], pt[0]]);
     return {
@@ -96,16 +96,22 @@ export function renderInterfacePins() {
 
 export function updateLayers() {
   // Prefer AOI-ordered hexes when available, fall back to map keys
-  const viewHexes = this.getHexes() || Array.from(this.cellFrictionMap.keys());
+  const viewHexes = this.getHexes() ?? Array.from(this.cellFrictionMap?.keys() ?? []);
 
   // Snapshot Maps to plain objects for faster hot-loop property access
   const frictionObj = Object.create(null);
-  for (const [k, v] of this.cellFrictionMap) frictionObj[k] = v;
+  for (const [k, v] of this.cellFrictionMap ?? []) frictionObj[k] = v;
   const pathObj = Object.create(null);
-  for (const [k, v] of this.pathDesireScores) pathObj[k] = v;
+  if (this.pathDesireScores) {
+    if (this.pathDesireScores.entries) {
+      for (const [k, v] of this.pathDesireScores) pathObj[k] = v;
+    } else {
+      for (const k in this.pathDesireScores) pathObj[k] = this.pathDesireScores[k];
+    }
+  }
 
   // Pre-compute logMax once instead of per-hex in getFillColor callback
-  const logMax = Math.log1p(this.globalPeakFlow || 1);
+  const logMax = Math.log1p(this.globalPeakFlow ?? 1);
   const invLogMax = logMax > 0 ? 1 / logMax : 0;
 
   // Legend stops (from CSS): #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049
@@ -121,8 +127,8 @@ export function updateLayers() {
   const len = viewHexes.length;
   for (let i = 0; i < len; i++) {
     const h = viewHexes[i];
-    const s = pathObj[h] || 0;
-    const entry = { hex: h, f: frictionObj[h], s };
+    const s = pathObj[h] ?? 0;
+    const entry = { hex: h, f: frictionObj[h] ?? 0, s };
     flatData.push(entry);
     if (s > 0) flowData.push(entry);
   }
@@ -176,18 +182,13 @@ export function updateLayers() {
 
   const layers =
     this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
-  this.deckOverlayInstance.setProps({
-    layers,
-  });
+  this.deckOverlayInstance?.setProps({ layers });
 }
 
 export function clearLayers() {
   this.baseLayer = null;
   this.flowLayer = null;
-  if (this.deckOverlayInstance) {
-    this.deckOverlayInstance.setProps({ layers: [] });
-  }
-  if (this.getCanvas) {
-    this.getCanvas().style.cursor = 'crosshair';
-  }
+  this.deckOverlayInstance?.setProps({ layers: [] });
+  const canvas = this.getCanvas?.();
+  if (canvas) canvas.style.cursor = 'crosshair';
 }

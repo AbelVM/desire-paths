@@ -44,7 +44,6 @@ describe('MinHeap', () => {
     for (let i = 0; i < 100; i++) {
       heap.insert(`item-${i}`, Math.random() * 1000);
     }
-    let prev = -Infinity;
     while (heap.size() > 0) {
       // We can't easily verify the extracted value since we don't store scores
       // but we can verify size decreases correctly

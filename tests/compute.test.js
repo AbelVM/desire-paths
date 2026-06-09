@@ -1,10 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   _angleDiff as angleDiff,
-  _getBearing as getBearing,
-  _isVisible as isVisible,
-  _computeDijkstraGradient as computeDijkstraGradient,
-  _getBestNextStep as getBestNextStep,
   getComputeCacheStats,
   initializeAffordanceMap,
   computeAndCacheGradient,
@@ -13,9 +9,7 @@ import {
   addDestination,
   updateDestinationWeight,
   removeDestination,
-  computeDesirePaths,
 } from '../src/helpers/compute.js';
-import { FRICTION_COSTS, AFFORDANCE, TEMPERATURE } from '../src/helpers/constants.js';
 import { latLngToCell } from 'h3-js';
 
 describe('angleDiff', () => {
@@ -220,7 +214,7 @@ describe('gradient cache helpers', () => {
       ]),
       _cellState: Object.create(null),
     };
-    const result = computeAndCacheGradient.call(map, h3);
+    computeAndCacheGradient.call(map, h3);
     expect(map._gradientCacheObj).toBeDefined();
     expect(map._gradientCacheObj[h3]).toBeDefined();
   });
@@ -273,7 +267,7 @@ describe('addDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = addDestination.call(map, 'abc123', 2);
+    addDestination.call(map, 'abc123', 2);
     expect(map.simulationNodes['abc123']).toBeDefined();
     expect(map.simulationNodes['abc123'].type).toBe('destination');
     expect(map.simulationNodes['abc123'].weight).toBe(2);

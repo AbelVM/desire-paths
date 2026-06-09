@@ -65,7 +65,7 @@ export function setupUI(map) {
   };
 
   const syncFlowReadout = () => {
-    const peak = Math.max(0, Math.round(map.globalPeakFlow || 0));
+    const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
     flowReadout.innerText = `Peak Flow Intensity: ${peak}`;
   };
 
@@ -73,10 +73,10 @@ export function setupUI(map) {
     const busy = map.isComputing === true;
     const mappingReady = map.mappingReady === true;
     const readyToRun = map.readyToCompute === true;
-    const hasGrid = Object.keys(map.simulationNodes || {}).length > 0;
+    const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
-    if (buildButton) buildButton.disabled = busy;
-    clearButton.disabled = busy || !hasGrid;
+    if (buildButton) buildButton.toggleAttribute('disabled', busy);
+    if (clearButton) clearButton.disabled = busy || !hasGrid;
     computeButton.disabled = busy || !mappingReady || !readyToRun;
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     if (loader && !busy) {
@@ -120,10 +120,10 @@ export function setupUI(map) {
   const resetSimulationState = () => {
     hideAlertCard();
     map.simulationNodes = {};
-    map.pathDesireScores.clear();
-    map.affordanceMap.clear();
-    map.cellFrictionMap.clear();
-    map.multiFrictionMap.clear();
+    map.pathDesireScores?.clear();
+    map.affordanceMap?.clear();
+    map.cellFrictionMap?.clear();
+    map.multiFrictionMap?.clear();
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
     map.mappingReady = false;
@@ -147,9 +147,7 @@ export function setupUI(map) {
     map._perTargetContribs = undefined;
     map._assignedCounts = undefined;
     map._targetWeights = undefined;
-    if (map.getSource('pins')) {
-      map.getSource('pins').setData({ type: 'FeatureCollection', features: [] });
-    }
+    map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
     syncFlowReadout();
     syncSimulationUI();

@@ -1,33 +1,5 @@
 import { describe, it, expect } from 'vitest';
 
-// Mock Worker to test spatialWorker.js in node environment
-class MockWorker {
-  constructor() {
-    this.messages = [];
-    this.listeners = { message: [], error: [] };
-  }
-  postMessage(msg) {
-    this.messages.push(msg);
-    // Simulate successful response
-    setTimeout(() => {
-      const handler = this.listeners.message[0];
-      if (handler) {
-        handler({ data: { ok: true, result: { test: 'result' } } });
-      }
-    }, 10);
-  }
-  addEventListener(event, handler) {
-    this.listeners[event].push(handler);
-  }
-  removeEventListener(event, handler) {
-    const idx = this.listeners[event].indexOf(handler);
-    if (idx !== -1) this.listeners[event].splice(idx, 1);
-  }
-  terminate() {
-    // no-op
-  }
-}
-
 // Test spatialTasks directly since spatialWorker depends on Worker API
 import {
   normalizeFrictionEntries,

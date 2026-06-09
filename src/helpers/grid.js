@@ -3,13 +3,9 @@ import {
   FRICTION_COSTS,
   AFFORDANCE,
   H3_STRIDE_RESOLUTION,
-  getSurface,
-  IMPASSABLE_BLUR_RADIUS,
-  IMPASSABLE_BLUR_SIGMA,
-  IMPASSABLE_BLUR_FRICTION_ADD,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
 } from './constants.js';
-import { runFastScanTask, runImpassableBlurTask } from './spatialWorker.js';
+import { runFastScanTask } from './spatialWorker.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -116,23 +112,27 @@ export async function triggerFastScan() {
   this.cellFrictionMap.clear();
 
   // Reuse existing multiFrictionMap when AOI hasn't changed to avoid re-allocating objects
-  const aoiKey = this._cachedAoiKey || (this.aoi_polygon ? _aoiKey(this.aoi_polygon) : '');
+  const aoiKey = this._cachedAoiKey ?? (this.aoi_polygon ? _aoiKey(this.aoi_polygon) : '');
   if (!this.multiFrictionMap || this._lastViewHexesKey !== aoiKey) {
     this.multiFrictionMap = new Map();
-    for (let i = 0; i < viewHexes.length; i++) this.multiFrictionMap.set(viewHexes[i], {});
+    for (let i = 0; i < viewHexes.length; i++) this.multiFrictionMap.set(viewHexes[i], Object.create(null));
     this._lastViewHexesKey = aoiKey;
   } else {
     for (const obj of this.multiFrictionMap.values()) {
-      for (const k in obj) delete obj[k];
+      const keys = Object.keys(obj);
+      for (let k = 0; k < keys.length; k++) delete obj[keys[k]];
     }
   }
 
-  const multiEntries = build.multiFrictionEntries || Object.create(null);
-  for (const cell in multiEntries) {
+  const multiEntries = build.multiFrictionEntries ?? Object.create(null);
+  const multiKeys = Object.keys(multiEntries);
+  for (let m = 0; m < multiKeys.length; m++) {
+    const cell = multiKeys[m];
     const target = this.multiFrictionMap.get(cell);
     if (!target) continue;
     const layerMap = multiEntries[cell];
-    for (const layer in layerMap) target[layer] = layerMap[layer];
+    const layerKeys = Object.keys(layerMap);
+    for (let l = 0; l < layerKeys.length; l++) target[layerKeys[l]] = layerMap[layerKeys[l]];
   }
 
   // Snapshot multiFrictionMap to a plain object for hot lookups
@@ -141,17 +141,17 @@ export async function triggerFastScan() {
 
   // Populate cellFrictionMap from worker output using the viewHexes order
   this._frictionObj = Object.create(null);
-  const cellEntries = build.cellFrictionEntries || Object.create(null);
+  const cellEntries = build.cellFrictionEntries ?? Object.create(null);
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const h = viewHexes[i];
-    const minCost = cellEntries[h] || 0;
+    const minCost = cellEntries[h] ?? 0;
     this.cellFrictionMap.set(h, minCost);
     this._frictionObj[h] = minCost;
   }
 
   // Apply gaussian blur from impassable cells to adjacent cells (updates friction map)
-  const blurWeights = build.blurWeights || Object.create(null);
-  const blurUpdates = build.blurUpdates || [];
+  const blurWeights = build.blurWeights ?? Object.create(null);
+  const blurUpdates = build.blurUpdates ?? [];
   for (let i = 0; i < blurUpdates.length; i++) {
     const [cell, newF] = blurUpdates[i];
     this.cellFrictionMap.set(cell, newF);
@@ -173,21 +173,15 @@ export async function triggerFastScan() {
   const midLH = (l + hg) / 2;
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];
-    const fr =
-      this._frictionObj && typeof this._frictionObj[cell] !== 'undefined'
-        ? this._frictionObj[cell]
-        : 0;
-    const multi =
-      this._multiFrictionObj && typeof this._multiFrictionObj[cell] !== 'undefined'
-        ? this._multiFrictionObj[cell]
-        : null;
+    const fr = this._frictionObj?.[cell] ?? 0;
+    const multi = this._multiFrictionObj?.[cell] ?? null;
     let aff;
     if (fr >= FRICTION_COSTS.IMPASSABLE) aff = impassable;
     else if (fr < midPL) aff = pavement;
     else if (fr < midLH) aff = lightPark;
     else aff = heavyGrass;
-    const weight = blurWeights && blurWeights[cell];
-    if (typeof weight !== 'undefined') {
+    const weight = blurWeights[cell];
+    if (weight != null) {
       const reduction = Math.min(aff, weight * penalty);
       aff = Math.max(0.0, aff - reduction);
     }
@@ -258,30 +252,6 @@ function mapCells(frictionMap, cells, surface) {
     const cell = cells[i];
     const val = frictionMap.get(cell);
     if (!val) continue; // outside AOI
-    if (val[layerKey] === undefined || layerVal > val[layerKey]) val[layerKey] = layerVal;
+    if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) val[layerKey] = layerVal;
   }
-}
-
-// Apply a gaussian influence from impassable cells outward.
-// Returns a Map(cell -> aggregatedWeight) of influenced non-impassable cells.
-async function applyImpassableBlur() {
-  const cellFrictionMap = this.cellFrictionMap;
-  const frictionObj = Object.create(null);
-  for (const [k, v] of cellFrictionMap) frictionObj[k] = v;
-  this._frictionObj = frictionObj;
-
-  const { blurWeights, updates } = await runImpassableBlurTask(frictionObj, {
-    radius: IMPASSABLE_BLUR_RADIUS,
-    sigma: IMPASSABLE_BLUR_SIGMA,
-    addFactor: IMPASSABLE_BLUR_FRICTION_ADD,
-  });
-
-  for (let i = 0; i < updates.length; i++) {
-    const [cell, newF] = updates[i];
-    cellFrictionMap.set(cell, newF);
-    frictionObj[cell] = newF;
-    if (this._cellState && this._cellState[cell]) this._cellState[cell].friction = newF;
-  }
-
-  return blurWeights;
 }

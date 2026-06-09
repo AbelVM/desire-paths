@@ -15,6 +15,25 @@ import {
 } from './constants.js';
 import { runGradientBatches } from './spatialWorker.js';
 
+// --- Deterministic seeded RNG (LCG) ---
+function _lcg(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+// --- String hash (FNV-1a variant) ---
+function _strHash(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
 // Local cache bounds for compute-heavy H3 calls (tuned from instrumentation)
 const COMPUTE_PATH_CACHE_MAX = 256;
 const COMPUTE_DISK_CACHE_MAX = 256;
@@ -28,22 +47,17 @@ const _cellLatLngCacheOrder = [];
 let _cellLatLngCacheHits = 0;
 let _cellLatLngCacheMisses = 0;
 
-// Lightweight helpers reused in hotspots to avoid re-allocating on each call
-function _strHash(s) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
+// --- Cell state builder: creates/updates per-cell state objects ---
+function buildCellStateEntry(friction, affordanceSource, pathDesireSource, multiFrictionObj, existingState, cellKey) {
+  let es = existingState && existingState[cellKey];
+  if (es) {
+    es.friction = friction;
+    es.affordance = affordanceSource !== undefined ? affordanceSource : 0.1;
+    es.desire = pathDesireSource ?? 0;
+    es.multi = multiFrictionObj !== undefined ? multiFrictionObj : null;
+    return es;
   }
-  return h >>> 0;
-}
-
-function _lcg(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
+  return { friction, affordance: affordanceSource !== undefined ? affordanceSource : 0.1, desire: pathDesireSource ?? 0, multi: multiFrictionObj !== undefined ? multiFrictionObj : null };
 }
 
 function _bearingFromLatLngs(s, e) {
@@ -173,6 +187,7 @@ function _getCachedVisibility(ctx, a, b, frictionLookup, frictionIsMap) {
       break;
     }
   }
+  // outer may have been created above or may be new
   if (!outer) {
     outer = Object.create(null);
     ctx._visibilityCacheObj[a] = outer;
@@ -191,6 +206,18 @@ function _getCachedVisibility(ctx, a, b, frictionLookup, frictionIsMap) {
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
 export async function computeDesirePaths() {
+  // Guard: ensure the friction map has been built before simulating
+  if (!this.cellFrictionMap || this.cellFrictionMap.size === 0) {
+    if (this.showAlertCard) {
+      this.showAlertCard(
+        'Build the mapping first by clicking "Build Mapping". ' +
+          'The simulation requires a friction map generated from the map tiles.',
+        { title: 'Mapping not built', tone: 'warning' }
+      );
+    }
+    return;
+  }
+
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
     ['destination', 'both'].includes(this.simulationNodes[k].type)
   );
@@ -223,48 +250,17 @@ export async function computeDesirePaths() {
   // Reuse existing _cellState structure when possible to avoid object churn.
   const existingState = this._cellState;
   this._cellState = Object.create(null);
-  for (const k in this._frictionObj) {
-    const fr = this._frictionObj[k];
-    // Reuse existing cell state object to reduce GC pressure
-    let es = existingState && existingState[k];
-    if (es) {
-      es.friction = fr;
-      // Prefer snapshot _affordanceObj populated above; default to 0.1 when missing
-      const aff =
-        this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
-          ? this._affordanceObj[k]
-          : 0.1;
-      const desire =
-        this.pathDesireScores && this.pathDesireScores.get
-          ? this.pathDesireScores.get(k) || 0
-          : this.pathDesireScores
-            ? this.pathDesireScores[k] || 0
-            : 0;
-      const multi =
-        this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
-          ? this._multiFrictionObj[k]
-          : null;
-      es.affordance = aff;
-      es.desire = desire;
-      es.multi = multi;
-      this._cellState[k] = es;
-    } else {
-      const aff =
-        this._affordanceObj && typeof this._affordanceObj[k] !== 'undefined'
-          ? this._affordanceObj[k]
-          : 0.1;
-      const desire =
-        this.pathDesireScores && this.pathDesireScores.get
-          ? this.pathDesireScores.get(k) || 0
-          : this.pathDesireScores
-            ? this.pathDesireScores[k] || 0
-            : 0;
-      const multi =
-        this._multiFrictionObj && typeof this._multiFrictionObj[k] !== 'undefined'
-          ? this._multiFrictionObj[k]
-          : null;
-      this._cellState[k] = { friction: fr, affordance: aff, desire, multi };
-    }
+  const frictionObj = this._frictionObj;
+  const affordanceObj = this._affordanceObj;
+  const desireScores = this.pathDesireScores;
+  const multiFrictionObj = this._multiFrictionObj;
+
+  for (const k in frictionObj) {
+    const fr = frictionObj[k];
+    const aff = affordanceObj?.[k] ?? 0.1;
+    const desire = desireScores?.get ? (desireScores.get(k) ?? 0) : (desireScores?.[k] ?? 0);
+    const multi = multiFrictionObj?.[k] ?? null;
+    this._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
   }
 
   // Reuse cached per-target gradients when possible to avoid recomputing
@@ -294,7 +290,6 @@ export async function computeDesirePaths() {
 
   // Fast per-cell state (optional). If present, prefer this over separate Maps/objs.
   const cellState = this._cellState || null;
-  const stateEnabled = !!cellState;
 
   // Batch affordance updates so earlier agents don't deterministically bias later agents
   const affordanceDeltas = new Map();
@@ -342,7 +337,9 @@ export async function computeDesirePaths() {
           totalVolume,
           candidates: destCandidates.map((c) => ({ d: c.dest, w: c.weight })),
         });
-      } catch (e) {}
+      } catch (_e) {
+        // debug logging is non-critical
+      }
     }
 
     // Compute float allocations then convert to integer counts deterministically
@@ -389,21 +386,19 @@ export async function computeDesirePaths() {
         if (typeof destGradientObj[originCell] !== 'number') continue;
       }
 
-      // ensure per-target contrib object exists for this run
+     // ensure per-target contrib object exists for this run
       if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
         let simCurrent = originCell;
         const simTarget = destCell;
-        const simGradient = destGradient;
         let simDirection = getBearing(simCurrent, simTarget);
-        let simPath = [];
+        let simPath = [originCell];
 
         for (let tick = 0; tick < ticks; tick++) {
           // If target is adjacent, step directly to it to avoid overshoot
           if (gridDistance(simCurrent, simTarget) <= 1) {
             simPath.push(simTarget);
-            simCurrent = simTarget;
             break;
           }
 
@@ -433,7 +428,6 @@ export async function computeDesirePaths() {
           }
 
           if (hitTarget) {
-            simCurrent = simTarget;
             break;
           }
 
@@ -441,6 +435,17 @@ export async function computeDesirePaths() {
           simCurrent = nextStep;
 
           if (simCurrent === simTarget) break;
+        }
+
+        // Accumulate desire scores for every cell traversed by this agent
+        for (let p = 0; p < simPath.length; p++) {
+          const cell = simPath[p];
+          if (this.pathDesireScores?.set) {
+            const cur = this.pathDesireScores.get(cell) ?? 0;
+            this.pathDesireScores.set(cell, cur + 1);
+          } else {
+            this.pathDesireScores[cell] = (this.pathDesireScores[cell] ?? 0) + 1;
+          }
         }
 
         if (this.debugCompute) {
@@ -459,39 +464,32 @@ export async function computeDesirePaths() {
               sim,
               simPath,
             });
-          } catch (e) {}
-        }
-
-        const uniqueSim = new Set(simPath);
-        for (let cell of uniqueSim) {
-          pathDesireDeltas.set(cell, (pathDesireDeltas.get(cell) || 0) + 1);
-          affordanceDeltas.set(cell, (affordanceDeltas.get(cell) || 0) + 1);
-          perTargetContribs[destCell][cell] = (perTargetContribs[destCell][cell] || 0) + 1;
+         } catch (_e) {
+        // debug logging is non-critical
+      }
         }
       }
     }
   }
 
   // Apply accumulated path desire scores and affordance updates in one pass
-  for (let [cell, v] of pathDesireDeltas) {
+  for (const [cell, v] of pathDesireDeltas) {
     // Prefer consolidated _cellState for hot-path updates; keep Map synced for external consumers
     let newDesire;
-    if (this._cellState && this._cellState[cell]) {
-      newDesire = (this._cellState[cell].desire || 0) + v;
-      this._cellState[cell].desire = newDesire;
+    const cs = this._cellState?.[cell];
+    if (cs) {
+      newDesire = (cs.desire ?? 0) + v;
+      cs.desire = newDesire;
     } else {
-      newDesire =
-        (this.pathDesireScores.get
-          ? this.pathDesireScores.get(cell) || 0
-          : this.pathDesireScores[cell] || 0) + v;
+      newDesire = (this.pathDesireScores?.get ? (this.pathDesireScores.get(cell) ?? 0) : (this.pathDesireScores?.[cell] ?? 0)) + v;
     }
-    if (this.pathDesireScores && typeof this.pathDesireScores.set === 'function') {
+    if (this.pathDesireScores?.set) {
       this.pathDesireScores.set(cell, newDesire);
     } else {
       this.pathDesireScores[cell] = newDesire;
     }
   }
-  for (let [cell, v] of affordanceDeltas) {
+  for (const [cell, v] of affordanceDeltas) {
     updateAffordance.call(this, cell, v);
   }
 
@@ -507,22 +505,22 @@ export async function computeDesirePaths() {
       decayAffordance.call(this, cell);
     }
   } else {
-    for (let cell of this.affordanceMap.keys()) {
+    for (const cell of this.affordanceMap.keys()) {
       decayAffordance.call(this, cell);
     }
   }
 
   // Compute global peak flow for consistent color normalization in the renderer.
-  // Prefer Map iteration when available, otherwise iterate object keys.
   let peak = 0;
-  if (this.pathDesireScores) {
-    if (typeof this.pathDesireScores.values === 'function') {
-      for (const v of this.pathDesireScores.values()) {
+  const scores = this.pathDesireScores;
+  if (scores) {
+    if (scores.values) {
+      for (const v of scores.values()) {
         if (typeof v === 'number' && v > peak) peak = v;
       }
     } else {
-      for (const k in this.pathDesireScores) {
-        const v = this.pathDesireScores[k];
+      for (const k in scores) {
+        const v = scores[k];
         if (typeof v === 'number' && v > peak) peak = v;
       }
     }
@@ -647,10 +645,15 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
   if (this.debugCompute) {
     try {
       const dbg = [];
-      for (let i = 0; i < cellsArr.length; i++) dbg.push({ cell: cellsArr[i], S_ij: scores[i] });
+      for (let i = 0; i < cLen; i++) {
+        const s = scores[i];
+        if (typeof s === 'number') dbg.push({ cell: cellsArr[i], S_ij: s });
+      }
       dbg.sort((a, b) => b.S_ij - a.S_ij);
       console.log('getBestNextStep: candidates', { curr, topCandidates: dbg.slice(0, 12) });
-    } catch (e) {}
+    } catch (_e) {
+        // debug logging is non-critical
+      }
   }
 
   if (cellsArr.length === 0) {
@@ -677,7 +680,9 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
         if (this.debugCompute) {
           try {
             console.log('getBestNextStep:fallback', { curr, depth, bestCandidate, bestGrad });
-          } catch (e) {}
+          } catch (_e) {
+        // debug logging is non-critical
+      }
         }
         return bestCandidate;
       }
@@ -686,8 +691,10 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     return null; // Truly trapped
   }
 
-  // If TEMPERATURE > 0, use seeded softmax sampling to diversify agent choices
-  if (typeof TEMPERATURE === 'number' && TEMPERATURE > 0) {
+  // If TEMPERATURE > 0 and we have valid scores, use seeded softmax sampling
+  // to diversify agent choices. Skip when useGradient is false (scores are undefined).
+  const hasValidScores = useGradient && scores.length > 0 && typeof scores[0] === 'number';
+  if (hasValidScores && typeof TEMPERATURE === 'number' && TEMPERATURE > 0) {
     // Deterministic seeded RNG and two-pass softmax without extra arrays
     const seed = _strHash(agentId + ':' + curr);
     const rng = _lcg(seed);
@@ -716,7 +723,9 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
         if (this.debugCompute) {
           try {
             console.log('getBestNextStep: sampled', { curr, chosen, chosenScore: scores[i] });
-          } catch (e) {}
+          } catch (_e) {
+        // debug logging is non-critical
+      }
         }
         return chosen;
       }
@@ -725,17 +734,24 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     return cellsArr[cellsArr.length - 1];
   }
 
-  // Deterministic fallback: choose best using index-based tie-breaker
+ // Deterministic fallback: choose best using index-based tie-breaker
+  // When useGradient is false, fall back to affordance-based selection
+  // (highest affordance = most worn path = most attractive)
   let bestScore = -Infinity;
   let bestIndex = -1;
   for (let i = 0; i < cLen; i++) {
     const S_ij = scores[i];
-    if (S_ij > bestScore) {
+    const isScoreValid = typeof S_ij === 'number';
+    if (isScoreValid && S_ij > bestScore) {
       bestScore = S_ij;
       bestIndex = i;
-    } else if (Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost = (frictionArr[bestIndex] || 0) + (gNsArr[bestIndex] || Infinity);
-      const candidateCost = (frictionArr[i] || 0) + (gNsArr[i] || Infinity);
+    } else if (!isScoreValid && affsArr[i] > bestScore) {
+      // No gradient: pick highest-affordance cell
+      bestScore = affsArr[i];
+      bestIndex = i;
+    } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
+      const currentBestCost = (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
+      const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
       if (candidateCost < currentBestCost) {
         bestIndex = i;
       } else if (candidateCost === currentBestCost) {
@@ -750,7 +766,9 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
   if (this.debugCompute) {
     try {
       console.log('getBestNextStep: chosen', { curr, chosen, bestScore });
-    } catch (e) {}
+    } catch (_e) {
+        // debug logging is non-critical
+      }
   }
 
   return chosen;
@@ -839,21 +857,20 @@ function angleDiff(a, b) {
  * LIGHT_PARK is easily worn (more wear)
  */
 function updateAffordance(cell, volume = 1) {
-  // Prefer consolidated _cellState as authoritative source
-  const cs = this._cellState && this._cellState[cell];
-  const friction = cs ? cs.friction : (this._frictionObj && this._frictionObj[cell]);
+  const cs = this._cellState?.[cell];
+  const friction = cs?.friction ?? this._frictionObj?.[cell];
 
   // Skip update for permanent infrastructure
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
-  const current = cs ? cs.affordance : (this._affordanceObj && this._affordanceObj[cell]) || 0.1;
+  const current = cs?.affordance ?? this._affordanceObj?.[cell] ?? 0.1;
   const newVal = Math.min(SOFT_CAP, current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor));
 
   if (cs) {
     cs.affordance = newVal;
   } else if (this.affordanceMap) {
-    if (typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    if (this.affordanceMap.set) this.affordanceMap.set(cell, newVal);
     else this.affordanceMap[cell] = newVal;
   }
 }
@@ -864,63 +881,39 @@ function updateAffordance(cell, volume = 1) {
  * LIGHT_PARK recovers faster (path fades quickly)
  */
 function decayAffordance(cell) {
-  const cs = this._cellState && this._cellState[cell];
-  const friction = cs ? cs.friction : (this._frictionObj && this._frictionObj[cell]);
+  const cs = this._cellState?.[cell];
+  const friction = cs?.friction ?? this._frictionObj?.[cell];
 
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
-  const current = cs ? cs.affordance : (this._affordanceObj && this._affordanceObj[cell]) || 0.1;
+  const current = cs?.affordance ?? this._affordanceObj?.[cell] ?? 0.1;
   const newVal = Math.max(0.1, current - DECAY_RATE * recoveryFactor);
 
   if (cs) {
     cs.affordance = newVal;
   } else if (this.affordanceMap) {
-    if (typeof this.affordanceMap.set === 'function') this.affordanceMap.set(cell, newVal);
+    if (this.affordanceMap.set) this.affordanceMap.set(cell, newVal);
     else this.affordanceMap[cell] = newVal;
   }
 }
 
-function getNearestDest(agentCell, dests, gradients, agentId = '') {
-  // Build candidate list excluding the agent's own cell (prevents 'both' nodes returning themselves)
-  const candidates = [];
-  for (let d of dests) {
-    if (d === agentCell) continue;
-    // gradients may be a Map of Maps or a Map of plain-objects (after migration)
-    const grad = typeof gradients.get === 'function' ? gradients.get(d) : gradients[d];
-    if (!grad) continue;
-    const dist = typeof grad.get === 'function' ? grad.get(agentCell) : grad[agentCell];
-    const dVal = typeof dist === 'number' ? dist : Infinity;
-    if (!isFinite(dVal)) continue;
-    candidates.push({ dest: d, dist: dVal });
-  }
+/**
+ * Classify affordance from friction value using numeric thresholds.
+ * Returns { affordance, tier } where tier is one of:
+ * 'impassable', 'pavement', 'light_park', 'heavy_grass'
+ */
+function classifyAffordance(friction) {
+  const p = FRICTION_COSTS.PAVEMENT;
+  const l = FRICTION_COSTS.LIGHT_PARK;
+  const h = FRICTION_COSTS.HEAVY_GRASS;
+  const midPL = (p + l) / 2;
+  const midLH = (l + h) / 2;
 
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0].dest;
-
-  // Use inverse-distance weighting to distribute agents across multiple destinations.
-  // Deterministic per-agent via seeded LCG using agentId + agentCell.
-  const seed = _strHash(agentId + ':' + agentCell);
-  const rng = _lcg(seed);
-
-  // compute unnormalized scores and sum without intermediate arrays
-  let sum = 0;
-  const scores = new Array(candidates.length);
-  for (let i = 0; i < candidates.length; i++) {
-    const sVal = 1 / (1 + candidates[i].dist);
-    scores[i] = sVal;
-    sum += sVal;
-  }
-
-  const r = rng() * sum;
-  let acc = 0;
-  for (let i = 0; i < candidates.length; i++) {
-    acc += scores[i];
-    if (r <= acc) {
-      return candidates[i].dest;
-    }
-  }
-  return candidates[0].dest;
+  if (friction >= FRICTION_COSTS.IMPASSABLE) return { affordance: AFFORDANCE.IMPASSABLE, tier: 'impassable' };
+  if (friction < midPL) return { affordance: AFFORDANCE.PAVEMENT, tier: 'pavement' };
+  if (friction < midLH) return { affordance: AFFORDANCE.LIGHT_PARK, tier: 'light_park' };
+  return { affordance: AFFORDANCE.HEAVY_GRASS, tier: 'heavy_grass' };
 }
 
 /**
@@ -929,61 +922,15 @@ function getNearestDest(agentCell, dests, gradients, agentId = '') {
 export function initializeAffordanceMap() {
   this.affordanceMap.clear();
 
-  // Use numeric thresholds so slight friction modifications (from blur) map sensibly
-  const p = FRICTION_COSTS.PAVEMENT;
-  const l = FRICTION_COSTS.LIGHT_PARK;
-  const h = FRICTION_COSTS.HEAVY_GRASS;
-  const midPL = (p + l) / 2;
-  const midLH = (l + h) / 2;
+  for (const [cell, friction] of this.cellFrictionMap) {
+    const { affordance } = classifyAffordance(friction);
+    this.affordanceMap.set(cell, affordance);
 
-  for (let [cell, friction] of this.cellFrictionMap) {
-    if (friction >= FRICTION_COSTS.IMPASSABLE) {
-      this.affordanceMap.set(cell, AFFORDANCE.IMPASSABLE);
-      if (this._cellState) {
-        if (!this._cellState[cell])
-          this._cellState[cell] = {
-            friction: friction,
-            affordance: AFFORDANCE.IMPASSABLE,
-            desire: 0,
-            multi: null,
-          };
-        else this._cellState[cell].affordance = AFFORDANCE.IMPASSABLE;
-      }
-    } else if (friction < midPL) {
-      this.affordanceMap.set(cell, AFFORDANCE.PAVEMENT);
-      if (this._cellState) {
-        if (!this._cellState[cell])
-          this._cellState[cell] = {
-            friction: friction,
-            affordance: AFFORDANCE.PAVEMENT,
-            desire: 0,
-            multi: null,
-          };
-        else this._cellState[cell].affordance = AFFORDANCE.PAVEMENT;
-      }
-    } else if (friction < midLH) {
-      this.affordanceMap.set(cell, AFFORDANCE.LIGHT_PARK);
-      if (this._cellState) {
-        if (!this._cellState[cell])
-          this._cellState[cell] = {
-            friction: friction,
-            affordance: AFFORDANCE.LIGHT_PARK,
-            desire: 0,
-            multi: null,
-          };
-        else this._cellState[cell].affordance = AFFORDANCE.LIGHT_PARK;
-      }
-    } else {
-      this.affordanceMap.set(cell, AFFORDANCE.HEAVY_GRASS);
-      if (this._cellState) {
-        if (!this._cellState[cell])
-          this._cellState[cell] = {
-            friction: friction,
-            affordance: AFFORDANCE.HEAVY_GRASS,
-            desire: 0,
-            multi: null,
-          };
-        else this._cellState[cell].affordance = AFFORDANCE.HEAVY_GRASS;
+    if (this._cellState) {
+      if (!this._cellState[cell]) {
+        this._cellState[cell] = { friction, affordance, desire: 0, multi: null };
+      } else {
+        this._cellState[cell].affordance = affordance;
       }
     }
   }
@@ -1158,7 +1105,7 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
   for (const o of origins) {
     const count = (newAssignedCounts[o] && newAssignedCounts[o][targetCell]) || 0;
     if (!count || count <= 0) continue;
-    for (let sim = 0; sim < count; sim++) {
+     for (let sim = 0; sim < count; sim++) {
       const simAgentId = `${o}:${targetCell}:${sim}`;
       let simCurrent = o;
       const simTarget = targetCell;
@@ -1168,7 +1115,6 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
       for (let tick = 0; tick < ticks; tick++) {
         if (gridDistance(simCurrent, simTarget) <= 1) {
           simPath.push(simTarget);
-          simCurrent = simTarget;
           break;
         }
 
@@ -1194,7 +1140,6 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
           }
         }
         if (hitTarget) {
-          simCurrent = simTarget;
           break;
         }
         simDirection = getBearing(simCurrent, nextStep);

@@ -478,9 +478,11 @@ describe('getSurface', () => {
     expect(result.cost).toBe('PAVEMENT');
   });
 
-  it('should throw when properties is empty and sourceLayer is transportation', () => {
-    // When cls is undefined and layerId is transportation, cls.includes throws
-    expect(() => getSurface({ sourceLayer: 'transportation', properties: {} })).toThrow();
+  it('should handle empty properties safely on transportation layer', () => {
+    // Previously this threw because cls.includes was called on undefined
+    const result = getSurface({ sourceLayer: 'transportation', properties: {} });
+    expect(result.cost).toBe('PAVEMENT');
+    expect(result.layer).toBe('0');
   });
 
   it('should handle custom layer value', () => {
@@ -491,12 +493,12 @@ describe('getSurface', () => {
     expect(result.layer).toBe('0');
   });
 
-  it('should handle non-numeric layer value (produces NaN)', () => {
+  it('should handle non-numeric layer value (defaults to 0)', () => {
     const result = getSurface({
       properties: { layer: 'abc', class: 'secondary' },
       sourceLayer: 'transportation',
     });
-    // parseInt('abc', 10) returns NaN, which toString() converts to 'NaN'
-    expect(result.layer).toBe('NaN');
+    // parseInt('abc', 10) returns NaN, now safely defaults to '0'
+    expect(result.layer).toBe('0');
   });
 });

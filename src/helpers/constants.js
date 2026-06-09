@@ -66,176 +66,186 @@ export const IMPASSABLE_BLUR_FRICTION_ADD = 3.0;
 export const IMPASSABLE_BLUR_AFFORDANCE_PENALTY = 0.4;
 
 /**
+ * Parse the vertical layer value safely.
+ * Returns '0' for NaN or missing values.
+ */
+function parseLayerValue(layer) {
+  const parsed = parseInt(layer ?? '0', 10);
+  return Number.isFinite(parsed) ? String(parsed) : '0';
+}
+
+/**
+ * Resolve vertical layer adjustments for bridges and tunnels.
+ */
+function resolveVerticalLayer(rawLayer, brunnel) {
+  let layer = parseLayerValue(rawLayer);
+  if (layer === '0') {
+    if (brunnel === 'bridge') layer = '1';
+    if (brunnel === 'tunnel') layer = '-1';
+  }
+  return layer;
+}
+
+/**
+ * Check if a surface is blocked by indoor/interior status.
+ */
+function isIndoorIndoors(properties) {
+  const { indoor } = properties;
+  return indoor === 1 || indoor === 'true' || indoor === true;
+}
+
+/**
+ * Check if a surface is not accessible by foot.
+ */
+function isFootRestricted(properties) {
+  const { foot, access } = properties;
+  return foot === 'no' || foot === 'private' || access === 'no' || access === 'private';
+}
+
+/**
+ * Check if a surface is under construction.
+ */
+function isUnderConstruction(cls) {
+  return cls.includes('_construction');
+}
+
+/**
+ * Classify transportation path subclass to friction cost.
+ */
+function classifyPathSubclass(subclass) {
+  const easyPaths = ['pedestrian', 'footway', 'corridor', 'platform', 'path'];
+  if (easyPaths.includes(subclass)) return 'PAVEMENT';
+  if (subclass === 'bridleway' || subclass === 'cycleway') return 'LIGHT_PARK';
+  if (subclass === 'steps') return 'HEAVY_GRASS';
+  return 'PAVEMENT';
+}
+
+/**
+ * Classify road hierarchy to friction cost.
+ */
+function classifyRoadHierarchy(cls) {
+  const highSpeed = ['motorway', 'trunk', 'primary', 'raceway', 'busway', 'bus_guideway'];
+  const mediumSpeed = ['secondary', 'tertiary'];
+  const lowSpeed = ['minor', 'service'];
+  if (highSpeed.includes(cls)) return 'IMPASSABLE';
+  if (mediumSpeed.includes(cls)) return 'PAVEMENT';
+  if (lowSpeed.includes(cls)) return 'PAVEMENT';
+  return null;
+}
+
+/**
+ * Classify landcover subclass to friction cost.
+ */
+function classifyLandcover(cls, subclass) {
+  const impassableSub = [
+    'glacier', 'bare_rock', 'scree', 'swamp', 'bog', 'marsh',
+    'mangrove', 'reedbed', 'saltmarsh', 'tidalflat', 'tundra',
+  ];
+  if (['ice', 'rock', 'wetland'].includes(cls) || impassableSub.includes(subclass)) {
+    return 'IMPASSABLE';
+  }
+  const heavySub = [
+    'forest', 'wood', 'scrub', 'shrubbery', 'heath', 'sand',
+    'beach', 'dune', 'fell',
+  ];
+  if (heavySub.includes(subclass)) return 'HEAVY_GRASS';
+  const lightSub = [
+    'grass', 'grassland', 'meadow', 'park', 'garden', 'golf_course',
+    'village_green', 'recreation_ground', 'flowerbed', 'wet_meadow',
+  ];
+  if (lightSub.includes(subclass)) return 'LIGHT_PARK';
+  const managedSub = ['farm', 'farmland', 'allotments', 'orchard', 'vineyard', 'plant_nursery'];
+  if (managedSub.includes(subclass)) return 'HEAVY_GRASS';
+  return null;
+}
+
+/**
+ * Classify landuse to friction cost.
+ */
+function classifyLanduse(cls) {
+  const restricted = ['military', 'industrial', 'quarry', 'dam', 'railway'];
+  if (restricted.includes(cls)) return 'IMPASSABLE';
+  const urban = [
+    'residential', 'commercial', 'retail', 'school', 'university',
+    'kindergarten', 'college', 'library', 'hospital', 'bus_station',
+  ];
+  if (urban.includes(cls)) return 'PAVEMENT';
+  const recreational = [
+    'stadium', 'pitch', 'playground', 'track', 'theme_park', 'zoo', 'cemetery',
+  ];
+  if (recreational.includes(cls)) return 'LIGHT_PARK';
+  const urbanFabric = ['suburb', 'quarter', 'neighbourhood', 'garages'];
+  if (urbanFabric.includes(cls)) return 'PAVEMENT';
+  return null;
+}
+
+/**
+ * Check if a transportation class is a railway.
+ */
+function isRailway(cls, subclass) {
+  const rails = [
+    'rail', 'narrow_gauge', 'preserved', 'funicular',
+    'subway', 'light_rail', 'monorail', 'tram',
+  ];
+  return cls === 'railway' || rails.includes(subclass);
+}
+
+/**
  * Exhaustive surface-only pedestrian friction classification.
  */
 export function getSurface(feature) {
   const layerId = feature.sourceLayer || '';
-  const { layer, class: cls, subclass, brunnel, indoor, foot, access } = feature.properties;
-  let relativeVerticalLayer = parseInt(layer ?? '0', 10).toString();
+  const { layer, class: cls, subclass, brunnel } = feature.properties;
+  const safeCls = cls == null ? '' : String(cls);
+  const safeSubclass = subclass == null ? '' : String(subclass);
 
   // 1. GLOBAL FILTER: Ignore sub-surface and interior
-  if (indoor === 1 || indoor === 'true' || indoor === true)
-    return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
+  if (isIndoorIndoors(feature.properties)) {
+    return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
+  }
 
   // 2. LAYER: TRANSPORTATION
   if (layerId === 'transportation') {
-    // 0. Vertical structures (Bridges/Tunnels): Even if tagged as "surface," these often have stairs, ramps, or other barriers that can impede pedestrian flow. For simplicity, we'll treat all as impassable, but this could be refined with additional tags in the future.
-    if (relativeVerticalLayer === '0') {
-      if (brunnel === 'bridge') relativeVerticalLayer = '1';
-      if (brunnel === 'tunnel') relativeVerticalLayer = '-1';
+    const verticalLayer = resolveVerticalLayer(layer, brunnel);
+
+    if (isFootRestricted(feature.properties)) {
+      return { cost: 'IMPASSABLE', layer: verticalLayer };
+    }
+    if (isUnderConstruction(safeCls)) {
+      return { cost: 'IMPASSABLE', layer: verticalLayer };
+    }
+    if (safeCls === 'path') {
+      return { cost: classifyPathSubclass(safeSubclass), layer: verticalLayer };
+    }
+    if (brunnel === 'ford') {
+      return { cost: 'HEAVY_GRASS', layer: verticalLayer };
     }
 
-    // 1. Non accesible by foot (Explicitly tagged as such)
-    if (foot === 'no' || foot === 'private' || access === 'no' || access === 'private')
-      return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
+    const roadResult = classifyRoadHierarchy(safeCls);
+    if (roadResult !== null) return { cost: roadResult, layer: verticalLayer };
+    if (safeCls === 'track') return { cost: 'LIGHT_PARK', layer: verticalLayer };
+    if (isRailway(safeCls, safeSubclass)) return { cost: 'IMPASSABLE', layer: verticalLayer };
 
-    // 2. CONSTRUCTION CHECK (Always assume danger/impassability)
-    if (cls.includes('_construction')) return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
-
-    // 3. SPECIALIZED PATHS (Fine-grained subclass control)
-    // If it's in the 'path' class, the subclass tells us exactly how walkable it is.
-    if (cls === 'path') {
-      const easyPaths = ['pedestrian', 'footway', 'corridor', 'platform', 'path'];
-      if (easyPaths.includes(subclass)) return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
-      if (subclass === 'bridleway' || subclass === 'cycleway')
-        return { cost: 'LIGHT_PARK', layer: relativeVerticalLayer }; // Walkable but often shared with horses/cycles, so slightly less comfortable.
-      if (subclass === 'steps') return { cost: 'HEAVY_GRASS', layer: relativeVerticalLayer }; // Technically walkable, but often less comfortable and more effortful, especially for high foot traffic or accessibility needs.
-      return { cost: 'PAVEMENT', layer: relativeVerticalLayer }; // Default for generic 'path'
-    }
-    if (brunnel === 'ford') return { cost: 'HEAVY_GRASS', layer: relativeVerticalLayer }; // Shallow water crossings can be walkable but less comfortable.
-
-    // 4. ROAD HIERARCHY
-    const highSpeed = ['motorway', 'trunk', 'primary', 'raceway', 'busway', 'bus_guideway'];
-    const mediumSpeed = ['secondary', 'tertiary'];
-    const lowSpeed = ['minor', 'service'];
-
-    if (highSpeed.includes(cls)) return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
-    if (mediumSpeed.includes(cls)) return { cost: 'PAVEMENT', layer: relativeVerticalLayer }; // Assuming sidewalk existence
-    if (lowSpeed.includes(cls)) return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
-
-    // 5. RURAL/TRACKS
-    if (cls === 'track') return { cost: 'LIGHT_PARK', layer: relativeVerticalLayer }; // Typically unpaved but walkable, often in rural areas or parks.
-
-    // 6. RAILWAYS (Generally impassable)
-    // Even if 'surface' level, rails are physical barriers.
-    const rails = [
-      'rail',
-      'narrow_gauge',
-      'preserved',
-      'funicular',
-      'subway',
-      'light_rail',
-      'monorail',
-      'tram',
-    ];
-    if (cls === 'railway' || rails.includes(subclass))
-      return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
-
-    return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
+    return { cost: 'PAVEMENT', layer: verticalLayer };
   }
 
-  // 3. LAYER: LANDCOVER (Granular Surface Analysis)
+  // 3. LAYER: LANDCOVER
   if (layerId === 'landcover') {
-    // 1. IMPASSABLE: High-risk or non-solid terrain
-    const impassableSub = [
-      'glacier',
-      'bare_rock',
-      'scree',
-      'swamp',
-      'bog',
-      'marsh',
-      'mangrove',
-      'reedbed',
-      'saltmarsh',
-      'tidalflat',
-      'tundra',
-    ];
-    if (['ice', 'rock', 'wetland'].includes(cls) || impassableSub.includes(subclass)) {
-      return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
-    }
-
-    // 2. HEAVY_GRASS: Dense vegetation or shifting ground
-    const heavySub = [
-      'forest',
-      'wood',
-      'scrub',
-      'shrubbery',
-      'heath',
-      'sand',
-      'beach',
-      'dune',
-      'fell',
-    ];
-    if (heavySub.includes(subclass)) {
-      return { cost: 'HEAVY_GRASS', layer: relativeVerticalLayer };
-    }
-
-    // 3. LIGHT_PARK: Maintained leisure or low vegetation
-    const lightSub = [
-      'grass',
-      'grassland',
-      'meadow',
-      'park',
-      'garden',
-      'golf_course',
-      'village_green',
-      'recreation_ground',
-      'flowerbed',
-      'wet_meadow',
-    ];
-    if (lightSub.includes(subclass)) {
-      return { cost: 'LIGHT_PARK', layer: relativeVerticalLayer };
-    }
-
-    // 4. MANAGED: Cultivated areas
-    const managedSub = ['farm', 'farmland', 'allotments', 'orchard', 'vineyard', 'plant_nursery'];
-    if (managedSub.includes(subclass)) {
-      return { cost: 'HEAVY_GRASS', layer: relativeVerticalLayer };
-    }
+    const result = classifyLandcover(safeCls, safeSubclass);
+    if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
 
   // 4. LAYER: LANDUSE
   if (layerId === 'landuse') {
-    // 1. IMPASSABLE: Hazard or Restriction
-    const restricted = ['military', 'industrial', 'quarry', 'dam', 'railway'];
-    if (restricted.includes(cls)) return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
-
-    // 2. PAVEMENT: High-Infrastructure / Urban Density
-    const urban = [
-      'residential',
-      'commercial',
-      'retail',
-      'school',
-      'university',
-      'kindergarten',
-      'college',
-      'library',
-      'hospital',
-      'bus_station',
-    ];
-    if (urban.includes(cls)) return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
-
-    // 3. LIGHT_PARK: Recreational Facilities
-    const recreational = [
-      'stadium',
-      'pitch',
-      'playground',
-      'track',
-      'theme_park',
-      'zoo',
-      'cemetery',
-    ];
-    if (recreational.includes(cls)) return { cost: 'LIGHT_PARK', layer: relativeVerticalLayer };
-
-    // 4. TRANSITIONAL/UNKNOWN: General Urban Fabric
-    const urbanFabric = ['suburb', 'quarter', 'neighbourhood', 'garages'];
-    if (urbanFabric.includes(cls)) return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
+    const result = classifyLanduse(safeCls);
+    if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
 
   // 5. LAYER: BUILDING or WATER (Physical Barrier)
-  if (layerId === 'building' || layerId === 'water')
-    return { cost: 'IMPASSABLE', layer: relativeVerticalLayer };
+  if (layerId === 'building' || layerId === 'water') {
+    return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
+  }
 
   // 6. Default assumption for unclassified features
-  return { cost: 'PAVEMENT', layer: relativeVerticalLayer };
+  return { cost: 'PAVEMENT', layer: parseLayerValue(layer) };
 }

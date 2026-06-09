@@ -16,6 +16,8 @@ const MAX_WORKERS = Math.min(
   )
 );
 
+const WORKER_TASK_TIMEOUT = 300_000; // 5m timeout per worker task
+
 const workerPool = [];
 const idleWorkers = [];
 const waitingAcquires = [];
@@ -68,11 +70,15 @@ function splitIntoChunks(items, chunkCount) {
 }
 
 function mergeFastScanEntries(target, source) {
-  for (const cell in source) {
+  const sourceKeys = Object.keys(source);
+  for (let k = 0; k < sourceKeys.length; k++) {
+    const cell = sourceKeys[k];
     let targetLayerMap = target[cell];
     if (!targetLayerMap) targetLayerMap = target[cell] = Object.create(null);
     const sourceLayerMap = source[cell];
-    for (const layer in sourceLayerMap) {
+    const layerKeys = Object.keys(sourceLayerMap);
+    for (let l = 0; l < layerKeys.length; l++) {
+      const layer = layerKeys[l];
       const nextValue = sourceLayerMap[layer];
       if (targetLayerMap[layer] === undefined || nextValue > targetLayerMap[layer])
         targetLayerMap[layer] = nextValue;
@@ -81,7 +87,9 @@ function mergeFastScanEntries(target, source) {
 }
 
 function mergeScalarEntries(target, source) {
-  for (const cell in source) {
+  const sourceKeys = Object.keys(source);
+  for (let k = 0; k < sourceKeys.length; k++) {
+    const cell = sourceKeys[k];
     const nextValue = source[cell];
     if (target[cell] === undefined || nextValue > target[cell]) target[cell] = nextValue;
   }
@@ -101,7 +109,7 @@ function runWorker(kind, payload) {
   let slotPromise;
   try {
     slotPromise = acquireWorkerSlot();
-  } catch (error) {
+  } catch {
     return Promise.resolve(runLocally(kind, payload));
   }
 
@@ -109,22 +117,39 @@ function runWorker(kind, payload) {
     (slot) =>
       new Promise((resolve, reject) => {
         const { worker } = slot;
+        let settled = false;
 
-        const handleMessage = (event) => {
-          const data = event.data || {};
+        const cleanup = () => {
           worker.removeEventListener('message', handleMessage);
           worker.removeEventListener('error', handleError);
+          if (timerId) clearTimeout(timerId);
+        };
+
+        const handleMessage = (event) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
           releaseWorkerSlot(slot);
+          const data = event.data ?? {};
           if (data.ok) resolve(data.result);
-          else reject(new Error(data.error || 'Spatial worker task failed'));
+          else reject(new Error(data.error ?? 'Spatial worker task failed'));
         };
 
         const handleError = (event) => {
-          worker.removeEventListener('message', handleMessage);
-          worker.removeEventListener('error', handleError);
+          if (settled) return;
+          settled = true;
+          cleanup();
           retireWorkerSlot(slot);
-          reject(event.error || new Error(event.message || 'Spatial worker error'));
+          reject(event.error ?? new Error(event.message ?? 'Spatial worker error'));
         };
+
+        const timerId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          retireWorkerSlot(slot);
+          reject(new Error(`Spatial worker task timed out after ${WORKER_TASK_TIMEOUT}ms`));
+        }, WORKER_TASK_TIMEOUT);
 
         worker.addEventListener('message', handleMessage);
         worker.addEventListener('error', handleError);
@@ -132,8 +157,8 @@ function runWorker(kind, payload) {
         try {
           worker.postMessage({ kind, payload });
         } catch (error) {
-          worker.removeEventListener('message', handleMessage);
-          worker.removeEventListener('error', handleError);
+          settled = true;
+          cleanup();
           retireWorkerSlot(slot);
           reject(error);
         }
@@ -149,6 +174,9 @@ export async function runGradientBatches(targets, frictionSource) {
     frictionSource && typeof frictionSource.entries !== 'function'
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
+
+  // Guard: empty friction source means no walkable cells; return empty gradients
+  if (Object.keys(frictionEntries).length === 0) return Object.create(null);
   const workerCount = Math.min(2, targets.length);
   if (workerCount <= 1) return runLocally('gradient-batch', { targets, frictionEntries });
 
@@ -160,7 +188,10 @@ export async function runGradientBatches(targets, frictionSource) {
   const merged = Object.create(null);
   for (let i = 0; i < results.length; i++) {
     const batch = results[i];
-    for (const cell in batch) merged[cell] = batch[cell];
+    const batchKeys = Object.keys(batch);
+    for (let k = 0; k < batchKeys.length; k++) {
+      merged[batchKeys[k]] = batch[batchKeys[k]];
+    }
   }
   return merged;
 }
@@ -175,7 +206,7 @@ export async function runFastScanTask(viewHexes, features) {
     };
   }
 
-  const featureCount = features ? features.length : 0;
+  const featureCount = features?.length ?? 0;
   if (featureCount <= 1) return runWorker('fast-scan', { viewHexes, features });
 
   const workerCount = Math.min(MAX_WORKERS, featureCount);
@@ -189,9 +220,9 @@ export async function runFastScanTask(viewHexes, features) {
   const multiFrictionEntries = Object.create(null);
   const cellFrictionEntries = Object.create(null);
   for (let i = 0; i < results.length; i++) {
-    const batch = results[i] || {};
-    mergeFastScanEntries(multiFrictionEntries, batch.multiFrictionEntries || Object.create(null));
-    mergeScalarEntries(cellFrictionEntries, batch.cellFrictionEntries || Object.create(null));
+    const batch = results[i] ?? {};
+    mergeFastScanEntries(multiFrictionEntries, batch.multiFrictionEntries ?? Object.create(null));
+    mergeScalarEntries(cellFrictionEntries, batch.cellFrictionEntries ?? Object.create(null));
   }
 
   const blur = await runImpassableBlurTask(cellFrictionEntries);
