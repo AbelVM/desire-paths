@@ -6,6 +6,7 @@ import {
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
 } from './constants.js';
 import { runFastScanTask } from './spatialWorker.js';
+import { clearComputeCaches } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -108,6 +109,9 @@ export async function triggerFastScan() {
 
   const build = await runFastScanTask(viewHexes, buildFeatures);
 
+  this._mappingGeneration = (this._mappingGeneration ?? 0) + 1;
+  clearComputeCaches.call(this);
+
   // Reset friction maps
   this.cellFrictionMap.clear();
 
@@ -187,7 +191,7 @@ export async function triggerFastScan() {
     }
     this.affordanceMap.set(cell, aff);
     this._affordanceObj[cell] = aff;
-    this._cellState[cell] = { friction: fr, affordance: aff, multi };
+    this._cellState[cell] = { friction: fr, affordance: aff, desire: 0, multi };
   }
 
   this.updateLayers();

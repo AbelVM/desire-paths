@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeDesirePaths } from '../src/helpers/compute.js';
 import { latLngToCell, gridDistance, gridDisk } from 'h3-js';
-import { FRICTION_COSTS } from '../src/helpers/constants.js';
+import { FRICTION_COSTS, AFFORDANCE } from '../src/helpers/constants.js';
 
 /**
  * Regression tests for computeDesirePaths — ensures the simulation
@@ -308,5 +308,23 @@ describe('computeDesirePaths regression', () => {
 
     // Should work with plain object pathDesireScores
     expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
+  });
+
+  it('should increase affordance on traversed non-pavement cells', async () => {
+    const pathCells = buildLinearPath(40.4169, -3.7035, 5);
+    const ctx = buildContext(pathCells);
+    for (const cell of pathCells) {
+      ctx._frictionObj[cell] = FRICTION_COSTS.LIGHT_PARK;
+      ctx.cellFrictionMap.set(cell, FRICTION_COSTS.LIGHT_PARK);
+      ctx._affordanceObj[cell] = AFFORDANCE.LIGHT_PARK;
+    }
+
+    const originCell = pathCells[0];
+    const before = ctx._affordanceObj[originCell];
+
+    await computeDesirePaths.call(ctx);
+
+    const after = ctx._cellState?.[originCell]?.affordance ?? ctx._affordanceObj?.[originCell];
+    expect(after).toBeGreaterThan(before);
   });
 });

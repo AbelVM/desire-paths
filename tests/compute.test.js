@@ -5,11 +5,14 @@ import {
   _isVisible,
   _getBearing,
   _getBestNextStep,
+  _getGradientDirection,
+  _estimateMaxTicks,
   getComputeCacheStats,
   initializeAffordanceMap,
   computeAndCacheGradient,
   getCachedGradient,
   clearGradientCache,
+  clearComputeCaches,
   addDestination,
   updateDestinationWeight,
   removeDestination,
@@ -854,5 +857,63 @@ describe('_getBestNextStep', () => {
     };
     const result = _getBestNextStep.call(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
+  });
+});
+
+describe('clearComputeCaches', () => {
+  it('should clear path, disk, visibility, and gradient caches', () => {
+    const map = {
+      _computePathCacheObj: { a: { b: [1] } },
+      _computePathCacheOrder: ['a'],
+      _computeDiskCacheObj: { c: { 1: [2] } },
+      _computeDiskCacheOrder: ['c'],
+      _visibilityCacheObj: { d: { e: true } },
+      _visibilityCacheOrder: ['d'],
+      _gradientCacheObj: { f: { f: 0 } },
+      _gradientCacheGen: 1,
+      _visibilityCacheGen: 1,
+    };
+    clearComputeCaches.call(map);
+    expect(map._computePathCacheObj).toBeUndefined();
+    expect(map._visibilityCacheObj).toBeUndefined();
+    expect(map._gradientCacheObj).toBeDefined();
+    expect(Object.keys(map._gradientCacheObj).length).toBe(0);
+    expect(map._gradientCacheGen).toBeUndefined();
+  });
+});
+
+describe('estimateMaxTicks', () => {
+  it('should cap ticks using origin-destination distance', () => {
+    const origin = latLngToCell(40.4169, -3.7035, 15);
+    const dest = latLngToCell(40.417, -3.7034, 15);
+    const ticks = _estimateMaxTicks(origin, dest, 1000);
+    expect(ticks).toBeGreaterThan(0);
+    expect(ticks).toBeLessThanOrEqual(5000);
+  });
+});
+
+describe('getGradientDirection', () => {
+  it('should return a bearing toward the steepest descent neighbor', () => {
+    const center = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(center, 1).filter((c) => c !== center);
+    const target = neighbors[0];
+    const gradient = Object.create(null);
+    gradient[center] = 10;
+    for (const n of neighbors) gradient[n] = 5;
+    gradient[target] = 1;
+
+    const map = {
+      _frictionObj: Object.create(null),
+      cellFrictionMap: new Map(),
+    };
+    for (const n of [center, ...neighbors]) {
+      map._frictionObj[n] = 1;
+      map.cellFrictionMap.set(n, 1);
+    }
+
+    const bearing = _getGradientDirection.call(map, center, gradient);
+    expect(typeof bearing).toBe('number');
+    expect(bearing).toBeGreaterThanOrEqual(0);
+    expect(bearing).toBeLessThan(360);
   });
 });

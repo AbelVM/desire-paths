@@ -1,3 +1,5 @@
+import { clearComputeCaches } from './compute.js';
+
 export function setupUI(map) {
   const panel = document.querySelector('.panel');
   const modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
@@ -137,16 +139,15 @@ export function setupUI(map) {
     map._affordanceObj = undefined;
     map._multiFrictionObj = undefined;
     map._cellState = undefined;
-    map._computePathCacheObj = undefined;
-    map._computePathCacheOrder = undefined;
-    map._computeDiskCacheObj = undefined;
-    map._computeDiskCacheOrder = undefined;
-    map._visibilityCacheObj = undefined;
-    map._visibilityCacheOrder = undefined;
-    map._gradientCacheObj = undefined;
     map._perTargetContribs = undefined;
     map._assignedCounts = undefined;
     map._targetWeights = undefined;
+    map._mappingGeneration = undefined;
+    map._frictionSnapshotGen = undefined;
+    map._multiFrictionSnapshotGen = undefined;
+    map._gradientCacheGen = undefined;
+    map._visibilityCacheGen = undefined;
+    clearComputeCaches.call(map);
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
     syncFlowReadout();

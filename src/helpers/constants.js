@@ -55,6 +55,11 @@ export const MAX_EXPECTED_VOLUME = 100; // A scaling factor for how much "wear" 
 
 export const TEMPERATURE = 0.5; // Controls randomness in agent decision-making: 0 = completely deterministic, higher values increase randomness (tuned based on testing)
 
+// Simulation tick budget: cap steps per agent journey to keep UI responsive
+export const MAX_SIM_TICKS = 5000;
+export const SIM_TICK_BUFFER = 8; // multiplier on H3 grid distance between origin and destination
+export const YIELD_EVERY_AGENTS = 5; // cooperative yield interval during main-thread simulation
+
 // IMPASSABLE blur configuration
 // Radius (in H3 rings) to blur impassable influence (1 = immediate neighbors)
 export const IMPASSABLE_BLUR_RADIUS = 1;
