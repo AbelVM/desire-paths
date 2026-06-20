@@ -1,4 +1,4 @@
-import { cellToLatLng } from 'h3-js';
+import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
 //import { Deck } from '@deck.gl/core';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';

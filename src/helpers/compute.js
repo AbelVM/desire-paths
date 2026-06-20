@@ -15,6 +15,7 @@ import {
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
   YIELD_EVERY_AGENTS,
+  SIM_YIELD_MS,
 } from './constants.js';
 import { runGradientBatches } from './spatialWorker.js';
 
@@ -249,6 +250,25 @@ function estimateMaxTicks(origin, dest, hexCount) {
   return Math.min(MAX_SIM_TICKS, pathBudget, globalBudget);
 }
 
+function nowMs() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+function resetYieldDeadline() {
+  return nowMs() + SIM_YIELD_MS;
+}
+
+export async function yieldToMain() {
+  const scheduler = globalThis.scheduler;
+  if (scheduler && typeof scheduler.yield === 'function') {
+    await scheduler.yield();
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 /** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
 function getGradientDirection(curr, gradientObj) {
   if (!gradientObj) return null;
@@ -372,6 +392,93 @@ function runSingleAgentPath(ctx, {
   return simPath;
 }
 
+function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
+  const destCandidates = [];
+  let destWeightSum = 0;
+  for (let d = 0; d < destinations.length; d++) {
+    const destCell = destinations[d];
+    if (destCell === originCell) continue;
+    const grad = goalGradients.get(destCell);
+    if (!grad) continue;
+    const hasOrigin =
+      typeof grad.has === 'function'
+        ? grad.has(originCell)
+        : typeof grad[originCell] === 'number';
+    if (!hasOrigin) continue;
+    const w = ctx.simulationNodes[destCell]?.weight || 1;
+    destCandidates.push({ dest: destCell, weight: w });
+    destWeightSum += w;
+  }
+  return { destCandidates, destWeightSum };
+}
+
+function allocateDestinationCounts(destCandidates, destWeightSum, totalVolume) {
+  if (!destCandidates.length || destWeightSum <= 0) return [];
+  const floats = destCandidates.map((c) => (c.weight / destWeightSum) * totalVolume);
+  const floors = floats.map((f) => Math.floor(f));
+  const assigned = floors.slice();
+  let allocated = floors.reduce((a, b) => a + b, 0);
+  let leftover = totalVolume - allocated;
+
+  if (leftover > 0) {
+    const frac = floats.map((f, i) => ({
+      i,
+      frac: f - floors[i],
+      weight: destCandidates[i].weight,
+    }));
+    frac.sort((a, b) => {
+      if (b.frac !== a.frac) return b.frac - a.frac;
+      return destCandidates[b.i].weight - destCandidates[a.i].weight;
+    });
+    for (let k = 0; k < leftover; k++) assigned[frac[k].i] += 1;
+  }
+  return assigned;
+}
+
+function buildSimulationPlan(ctx, origins, destinations, goalGradients) {
+  const plan = [];
+  const assignedCounts = Object.create(null);
+  let totalAgents = 0;
+
+  for (let o = 0; o < origins.length; o++) {
+    const originCell = origins[o];
+    const totalVolume = Math.max(
+      1,
+      Math.round((ctx.simulationNodes[originCell]?.weight || 1) * AGENTS_PER_DESTINATION)
+    );
+    const { destCandidates, destWeightSum } = getReachableDestinations(
+      ctx,
+      originCell,
+      destinations,
+      goalGradients
+    );
+    if (!destCandidates.length) continue;
+
+    const assigned = allocateDestinationCounts(destCandidates, destWeightSum, totalVolume);
+    assignedCounts[originCell] = Object.create(null);
+    for (let i = 0; i < destCandidates.length; i++) {
+      const destCell = destCandidates[i].dest;
+      assignedCounts[originCell][destCell] = assigned[i] || 0;
+      totalAgents += assigned[i] || 0;
+    }
+
+    plan.push({ originCell, totalVolume, destCandidates, assigned });
+  }
+
+  return { plan, assignedCounts, totalAgents };
+}
+
+function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flows...') {
+  const percent = total > 0 ? Math.min(100, (processed / total) * 100) : 0;
+  ctx.simulationProgress = {
+    processed,
+    total,
+    percent,
+    phase,
+  };
+  ctx.syncSimulationUI?.();
+}
+
 /**
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
@@ -467,49 +574,30 @@ export async function computeDesirePaths() {
     goalGradients.set(d, this._gradientCacheObj[d]);
   }
 
-  // Batch path desire; apply affordance wear immediately so later agents see worn trails
   const pathDesireDeltas = new Map();
   const perTargetContribs = Object.create(null);
-  const assignedCountsTmp = Object.create(null);
+  const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
+    this,
+    agents,
+    destinations,
+    goalGradients
+  );
   let agentsProcessed = 0;
+  let nextYieldAt = resetYieldDeadline();
+  updateSimulationProgress(this, 0, totalAgents);
 
-  for (const o of agents) {
-    const originCell = o;
-    // Determine total discrete simulated agents for this origin
-    const totalVolume = Math.max(
-      1,
-      Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
-    );
-
-    // Build list of reachable destination candidates (exclude self-targeting)
-    const destCandidates = [];
-    let destWeightSum = 0;
-    for (let d of destinations) {
-      if (d === originCell) continue; // avoid self-targeting when origin is also a destination
-      const grad = goalGradients.get(d);
-      if (!grad) continue;
-      // support both Map and plain-object gradients
-      const hasOrigin =
-        typeof grad.has === 'function'
-          ? grad.has(originCell)
-          : typeof grad[originCell] === 'number';
-      if (!hasOrigin) continue; // unreachable
-      const w = this.simulationNodes[d]?.weight || 1;
-      destCandidates.push({ dest: d, weight: w });
-      destWeightSum += w;
-    }
-
-    if (destCandidates.length === 0) continue;
+  for (let planIndex = 0; planIndex < plan.length; planIndex++) {
+    const { originCell, destCandidates, assigned } = plan[planIndex];
 
     if (this.debugCompute) {
       try {
         console.groupCollapsed &&
           console.groupCollapsed(
-            `computeDesirePaths: origin ${originCell} -> distribute ${totalVolume} sims`
+            `computeDesirePaths: origin ${originCell} -> distribute ${totalAgents} sims`
           );
         console.log('computeDesirePaths:start', {
           origin: originCell,
-          totalVolume,
+          totalAgents,
           candidates: destCandidates.map((c) => ({ d: c.dest, w: c.weight })),
         });
       } catch (_e) {
@@ -517,51 +605,22 @@ export async function computeDesirePaths() {
       }
     }
 
-    // Compute float allocations then convert to integer counts deterministically
-    const floats = destCandidates.map((c) => (c.weight / destWeightSum) * totalVolume);
-    const floors = floats.map((f) => Math.floor(f));
-    const assigned = floors.slice();
-    let allocated = floors.reduce((a, b) => a + b, 0);
-    let leftover = totalVolume - allocated;
-
-    if (leftover > 0) {
-      const frac = floats.map((f, i) => ({
-        i,
-        frac: f - floors[i],
-        weight: destCandidates[i].weight,
-      }));
-      frac.sort((a, b) => {
-        if (b.frac !== a.frac) return b.frac - a.frac;
-        return destCandidates[b.i].weight - destCandidates[a.i].weight;
-      });
-      for (let k = 0; k < leftover; k++) assigned[frac[k].i] += 1;
-    }
-
-    // Record assigned counts for this origin (used for incremental diffs)
-    assignedCountsTmp[originCell] = Object.create(null);
-    // For each destination, run its assigned simulations
     for (let idx = 0; idx < destCandidates.length; idx++) {
       const destCell = destCandidates[idx].dest;
       const count = assigned[idx] || 0;
-      assignedCountsTmp[originCell][destCell] = count;
       if (count <= 0) continue;
       const destGradient = goalGradients.get(destCell);
       if (!destGradient) continue;
-      // Accept either a Map or a plain-object gradient. Prefer plain-object
-      // for hot inner loops; if we have a Map, convert it once here.
       let destGradientObj;
       if (typeof destGradient.get === 'function') {
-        // Map -> plain object
         destGradientObj = Object.create(null);
         for (const [k, v] of destGradient) destGradientObj[k] = v;
         if (!destGradient.has(originCell)) continue;
       } else {
-        // already a plain object
         destGradientObj = destGradient;
         if (typeof destGradientObj[originCell] !== 'number') continue;
       }
 
-     // ensure per-target contrib object exists for this run
       if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
       const maxTicks = estimateMaxTicks(originCell, destCell, hexes);
 
@@ -583,12 +642,10 @@ export async function computeDesirePaths() {
         }
 
         agentsProcessed++;
-        if (
-          agentsProcessed % YIELD_EVERY_AGENTS === 0 &&
-          typeof scheduler !== 'undefined' &&
-          typeof scheduler.yield === 'function'
-        ) {
-          await scheduler.yield();
+        if (agentsProcessed % YIELD_EVERY_AGENTS === 0 && nowMs() >= nextYieldAt) {
+          await yieldToMain();
+          nextYieldAt = resetYieldDeadline();
+          updateSimulationProgress(this, agentsProcessed, totalAgents);
         }
 
         if (this.debugCompute) {
@@ -619,7 +676,7 @@ export async function computeDesirePaths() {
 
   // Persist per-target contribution and assignment snapshots for incremental APIs
   this._perTargetContribs = perTargetContribs;
-  this._assignedCounts = assignedCountsTmp;
+  this._assignedCounts = assignedCounts;
   this._targetWeights = Object.create(null);
   for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
 
@@ -640,6 +697,7 @@ export async function computeDesirePaths() {
   }
   this.globalPeakFlow = peak > 0 ? peak : 1;
 
+  updateSimulationProgress(this, totalAgents, totalAgents, 'Complete');
   this.updateLayers();
 }
 
@@ -1064,6 +1122,7 @@ export {
   angleDiff as _angleDiff,
   isVisible as _isVisible,
   estimateMaxTicks as _estimateMaxTicks,
+  yieldToMain as _yieldToMain,
 };
 
 // Diagnostic helper to inspect cache instrumentation
