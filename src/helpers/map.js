@@ -2,21 +2,64 @@ import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
 //import { Deck } from '@deck.gl/core';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
-import maplibregl from 'maplibre-gl';
+
+function buildCircularAoiPolygon(mapInstance, nodePoints) {
+  const viewportSE = mapInstance.project(mapInstance.getBounds().getSouthEast());
+  const centerX = nodePoints.reduce((sum, p) => sum + p.point.x, 0) / nodePoints.length;
+  const centerY = nodePoints.reduce((sum, p) => sum + p.point.y, 0) / nodePoints.length;
+  let radiusPx = BUFFER_PX;
+
+  for (let i = 0; i < nodePoints.length; i++) {
+    const dx = nodePoints[i].point.x - centerX;
+    const dy = nodePoints[i].point.y - centerY;
+    radiusPx = Math.max(radiusPx, Math.hypot(dx, dy) + BUFFER_PX);
+  }
+
+  const nwPx = [Math.max(0, centerX - radiusPx), Math.max(0, centerY - radiusPx)];
+  const sePx = [
+    Math.min(viewportSE.x, centerX + radiusPx),
+    Math.min(viewportSE.y, centerY + radiusPx),
+  ];
+  const polygon = [];
+  const steps = 32;
+
+  for (let i = 0; i < steps; i++) {
+    const angle = (Math.PI * 2 * i) / steps;
+    const px = centerX + Math.cos(angle) * radiusPx;
+    const py = centerY + Math.sin(angle) * radiusPx;
+    const clamped = [
+      Math.max(nwPx[0], Math.min(sePx[0], px)),
+      Math.max(nwPx[1], Math.min(sePx[1], py)),
+    ];
+    const lngLat = mapInstance.unproject(clamped);
+    polygon.push([lngLat.lng, lngLat.lat]);
+  }
+  polygon.push([polygon[0][0], polygon[0][1]]);
+
+  return {
+    aoiPx: [nwPx, sePx],
+    aoiPolygon: [polygon],
+  };
+}
 
 export function renderInterfacePins() {
-  const bounds = new maplibregl.LngLatBounds();
-  const mapSE = this.project(this.getBounds().getSouthEast());
-
-  const feats = Object.entries(this.simulationNodes ?? {}).map(([k, node]) => {
+  const nodePoints = Object.entries(this.simulationNodes ?? {}).map(([k, node]) => {
     const pt = cellToLatLng(k);
-    bounds.extend([pt[1], pt[0]]);
     return {
-      type: 'Feature',
-      properties: { type: node.type, weight: node.weight },
-      geometry: { type: 'Point', coordinates: [pt[1], pt[0]] },
+      cell: k,
+      point: this.project([pt[1], pt[0]]),
+      lng: pt[1],
+      lat: pt[0],
+      type: node.type,
+      weight: node.weight,
     };
   });
+
+  const feats = nodePoints.map((node) => ({
+    type: 'Feature',
+    properties: { type: node.type, weight: node.weight },
+    geometry: { type: 'Point', coordinates: [node.lng, node.lat] },
+  }));
 
   if (feats.length === 0) {
     this.aoi_px = undefined;
@@ -32,22 +75,9 @@ export function renderInterfacePins() {
     return;
   }
 
-  let nw = this.project(bounds.getNorthWest());
-  let se = this.project(bounds.getSouthEast());
-  nw = [Math.max(0, nw.x - BUFFER_PX), Math.max(0, nw.y - BUFFER_PX)];
-  se = [Math.min(mapSE.x, se.x + BUFFER_PX), Math.min(mapSE.y, se.y + BUFFER_PX)];
-
-  const sw = this.unproject([nw[0], se[1]]);
-  const ne = this.unproject([se[0], nw[1]]);
-
-  this.aoi_px = [nw, se];
-  this.aoi_polygon = [
-    [sw.lng, sw.lat],
-    [ne.lng, sw.lat],
-    [ne.lng, ne.lat],
-    [sw.lng, ne.lat],
-    [sw.lng, sw.lat],
-  ];
+  const aoi = buildCircularAoiPolygon(this, nodePoints);
+  this.aoi_px = aoi.aoiPx;
+  this.aoi_polygon = aoi.aoiPolygon;
 
   if (!this.getSource('pins')) {
     this.addSource('pins', {
@@ -183,6 +213,64 @@ export function updateLayers() {
   const layers =
     this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
   this.deckOverlayInstance?.setProps({ layers });
+}
+
+function getScore(ctx, cell) {
+  const scores = ctx.pathDesireScores;
+  if (!scores) return 0;
+  return typeof scores.get === 'function' ? scores.get(cell) || 0 : scores[cell] || 0;
+}
+
+export function buildSimulationGeoJSON(ctx) {
+  const viewHexes = ctx.getHexes?.() ?? Array.from(ctx.cellFrictionMap?.keys() ?? []);
+  const features = [];
+
+  for (let i = 0; i < viewHexes.length; i++) {
+    const cell = viewHexes[i];
+    const score = getScore(ctx, cell);
+    if (!score) continue;
+
+    const boundary = cellToBoundary(cell, true);
+    const frictionObj = ctx._frictionObj || {};
+    const affordanceObj = ctx._affordanceObj || {};
+    const friction = typeof frictionObj[cell] === 'number' ? frictionObj[cell] : ctx.cellFrictionMap?.get(cell) ?? 0;
+    const affordance =
+      typeof affordanceObj[cell] === 'number' ? affordanceObj[cell] : ctx.affordanceMap?.get(cell) ?? 0;
+
+    features.push({
+      type: 'Feature',
+      properties: {
+        h3: cell,
+        desireScore: score,
+        affordance,
+        friction,
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [boundary],
+      },
+    });
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+export function exportSimulationGeoJSON(ctx) {
+  const geojson = buildSimulationGeoJSON(ctx);
+  const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const date = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `desire-paths-${date}.geojson`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return geojson;
 }
 
 export function clearLayers() {

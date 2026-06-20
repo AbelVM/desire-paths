@@ -10,7 +10,7 @@ import {
   getSurface,
 } from './helpers/constants.js';
 import { getHexes, triggerFastScan, mapPolygonCells, mapLineCells } from './helpers/grid.js';
-import { renderInterfacePins, updateLayers, clearLayers } from './helpers/map.js';
+import { renderInterfacePins, updateLayers, clearLayers, exportSimulationGeoJSON } from './helpers/map.js';
 import { setupUI } from './helpers/ui.js';
 import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
 
@@ -122,10 +122,11 @@ class DesireMap {
   renderInterfacePins(...args) { return renderInterfacePins.call(this, ...args); }
   updateLayers(...args) { return updateLayers.call(this, ...args); }
   clearLayers(...args) { return clearLayers.call(this, ...args); }
+  exportSimulationGeoJSON(...args) { return exportSimulationGeoJSON.call(this, ...args); }
   computeDesirePaths(...args) { return computeDesirePaths.call(this, ...args); }
   initializeAffordanceMap(...args) { return initializeAffordanceMap.call(this, ...args); }
-  showAlertCard(...args) { return this._showAlertCard(...args); }
-  syncSimulationUI(...args) { return this._syncSimulationUI(...args); }
+  showAlertCard(...args) { return typeof this._showAlertCard === 'function' ? this._showAlertCard(...args) : this.#map.showAlertCard?.(...args); }
+  syncSimulationUI(...args) { return typeof this._syncSimulationUI === 'function' ? this._syncSimulationUI(...args) : this.#map.syncSimulationUI?.(...args); }
 }
 
 export function setMapCursor(mapInstance, cursor) {
@@ -282,7 +283,7 @@ const isAccessible = (mapInstance, clickEvent) => {
   }
   const costs = Object.values(layerCosts);
   if (costs.length === 0) return true; // No features found; allow placement
-  const groundCost = layerCosts['0']; // We use ground level
+  const groundCost = typeof layerCosts['0'] === 'number' ? layerCosts['0'] : Math.min(...costs);
   return groundCost < FRICTION_COSTS.IMPASSABLE;
 };
 

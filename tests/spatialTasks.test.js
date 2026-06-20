@@ -8,6 +8,7 @@ import {
   computeFastScanChunkSnapshot,
 } from '../src/helpers/spatialTasks.js';
 import { latLngToCell, gridDisk } from 'h3-js';
+import { FRICTION_COSTS } from '../src/helpers/constants.js';
 
 const h3Cell = latLngToCell(40.4169, -3.7035, 15);
 
@@ -221,6 +222,22 @@ describe('computeFastScanChunkSnapshot', () => {
     const features = [null];
     const result = computeFastScanChunkSnapshot({ features, viewHexes });
     expect(result.multiFrictionEntries).toBeDefined();
+  });
+
+  it('should use non-ground layer when ground layer is absent', () => {
+    const viewHexes = [h3Cell];
+    const features = [
+      {
+        sourceLayer: 'transportation',
+        properties: { class: 'path', layer: '1' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[[-3.704, 40.416], [-3.703, 40.416], [-3.703, 40.417], [-3.704, 40.417], [-3.704, 40.416]]],
+        },
+      },
+    ];
+    const result = computeFastScanSnapshot({ features, viewHexes });
+    expect(result.cellFrictionEntries[h3Cell]).toBe(FRICTION_COSTS.PAVEMENT);
   });
 
   it('should handle Polygon geometry with coordinates near the H3 cell', () => {

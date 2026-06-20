@@ -69,12 +69,28 @@
         <div class="btn-group">
           <button class="btn btn-ghost" id="btn-build-mapping" type="button">Build Mapping</button>
           <button class="btn btn-accent" id="btn-compute">Simulate Flows</button>
+          <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
           <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
         </div>
       </div>
 
       <div class="panel-footer">
         <div id="scan-loader">Sampling walkable surfaces...</div>
+        <div class="simulation-progress-wrap">
+          <div
+            id="simulation-progress"
+            class="simulation-progress"
+            role="progressbar"
+            aria-label="Simulation progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            hidden
+          >
+            <span id="simulation-progress-bar"></span>
+          </div>
+          <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
+        </div>
         <div id="max-flow-readout" class="density-readout">
           Peak flow intensity: 0
         </div>

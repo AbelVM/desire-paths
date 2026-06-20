@@ -13,11 +13,13 @@ import {
   getCachedGradient,
   clearGradientCache,
   clearComputeCaches,
+  _yieldToMain,
   addDestination,
   updateDestinationWeight,
   removeDestination,
 } from '../src/helpers/compute.js';
-import { latLngToCell, gridDisk, gridPathCells } from 'h3-js';
+import { latLngToCell, gridDisk } from 'h3-js';
+import { buildSimulationGeoJSON } from '../src/helpers/map.js';
 
 describe('angleDiff', () => {
   it('should return 0 for equal angles', () => {
@@ -879,6 +881,49 @@ describe('clearComputeCaches', () => {
     expect(map._gradientCacheObj).toBeDefined();
     expect(Object.keys(map._gradientCacheObj).length).toBe(0);
     expect(map._gradientCacheGen).toBeUndefined();
+  });
+});
+
+describe('yieldToMain', () => {
+  it('should yield without requiring Scheduler API', async () => {
+    await expect(_yieldToMain()).resolves.toBeUndefined();
+  });
+});
+
+describe('buildSimulationGeoJSON', () => {
+  it('should export flow cells as GeoJSON polygons', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const ctx = {
+      getHexes: () => [h3],
+      cellFrictionMap: new Map([[h3, 1]]),
+      pathDesireScores: new Map([[h3, 7]]),
+      _frictionObj: { [h3]: 1 },
+      _affordanceObj: { [h3]: 0.4 },
+    };
+
+    const geojson = buildSimulationGeoJSON(ctx);
+
+    expect(geojson.type).toBe('FeatureCollection');
+    expect(geojson.features).toHaveLength(1);
+    expect(geojson.features[0].geometry.type).toBe('Polygon');
+    expect(geojson.features[0].properties.desireScore).toBe(7);
+    expect(geojson.features[0].properties.friction).toBe(1);
+    expect(geojson.features[0].properties.affordance).toBe(0.4);
+  });
+
+  it('should skip cells without desire score', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const ctx = {
+      getHexes: () => [h3],
+      cellFrictionMap: new Map([[h3, 1]]),
+      pathDesireScores: new Map(),
+      _frictionObj: { [h3]: 1 },
+      _affordanceObj: { [h3]: 0.4 },
+    };
+
+    const geojson = buildSimulationGeoJSON(ctx);
+
+    expect(geojson.features).toHaveLength(0);
   });
 });
 

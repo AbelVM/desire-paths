@@ -111,6 +111,13 @@ export function computeGradientBatch({ frictionEntries, targets }) {
   return gradients;
 }
 
+function getEffectiveFriction(layerMap) {
+  if (!layerMap) return 0;
+  if (typeof layerMap['0'] === 'number') return layerMap['0'];
+  const values = Object.values(layerMap);
+  return values.length > 0 ? Math.min(...values) : 0;
+}
+
 function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   const viewLookup = Object.create(null);
   for (let i = 0; i < viewHexes.length; i++) viewLookup[viewHexes[i]] = 1;
@@ -155,7 +162,7 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   for (let i = 0; i < viewHexes.length; i++) {
     const cell = viewHexes[i];
     const layerMap = multiFrictionEntries[cell];
-    cellFrictionEntries[cell] = layerMap?.['0'] ?? 0;
+    cellFrictionEntries[cell] = getEffectiveFriction(layerMap);
   }
 
   return { multiFrictionEntries, cellFrictionEntries };

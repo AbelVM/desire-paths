@@ -9,10 +9,14 @@ export function setupUI(map) {
   const weightReadout = document.getElementById('node-weight-readout');
   const buildButton = document.getElementById('btn-build-mapping');
   const computeButton = document.getElementById('btn-compute');
+  const exportButton = document.getElementById('btn-export-geojson');
   const clearButton = document.getElementById('btn-clear');
   const modeLabel = document.getElementById('mode-status');
   const loader = document.getElementById('scan-loader');
   const flowReadout = document.getElementById('max-flow-readout');
+  const progress = document.getElementById('simulation-progress');
+  const progressBar = document.getElementById('simulation-progress-bar');
+  const progressLabel = document.getElementById('simulation-progress-label');
   const alertCard = document.getElementById('app-alert');
   const alertTitle = document.getElementById('app-alert-title');
   const alertMessage = document.getElementById('app-alert-message');
@@ -71,6 +75,21 @@ export function setupUI(map) {
     flowReadout.innerText = `Peak Flow Intensity: ${peak}`;
   };
 
+  const syncProgressUI = () => {
+    const state = map.simulationProgress || { processed: 0, total: 0, percent: 0, phase: 'Idle' };
+    const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+    if (progressBar) progressBar.style.transform = `scaleX(${percent / 100})`;
+    if (progress) {
+      progress.hidden = state.total <= 0 && state.phase === 'Idle';
+    }
+    if (progressLabel) {
+      progressLabel.innerText =
+        state.total > 0
+          ? `${state.phase} ${state.processed}/${state.total} agents (${Math.round(percent)}%)`
+          : state.phase;
+    }
+  };
+
   const syncSimulationUI = () => {
     const busy = map.isComputing === true;
     const mappingReady = map.mappingReady === true;
@@ -80,10 +99,12 @@ export function setupUI(map) {
     if (buildButton) buildButton.toggleAttribute('disabled', busy);
     if (clearButton) clearButton.disabled = busy || !hasGrid;
     computeButton.disabled = busy || !mappingReady || !readyToRun;
+    if (exportButton) exportButton.disabled = busy;
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     if (loader && !busy) {
       loader.style.display = 'none';
     }
+    syncProgressUI();
   };
 
   const hideAlertCard = () => {
@@ -111,11 +132,13 @@ export function setupUI(map) {
     frictionButton.disabled = busy;
     if (weightInput) weightInput.disabled = busy;
     if (buildButton) buildButton.disabled = busy;
+    if (exportButton) exportButton.disabled = busy;
     computeButton.disabled = busy;
     clearButton.disabled = busy;
     loader.innerText = message;
     loader.style.display = busy ? 'block' : 'none';
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    if (progressLabel) progressLabel.innerText = message;
     panel.setAttribute('aria-busy', String(busy));
   };
 
@@ -147,6 +170,7 @@ export function setupUI(map) {
     map._multiFrictionSnapshotGen = undefined;
     map._gradientCacheGen = undefined;
     map._visibilityCacheGen = undefined;
+    map.simulationProgress = undefined;
     clearComputeCaches.call(map);
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
@@ -229,6 +253,24 @@ export function setupUI(map) {
     }
   });
 
+  if (exportButton) {
+    exportButton.addEventListener('click', () => {
+      try {
+        const geojson = map.exportSimulationGeoJSON();
+        showAlertCard(`Exported ${geojson.features.length} flow cells as GeoJSON.`, {
+          title: 'GeoJSON exported',
+          tone: 'success',
+        });
+      } catch (err) {
+        console.error('GeoJSON export failed:', err);
+        showAlertCard('GeoJSON export failed. Please try again.', {
+          title: 'Export failed',
+          tone: 'error',
+        });
+      }
+    });
+  }
+
   clearButton.addEventListener('click', () => {
     resetSimulationState();
   });
@@ -237,6 +279,8 @@ export function setupUI(map) {
     alertDismiss.addEventListener('click', hideAlertCard);
   }
 
+  map._showAlertCard = showAlertCard;
+  map._syncSimulationUI = syncSimulationUI;
   map.showAlertCard = showAlertCard;
   map.syncSimulationUI = syncSimulationUI;
 
@@ -245,5 +289,6 @@ export function setupUI(map) {
   syncWeightUI();
   syncFrictionUI();
   syncFlowReadout();
+  syncProgressUI();
   syncSimulationUI();
 }
