@@ -193,6 +193,7 @@ function createMockMap(extra = {}) {
   map.addSource = vi.fn();
   map.addLayer = vi.fn();
   map.addControl = vi.fn();
+  map.fitBounds = vi.fn();
   map.getCanvas = () => ({ style: { cursor: 'crosshair' } });
   map.on = vi.fn();
   map.clearLayers = vi.fn();
@@ -477,6 +478,32 @@ describe('map.js', () => {
       expect(Array.isArray(map.aoi_polygon)).toBe(true);
     });
 
+    it('should not clamp circular AOI pixels to the current viewport bounds', async () => {
+      const map = createMockMap({
+        simulationNodes: {
+          [mockHexes[0]]: { type: 'origin', weight: 1 },
+        },
+      });
+      const viewportSE = map.getBounds().getSouthEast();
+      const { renderInterfacePins } = await import('../src/helpers/map.js');
+      renderInterfacePins.call(map);
+
+      const ring = map.aoi_polygon[0];
+      const lngs = ring.map(([lng]) => lng);
+      const lats = ring.map(([, lat]) => lat);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+
+      expect(map.aoi_px[0][0]).toBeLessThan(viewportSE.lng * 100);
+      expect(map.aoi_px[1][1]).toBeGreaterThan(viewportSE.lat * 100);
+      expect(minLng).toBeLessThan(-3.8);
+      expect(maxLng).toBeGreaterThan(-3.7);
+      expect(minLat).toBeLessThan(40.4);
+      expect(maxLat).toBeGreaterThan(40.5);
+    });
+
     it('should add pin source and layers when not present', async () => {
       const map = createMockMap();
       map.getSource = vi.fn(() => null);
@@ -692,7 +719,7 @@ describe('map.js', () => {
 // ══════════════════════════════════════════════════════════════════════
 describe('ui.js', () => {
   function setupMockDocument() {
-    const panel = { classList: { toggle: vi.fn() }, 'aria-busy': '', hidden: false };
+    const panel = { classList: { toggle: vi.fn() }, 'aria-busy': '', hidden: false, setAttribute: vi.fn() };
     const modeButtons = [
       { dataset: { placementMode: 'origin' }, classList: { toggle: vi.fn() }, setAttribute: vi.fn(), disabled: false, innerText: '', addEventListener: vi.fn() },
       { dataset: { placementMode: 'destination' }, classList: { toggle: vi.fn() }, setAttribute: vi.fn(), disabled: false, innerText: '', addEventListener: vi.fn() },
@@ -765,6 +792,42 @@ describe('ui.js', () => {
     setupUI(map);
 
     expect(map.placementWeight).toBeDefined();
+  });
+
+  it('should fit AOI bounds before building the mapping', async () => {
+    const map = createMockMap({
+      aoi_px: undefined,
+      mappingReady: false,
+      cellFrictionMap: new Map(),
+    });
+    map.renderInterfacePins = vi.fn();
+    map.triggerFastScan = vi.fn(async () => {
+      map.cellFrictionMap.set(mockHexes[0], 1);
+    });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const buildButton = doc.getElementById('btn-build-mapping');
+    const clickHandler = buildButton.addEventListener.mock.calls.find(
+      ([eventName]) => eventName === 'click'
+    )?.[1];
+    expect(clickHandler).toBeDefined();
+
+    await clickHandler();
+
+    expect(map.fitBounds).toHaveBeenCalledWith(
+      [[expect.any(Number), expect.any(Number)], [expect.any(Number), expect.any(Number)]],
+      { padding: 0 }
+    );
+    expect(map.fitBounds.mock.invocationCallOrder[0]).toBeLessThan(
+      map.renderInterfacePins.mock.invocationCallOrder[0]
+    );
+    expect(map.renderInterfacePins.mock.invocationCallOrder[0]).toBeLessThan(
+      map.triggerFastScan.mock.invocationCallOrder[0]
+    );
+    expect(map.mappingReady).toBe(true);
   });
 
   it('should sync mode UI for origin mode', async () => {
@@ -1159,6 +1222,7 @@ describe('main.js', () => {
         addSource: () => {},
         addLayer: () => {},
         addControl: () => {},
+        fitBounds: vi.fn(),
         getCanvas: () => null,
         on: () => {},
       };
@@ -1225,6 +1289,7 @@ describe('main.js', () => {
         addSource: () => {},
         addLayer: () => {},
         addControl: () => {},
+        fitBounds: vi.fn(),
         getCanvas: () => null,
         on: () => {},
       };
@@ -1322,6 +1387,7 @@ describe('main.js', () => {
         addSource: () => {},
         addLayer: () => {},
         addControl: () => {},
+        fitBounds: vi.fn(),
         getCanvas: () => null,
         on: () => {},
       };
@@ -1388,6 +1454,7 @@ describe('main.js', () => {
         addSource: () => {},
         addLayer: () => {},
         addControl: () => {},
+        fitBounds: vi.fn(),
         getCanvas: () => null,
         on: () => {},
       };
@@ -1474,6 +1541,7 @@ describe('main.js', () => {
       const addSourceSpy = vi.fn();
       const addLayerSpy = vi.fn();
       const addControlSpy = vi.fn();
+      const fitBoundsSpy = vi.fn();
       const getCanvasSpy = vi.fn(() => null);
       const onSpy = vi.fn();
 
@@ -1525,6 +1593,7 @@ describe('main.js', () => {
         addSource: addSourceSpy,
         addLayer: addLayerSpy,
         addControl: addControlSpy,
+        fitBounds: fitBoundsSpy,
         getCanvas: getCanvasSpy,
         on: onSpy,
       };
@@ -1541,6 +1610,7 @@ describe('main.js', () => {
       dm.addSource('test', {});
       dm.addLayer({ id: 'test' });
       dm.addControl({});
+      dm.fitBounds([[0, 0], [1, 1]], { padding: 0 });
       dm.getCanvas();
       dm.on('click', () => {});
 
@@ -1555,6 +1625,7 @@ describe('main.js', () => {
       expect(addSourceSpy).toHaveBeenCalled();
       expect(addLayerSpy).toHaveBeenCalled();
       expect(addControlSpy).toHaveBeenCalled();
+      expect(fitBoundsSpy).toHaveBeenCalledWith([[0, 0], [1, 1]], { padding: 0 });
       expect(getCanvasSpy).toHaveBeenCalled();
       expect(onSpy).toHaveBeenCalled();
     });
@@ -1609,6 +1680,7 @@ describe('main.js', () => {
         addSource: () => {},
         addLayer: () => {},
         addControl: () => {},
+        fitBounds: vi.fn(),
         getCanvas: () => null,
         on: () => {},
         getHexes: () => mockHexes,

@@ -4,7 +4,6 @@ import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 
 function buildCircularAoiPolygon(mapInstance, nodePoints) {
-  const viewportSE = mapInstance.project(mapInstance.getBounds().getSouthEast());
   const centerX = nodePoints.reduce((sum, p) => sum + p.point.x, 0) / nodePoints.length;
   const centerY = nodePoints.reduce((sum, p) => sum + p.point.y, 0) / nodePoints.length;
   let radiusPx = BUFFER_PX;
@@ -15,11 +14,8 @@ function buildCircularAoiPolygon(mapInstance, nodePoints) {
     radiusPx = Math.max(radiusPx, Math.hypot(dx, dy) + BUFFER_PX);
   }
 
-  const nwPx = [Math.max(0, centerX - radiusPx), Math.max(0, centerY - radiusPx)];
-  const sePx = [
-    Math.min(viewportSE.x, centerX + radiusPx),
-    Math.min(viewportSE.y, centerY + radiusPx),
-  ];
+  const nwPx = [centerX - radiusPx, centerY - radiusPx];
+  const sePx = [centerX + radiusPx, centerY + radiusPx];
   const polygon = [];
   const steps = 32;
 

@@ -556,7 +556,7 @@ html {
 .legend-gradient {
   height: 12px;
   width: 100%;
-  background: linear-gradient(to right, #d7e7f4, #9bb5cf, #5d7f97, #375166, #192732);
+  background: linear-gradient(to right, #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049);
   margin: 6px 0 4px 0;
   border-radius: 2px;
 }

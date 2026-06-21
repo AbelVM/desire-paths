@@ -111,6 +111,7 @@ class DesireMap {
   addSource(...args) { return this.#map.addSource(...args); }
   addLayer(...args) { return this.#map.addLayer(...args); }
   addControl(...args) { return this.#map.addControl(...args); }
+  fitBounds(...args) { return this.#map.fitBounds(...args); }
   getCanvas() { return this.#map.getCanvas(); }
   on(...args) { return this.#map.on(...args); }
 

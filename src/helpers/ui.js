@@ -1,5 +1,63 @@
 import { clearComputeCaches } from './compute.js';
 
+function isFiniteLngLat(value) {
+  return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
+}
+
+function boundsFromLngLat(a, b) {
+  return [
+    [Math.min(a.lng, b.lng), Math.min(a.lat, b.lat)],
+    [Math.max(a.lng, b.lng), Math.max(a.lat, b.lat)],
+  ];
+}
+
+function getAoiBounds(mapInstance) {
+  const pxBounds = mapInstance.aoi_px;
+  if (Array.isArray(pxBounds) && pxBounds.length === 2) {
+    const nw = mapInstance.unproject?.(pxBounds[0]);
+    const se = mapInstance.unproject?.(pxBounds[1]);
+    if (isFiniteLngLat(nw) && isFiniteLngLat(se)) return boundsFromLngLat(nw, se);
+  }
+
+  const polygon = mapInstance.aoi_polygon;
+  const rings = Array.isArray(polygon?.[0]?.[0]) ? polygon : polygon ? [polygon] : [];
+  if (!rings.length) return null;
+
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+
+  for (let r = 0; r < rings.length; r++) {
+    const ring = rings[r];
+    if (!Array.isArray(ring)) continue;
+    for (let i = 0; i < ring.length; i++) {
+      const [lng, lat] = ring[i] || [];
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+      if (lng < minLng) minLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lng > maxLng) maxLng = lng;
+      if (lat > maxLat) maxLat = lat;
+    }
+  }
+
+  if (!Number.isFinite(minLng)) return null;
+  return [[minLng, minLat], [maxLng, maxLat]];
+}
+
+async function fitAoiBounds(mapInstance) {
+  const bounds = getAoiBounds(mapInstance);
+  if (!bounds || typeof mapInstance.fitBounds !== 'function') return;
+
+  mapInstance.fitBounds(bounds, { padding: 0 });
+  await new Promise((resolve) => {
+    const raf = globalThis.requestAnimationFrame;
+    if (typeof raf === 'function') raf(resolve);
+    else setTimeout(resolve, 0);
+  });
+  mapInstance.renderInterfacePins?.();
+}
+
 export function setupUI(map) {
   const panel = document.querySelector('.panel');
   const modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
@@ -209,7 +267,12 @@ export function setupUI(map) {
 
       setBusyState(true, 'Building mapping...');
       try {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await fitAoiBounds(map);
+        await new Promise((resolve) => {
+          const raf = globalThis.requestAnimationFrame;
+          if (typeof raf === 'function') raf(resolve);
+          else setTimeout(resolve, 0);
+        });
         await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
         if (!map.mappingReady) {
