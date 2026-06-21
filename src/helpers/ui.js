@@ -4,6 +4,18 @@ function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
 }
 
+function isActiveNode(node) {
+  return node && Number(node.weight) > 0;
+}
+
+function hasBuildInputs(nodes = {}) {
+  const activeNodes = Object.values(nodes ?? {});
+  return (
+    activeNodes.some((node) => isActiveNode(node) && (node.type === 'origin' || node.type === 'both')) &&
+    activeNodes.some((node) => isActiveNode(node) && (node.type === 'destination' || node.type === 'both'))
+  );
+}
+
 function boundsFromLngLat(a, b) {
   return [
     [Math.min(a.lng, b.lng), Math.min(a.lat, b.lat)],
@@ -151,13 +163,15 @@ export function setupUI(map) {
   const syncSimulationUI = () => {
     const busy = map.isComputing === true;
     const mappingReady = map.mappingReady === true;
-    const readyToRun = map.readyToCompute === true;
+    const canBuild = hasBuildInputs(map.simulationNodes);
+    const canCompute = mappingReady && canBuild;
+    const canExport = map.flowsReady === true;
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
-    if (buildButton) buildButton.toggleAttribute('disabled', busy);
+    if (buildButton) buildButton.toggleAttribute('disabled', busy || !canBuild);
     if (clearButton) clearButton.disabled = busy || !hasGrid;
-    computeButton.disabled = busy || !mappingReady || !readyToRun;
-    if (exportButton) exportButton.disabled = busy;
+    computeButton.disabled = busy || !canCompute;
+    if (exportButton) exportButton.disabled = busy || !canExport;
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     if (loader && !busy) {
       loader.style.display = 'none';
@@ -210,6 +224,7 @@ export function setupUI(map) {
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
     map.mappingReady = false;
+    map.flowsReady = false;
     map.aoi = undefined;
     map.aoi_px = undefined;
     map.aoi_polygon = undefined;
@@ -257,9 +272,9 @@ export function setupUI(map) {
 
   if (buildButton) {
     buildButton.addEventListener('click', async () => {
-      if (!map.simulationNodes || Object.keys(map.simulationNodes).length === 0) {
-        showAlertCard('Place at least one node before building the mapping.', {
-          title: 'Nothing to build',
+      if (!hasBuildInputs(map.simulationNodes)) {
+        showAlertCard('Place at least one origin/dual node and one destination/dual node before building the mapping.', {
+          title: 'Missing endpoints',
           tone: 'warning',
         });
         return;
@@ -267,6 +282,7 @@ export function setupUI(map) {
 
       setBusyState(true, 'Building mapping...');
       try {
+        map.flowsReady = false;
         await fitAoiBounds(map);
         await new Promise((resolve) => {
           const raf = globalThis.requestAnimationFrame;
@@ -275,6 +291,7 @@ export function setupUI(map) {
         });
         await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
+        map.flowsReady = false;
         if (!map.mappingReady) {
           showAlertCard(
             'The current layout did not produce a mapping. Add more nodes and try again.',
@@ -285,6 +302,7 @@ export function setupUI(map) {
           );
         }
       } catch (err) {
+        map.flowsReady = false;
         console.error('Mapping build failed:', err);
         showAlertCard('Mapping build failed. Please try again.', {
           title: 'Build failed',
@@ -298,12 +316,31 @@ export function setupUI(map) {
   }
 
   computeButton.addEventListener('click', async () => {
-    if (!map.mappingReady) return;
+    if (!map.mappingReady) {
+      showAlertCard('Build the mapping before simulating flows.', {
+        title: 'Mapping not built',
+        tone: 'warning',
+      });
+      return;
+    }
+    if (!hasBuildInputs(map.simulationNodes)) {
+      showAlertCard('Place at least one origin/dual node and one destination/dual node before simulating flows.', {
+        title: 'Missing endpoints',
+        tone: 'warning',
+      });
+      return;
+    }
     setBusyState(true);
     try {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => {
+        const raf = globalThis.requestAnimationFrame;
+        if (typeof raf === 'function') raf(resolve);
+        else setTimeout(resolve, 0);
+      });
       await map.computeDesirePaths();
+      map.flowsReady = true;
     } catch (err) {
+      map.flowsReady = false;
       console.error('Desire path computation failed:', err);
       showAlertCard('Simulation error. Please try again.', {
         title: 'Simulation failed',
@@ -318,6 +355,13 @@ export function setupUI(map) {
 
   if (exportButton) {
     exportButton.addEventListener('click', () => {
+      if (map.flowsReady !== true) {
+        showAlertCard('Simulate flows before exporting GeoJSON.', {
+          title: 'No flows to export',
+          tone: 'warning',
+        });
+        return;
+      }
       try {
         const geojson = map.exportSimulationGeoJSON();
         showAlertCard(`Exported ${geojson.features.length} flow cells as GeoJSON.`, {

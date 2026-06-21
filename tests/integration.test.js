@@ -24,6 +24,7 @@ vi.stubGlobal('document', {
     if (sel === '#node-weight-readout') return mockElements.get('node-weight-readout');
     if (sel === '#btn-build-mapping') return mockElements.get('btn-build-mapping');
     if (sel === '#btn-compute') return mockElements.get('btn-compute');
+    if (sel === '#btn-export-geojson') return mockElements.get('btn-export-geojson');
     if (sel === '#btn-clear') return mockElements.get('btn-clear');
     if (sel === '#mode-status') return mockElements.get('mode-status');
     if (sel === '#scan-loader') return mockElements.get('scan-loader');
@@ -150,6 +151,7 @@ function createMockMap(extra = {}) {
     globalPeakFlow: 1,
     showFrictionMesh: true,
     mappingReady: false,
+    flowsReady: false,
     deckOverlayInstance: { setProps: vi.fn(), layers: [] },
     targetLabelLayerId: 'place-label',
     placementMode: 'origin',
@@ -731,6 +733,7 @@ describe('ui.js', () => {
     const weightReadout = { value: '1' };
     const buildButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const computeButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn() };
+    const exportButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const clearButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const modeLabel = { innerText: '', className: '' };
     const loader = { style: { display: 'none' }, innerText: '' };
@@ -749,6 +752,7 @@ describe('ui.js', () => {
         if (sel === '#node-weight-readout') return weightReadout;
         if (sel === '#btn-build-mapping') return buildButton;
         if (sel === '#btn-compute') return computeButton;
+        if (sel === '#btn-export-geojson') return exportButton;
         if (sel === '#btn-clear') return clearButton;
         if (sel === '#mode-status') return modeLabel;
         if (sel === '#scan-loader') return loader;
@@ -767,6 +771,7 @@ describe('ui.js', () => {
         if (id === 'node-weight-readout') return weightReadout;
         if (id === 'btn-build-mapping') return buildButton;
         if (id === 'btn-compute') return computeButton;
+        if (id === 'btn-export-geojson') return exportButton;
         if (id === 'btn-clear') return clearButton;
         if (id === 'mode-status') return modeLabel;
         if (id === 'scan-loader') return loader;
@@ -782,6 +787,10 @@ describe('ui.js', () => {
     };
 
     return doc;
+  }
+
+  function getClickHandler(button) {
+    return button.addEventListener.mock.calls.find(([eventName]) => eventName === 'click')?.[1];
   }
 
   it('should setup UI elements and bind event listeners', async () => {
@@ -810,9 +819,7 @@ describe('ui.js', () => {
     setupUI(map);
 
     const buildButton = doc.getElementById('btn-build-mapping');
-    const clickHandler = buildButton.addEventListener.mock.calls.find(
-      ([eventName]) => eventName === 'click'
-    )?.[1];
+    const clickHandler = getClickHandler(buildButton);
     expect(clickHandler).toBeDefined();
 
     await clickHandler();
@@ -828,6 +835,156 @@ describe('ui.js', () => {
       map.triggerFastScan.mock.invocationCallOrder[0]
     );
     expect(map.mappingReady).toBe(true);
+  });
+
+  it('should disable build mapping without both endpoint types', async () => {
+    const map = createMockMap({
+      simulationNodes: {
+        [mockHexes[0]]: { type: 'origin', weight: 1 },
+      },
+    });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const buildButton = doc.getElementById('btn-build-mapping');
+    expect(buildButton.toggleAttribute).toHaveBeenCalledWith('disabled', true);
+  });
+
+  it('should enable build mapping with origin and destination endpoints', async () => {
+    const map = createMockMap();
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const buildButton = doc.getElementById('btn-build-mapping');
+    expect(buildButton.toggleAttribute).toHaveBeenCalledWith('disabled', false);
+  });
+
+  it('should disable compute without a built mapping', async () => {
+    const map = createMockMap({ mappingReady: false, readyToCompute: true });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const computeButton = doc.getElementById('btn-compute');
+    expect(computeButton.disabled).toBe(true);
+  });
+
+  it('should disable compute without both endpoint types', async () => {
+    const map = createMockMap({
+      mappingReady: true,
+      readyToCompute: true,
+      simulationNodes: {
+        [mockHexes[0]]: { type: 'origin', weight: 1 },
+      },
+    });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const computeButton = doc.getElementById('btn-compute');
+    expect(computeButton.disabled).toBe(true);
+  });
+
+  it('should enable compute when mapping and endpoints are ready', async () => {
+    const map = createMockMap({ mappingReady: true, readyToCompute: true });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const computeButton = doc.getElementById('btn-compute');
+    expect(computeButton.disabled).toBe(false);
+  });
+
+  it('should disable export until flows are simulated', async () => {
+    const map = createMockMap({ flowsReady: false });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const exportButton = doc.getElementById('btn-export-geojson');
+    expect(exportButton.disabled).toBe(true);
+  });
+
+  it('should enable export after flows are simulated', async () => {
+    const map = createMockMap({ flowsReady: true });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const exportButton = doc.getElementById('btn-export-geojson');
+    expect(exportButton.disabled).toBe(false);
+  });
+
+  it('should reject build mapping without both endpoint types', async () => {
+    const map = createMockMap({
+      simulationNodes: {
+        [mockHexes[0]]: { type: 'origin', weight: 1 },
+      },
+    });
+    map.triggerFastScan = vi.fn();
+    map.showAlertCard = vi.fn();
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    await getClickHandler(doc.getElementById('btn-build-mapping'))();
+    const alertCard = doc.getElementById('app-alert');
+    const alertMessage = doc.getElementById('app-alert-message');
+
+    expect(map.triggerFastScan).not.toHaveBeenCalled();
+    expect(alertCard.hidden).toBe(false);
+    expect(alertCard.dataset.tone).toBe('warning');
+    expect(alertMessage.innerText).toBe(
+      'Place at least one origin/dual node and one destination/dual node before building the mapping.'
+    );
+  });
+
+  it('should reject compute flows without a built mapping', async () => {
+    const map = createMockMap({ mappingReady: false });
+    map.computeDesirePaths = vi.fn();
+    map.showAlertCard = vi.fn();
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    await getClickHandler(doc.getElementById('btn-compute'))();
+    const alertCard = doc.getElementById('app-alert');
+    const alertMessage = doc.getElementById('app-alert-message');
+
+    expect(map.computeDesirePaths).not.toHaveBeenCalled();
+    expect(alertCard.hidden).toBe(false);
+    expect(alertCard.dataset.tone).toBe('warning');
+    expect(alertMessage.innerText).toBe('Build the mapping before simulating flows.');
+  });
+
+  it('should reject export without simulated flows', async () => {
+    const map = createMockMap({ flowsReady: false });
+    map.exportSimulationGeoJSON = vi.fn();
+    map.showAlertCard = vi.fn();
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    getClickHandler(doc.getElementById('btn-export-geojson'))();
+    const alertCard = doc.getElementById('app-alert');
+    const alertMessage = doc.getElementById('app-alert-message');
+
+    expect(map.exportSimulationGeoJSON).not.toHaveBeenCalled();
+    expect(alertCard.hidden).toBe(false);
+    expect(alertCard.dataset.tone).toBe('warning');
+    expect(alertMessage.innerText).toBe('Simulate flows before exporting GeoJSON.');
   });
 
   it('should sync mode UI for origin mode', async () => {
@@ -912,6 +1069,7 @@ describe('ui.js', () => {
     map.globalPeakFlow = 10;
     map.readyToCompute = true;
     map.mappingReady = true;
+    map.flowsReady = true;
 
     // Simulate resetSimulationState logic from ui.js
     map.simulationNodes = {};
@@ -922,6 +1080,7 @@ describe('ui.js', () => {
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
     map.mappingReady = false;
+    map.flowsReady = false;
     map.aoi = undefined;
     map.aoi_px = undefined;
     map.aoi_polygon = undefined;
@@ -947,6 +1106,7 @@ describe('ui.js', () => {
     expect(map.globalPeakFlow).toBe(1);
     expect(map.readyToCompute).toBe(false);
     expect(map.mappingReady).toBe(false);
+    expect(map.flowsReady).toBe(false);
   });
 
   it('should show alert card on build failure', async () => {
@@ -1183,6 +1343,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1235,6 +1396,7 @@ describe('main.js', () => {
       expect(dm.globalPeakFlow).toBe(1);
       expect(dm.showFrictionMesh).toBe(true);
       expect(dm.mappingReady).toBe(false);
+      expect(dm.flowsReady).toBe(false);
       expect(dm.placementMode).toBe('origin');
       expect(dm.placementWeight).toBe(1);
     });
@@ -1250,6 +1412,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1302,6 +1465,7 @@ describe('main.js', () => {
       dm.globalPeakFlow = 42;
       dm.showFrictionMesh = false;
       dm.mappingReady = true;
+      dm.flowsReady = true;
       dm.placementMode = 'destination';
       dm.placementWeight = 5;
       dm.readyToCompute = true;
@@ -1330,6 +1494,8 @@ describe('main.js', () => {
       expect(mockMap.simulationNodes).toEqual({ hex1: { type: 'origin', weight: 1 } });
       expect(mockMap.globalPeakFlow).toBe(42);
       expect(mockMap.showFrictionMesh).toBe(false);
+      expect(mockMap.mappingReady).toBe(true);
+      expect(mockMap.flowsReady).toBe(true);
       expect(mockMap.placementMode).toBe('destination');
       expect(mockMap.placementWeight).toBe(5);
       expect(mockMap.readyToCompute).toBe(true);
@@ -1348,6 +1514,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1415,6 +1582,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1475,6 +1643,9 @@ describe('main.js', () => {
 
       dm.aoi_polygon = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
       expect(dm.aoi_polygon).toBeDefined();
+
+      dm.flowsReady = true;
+      expect(dm.flowsReady).toBe(true);
 
       dm._cachedViewHexes = ['hex1'];
       expect(dm._cachedViewHexes).toEqual(['hex1']);
@@ -1554,6 +1725,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1641,6 +1813,7 @@ describe('main.js', () => {
         globalPeakFlow: 1,
         showFrictionMesh: true,
         mappingReady: false,
+        flowsReady: false,
         deckOverlayInstance: { setProps: vi.fn() },
         targetLabelLayerId: 'label',
         placementMode: 'origin',
@@ -1786,7 +1959,7 @@ describe('main.js', () => {
         },
       };
       const result = isReadyToCompute(mapInstance);
-      expect(result).toBe(false); // only one node, need at least 2
+      expect(result).toBe(true);
     });
 
     it('should return true when both type and origin node exist', async () => {

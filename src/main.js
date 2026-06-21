@@ -42,6 +42,8 @@ class DesireMap {
   set showFrictionMesh(v) { this.#map.showFrictionMesh = v; }
   get mappingReady() { return this.#map.mappingReady; }
   set mappingReady(v) { this.#map.mappingReady = v; }
+  get flowsReady() { return this.#map.flowsReady; }
+  set flowsReady(v) { this.#map.flowsReady = v; }
   get deckOverlayInstance() { return this.#map.deckOverlayInstance; }
   set deckOverlayInstance(v) { this.#map.deckOverlayInstance = v; }
   get targetLabelLayerId() { return this.#map.targetLabelLayerId; }
@@ -151,6 +153,7 @@ const init = () => {
   desireMap.simulationNodes = {};
   desireMap.showFrictionMesh = true;
   desireMap.mappingReady = false;
+  desireMap.flowsReady = false;
   desireMap.deckOverlayInstance = new MapboxOverlay({
     interleaved: true,
     layers: [],
@@ -210,6 +213,8 @@ const init = () => {
     if (existingNode) {
       if (existingNode.type === desireMap.placementMode) {
         existingNode.weight = Math.min(10, existingNode.weight + 1);
+        desireMap.mappingReady = false;
+        desireMap.flowsReady = false;
       } else {
         existingNode.type = desireMap.placementMode;
         structureChanged = true;
@@ -243,6 +248,10 @@ const init = () => {
     if (node && node.weight <= 0) {
       delete desireMap.simulationNodes[cell];
       desireMap.mappingReady = false;
+      desireMap.flowsReady = false;
+    } else if (node) {
+      desireMap.mappingReady = false;
+      desireMap.flowsReady = false;
     }
     desireMap.renderInterfacePins();
     desireMap.readyToCompute = isReadyToCompute(desireMap);
@@ -256,10 +265,9 @@ const init = () => {
 const isReadyToCompute = (mapInstance) => {
   const nodes = Object.values(mapInstance.simulationNodes ?? {});
   const activeNodes = nodes.filter((n) => n.weight > 0);
-  const hasEnoughNodes = activeNodes.length >= 2;
   const hasOrigin = activeNodes.some((n) => n.type === 'origin' || n.type === 'both');
   const hasDestination = activeNodes.some((n) => n.type === 'destination' || n.type === 'both');
-  return hasEnoughNodes && hasOrigin && hasDestination;
+  return hasOrigin && hasDestination;
 };
 
 // Check if the added node is accessible by foot, and if not, alert the user and remove it

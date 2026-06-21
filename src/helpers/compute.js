@@ -485,6 +485,7 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
 export async function computeDesirePaths() {
   // Guard: ensure the friction map has been built before simulating
   if (!this.cellFrictionMap || this.cellFrictionMap.size === 0) {
+    this.flowsReady = false;
     if (this.showAlertCard) {
       this.showAlertCard(
         'Build the mapping first by clicking "Build Mapping". ' +
@@ -699,6 +700,7 @@ export async function computeDesirePaths() {
 
   updateSimulationProgress(this, totalAgents, totalAgents, 'Complete');
   this.updateLayers();
+  this.flowsReady = true;
 }
 
 /**
