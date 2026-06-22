@@ -276,3 +276,11 @@ export async function runImpassableBlurTask(frictionSource, options = {}) {
       : normalizeFrictionEntries(frictionSource);
   return runWorker('impassable-blur', { frictionEntries, ...options });
 }
+
+/**
+ * Compute AOI hexes in a worker — runs off the main thread.
+ */
+export async function runAoiHexesTask(aoiPolygon) {
+  if (!aoiPolygon || !aoiPolygon.length) return [];
+  return runWorker('aoi-hexes', aoiPolygon);
+}

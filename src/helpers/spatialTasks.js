@@ -11,6 +11,19 @@ import {
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
+/**
+ * Convert AOI polygon to H3 hexes — designed for worker execution.
+ * Cached via getCachedPolyCells so repeated calls with same geometry are fast.
+ */
+export function computeAoiHexes(aoiPolygon) {
+  if (!aoiPolygon || !aoiPolygon.length) return [];
+  try {
+    return polygonToCells(aoiPolygon, H3_STRIDE_RESOLUTION, true);
+  } catch (_e) {
+    return [];
+  }
+}
+
 // Cache polygonToCells results to avoid repeated H3 computation for identical geometries
 const POLY_CELLS_CACHE_MAX = 512;
 const _polyCellsCache = Object.create(null);
@@ -122,8 +135,9 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   const viewLookup = Object.create(null);
   for (let i = 0; i < viewHexes.length; i++) viewLookup[viewHexes[i]] = 1;
 
-  const multiFrictionEntries = Object.create(null);
-
+  // Group features by surface classification tuple to enable batch processing
+  // Key: "layerKey|layerVal" → array of {geometry}
+  const grouped = Object.create(null);
   for (let i = 0; i < features.length; i++) {
     const feature = features[i];
     if (!feature || !feature.geometry) continue;
@@ -136,26 +150,17 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     const layerVal = FRICTION_COSTS[surface.cost];
     if (typeof layerVal === 'undefined') continue;
 
-    const geometry = feature.geometry;
-    const applyCells = (coords) => {
-      const cells = getCachedPolyCells(coords);
-      for (let j = 0; j < cells.length; j++) {
-        const cell = cells[j];
-        if (!viewLookup[cell]) continue;
+    const groupKey = `${layerKey}|${layerVal}`;
+    if (!grouped[groupKey]) grouped[groupKey] = { layerKey, layerVal, geometries: [] };
+    grouped[groupKey].geometries.push(feature.geometry);
+  }
 
-        let layerMap = multiFrictionEntries[cell];
-        if (!layerMap) layerMap = multiFrictionEntries[cell] = Object.create(null);
-        if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
-          layerMap[layerKey] = layerVal;
-      }
-    };
+  // Shared result buffer — reuse across groups
+  const multiFrictionEntries = Object.create(null);
 
-    if (geometry.type === 'Polygon') {
-      applyCells(geometry.coordinates);
-    } else if (geometry.type === 'MultiPolygon') {
-      const polygons = geometry.coordinates;
-      for (let j = 0; j < polygons.length; j++) applyCells(polygons[j]);
-    }
+  // Process each group in batch using shared cell iterator
+  for (const group of Object.values(grouped)) {
+    _applyGroupToBuffer(group.geometries, group.layerKey, group.layerVal, viewLookup, multiFrictionEntries);
   }
 
   const cellFrictionEntries = Object.create(null);
@@ -166,6 +171,29 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   }
 
   return { multiFrictionEntries, cellFrictionEntries };
+}
+
+function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target) {
+  // Process all geometries in this group using a shared iteration pattern
+  for (let g = 0; g < geometries.length; g++) {
+    const geometry = geometries[g];
+    if (!geometry || !geometry.coordinates) continue;
+
+    const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+    for (let p = 0; p < coordsArray.length; p++) {
+      const cells = getCachedPolyCells(coordsArray[p]);
+      // Shared cell iterator — no per-feature allocation overhead
+      for (let c = 0; c < cells.length; c++) {
+        const cell = cells[c];
+        if (!viewLookup[cell]) continue;
+
+        let layerMap = target[cell];
+        if (!layerMap) layerMap = target[cell] = Object.create(null);
+        if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
+          layerMap[layerKey] = layerVal;
+      }
+    }
+  }
 }
 
 

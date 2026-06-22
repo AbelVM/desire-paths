@@ -1,4 +1,5 @@
 import {
+  computeAoiHexes,
   computeFastScanChunkSnapshot,
   computeFastScanSnapshot,
   computeGradientBatch,
@@ -18,6 +19,8 @@ self.onmessage = (event) => {
       result = computeGradientBatch(data.payload || {});
     } else if (data.kind === 'impassable-blur') {
       result = computeImpassableBlurSnapshot(data.payload || {});
+    } else if (data.kind === 'aoi-hexes') {
+      result = computeAoiHexes(data.payload || null);
     } else {
       throw new Error(`Unknown spatial task: ${data.kind}`);
     }

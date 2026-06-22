@@ -114,6 +114,12 @@ vi.mock('h3-js', async () => {
 
 // ── Spatial Worker Mock ───────────────────────────────────────────────
 vi.mock('../src/helpers/spatialWorker.js', () => ({
+  runAoiHexesTask: vi.fn(async (aoiPolygon) => {
+    // Return mock hexes for testing — simulates AOI polygon-to-cells result.
+    // Returns empty array when no AOI polygon is provided.
+    if (!aoiPolygon || !aoiPolygon.length) return [];
+    return mockHexes;
+  }),
   runFastScanTask: vi.fn(async (viewHexes, features) => {
     const multiFrictionEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);
@@ -263,7 +269,8 @@ describe('grid.js', () => {
   describe('triggerFastScan', () => {
     it('should return early when no viewHexes', async () => {
       const map = createMockMap();
-      map.getHexes = () => [];
+      // Set aoi_polygon to null so runAoiHexesTask returns empty array
+      map.aoi_polygon = null;
       const { triggerFastScan } = await import('../src/helpers/grid.js');
       await triggerFastScan.call(map);
       // triggerFastScan returns early when viewHexes is empty

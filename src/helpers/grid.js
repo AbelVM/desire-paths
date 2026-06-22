@@ -5,7 +5,7 @@ import {
   H3_STRIDE_RESOLUTION,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
 } from './constants.js';
-import { runFastScanTask } from './spatialWorker.js';
+import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
 import { clearComputeCaches } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
@@ -87,15 +87,28 @@ export function getHexes() {
 }
 
 /**
- * Fast Grid Building using unified Bounding Box updates
+ * Fast Grid Building using unified Bounding Box updates.
+ * Runs AOI hex generation in a worker (off main thread) in parallel with
+ * queryRenderedFeatures, so H3 computation doesn't block feature fetching.
  */
 export async function triggerFastScan() {
-  const viewHexes = this.getHexes();
+  // Start AOI hex generation in a Web Worker — runs off the main thread.
+  // This is CPU-intensive (polygonToCells) and blocks for ~50-200ms otherwise.
+  const aoiPolygon = this.aoi_polygon;
+  const aoiHexPromise = runAoiHexesTask(aoiPolygon).catch(() => []);
+
+  // Fetch features in parallel — queryRenderedFeatures depends on map rendering,
+  // which is already done (we waited for moveend in fitAoiBounds).
+  const rawFeatures = this.queryRenderedFeatures(this.aoi_px) || [];
+
+  // Wait for both AOI hexes and feature data to be ready
+  const viewHexes = await aoiHexPromise;
   if (!viewHexes || viewHexes.length === 0) return;
-  const features = this.queryRenderedFeatures(this.aoi_px) || [];
+
+  // Preprocess features into the format expected by workers
   const buildFeatures = [];
-  for (let i = 0; i < features.length; i++) {
-    const feat = features[i];
+  for (let i = 0; i < rawFeatures.length; i++) {
+    const feat = rawFeatures[i];
     if (!feat || !feat.geometry) continue;
     buildFeatures.push({
       sourceLayer: feat.sourceLayer,

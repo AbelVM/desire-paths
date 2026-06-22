@@ -61,12 +61,25 @@ async function fitAoiBounds(mapInstance) {
   const bounds = getAoiBounds(mapInstance);
   if (!bounds || typeof mapInstance.fitBounds !== 'function') return;
 
-  mapInstance.fitBounds(bounds, { padding: 0 });
-  await new Promise((resolve) => {
-    const raf = globalThis.requestAnimationFrame;
-    if (typeof raf === 'function') raf(resolve);
-    else setTimeout(resolve, 0);
+  // Use moveend event instead of RAF — fires when panning/zooming animation completes,
+  // avoiding unnecessary wait time while guaranteeing the map is ready.
+  const fitPromise = new Promise((resolve) => {
+    if (typeof mapInstance.on === 'function' && typeof mapInstance.off === 'function') {
+      const handler = () => {
+        mapInstance.off('moveend', handler);
+        resolve();
+      };
+      mapInstance.on('moveend', handler);
+    } else {
+      // Fallback: use RAF for environments without event support (e.g. tests)
+      const raf = globalThis.requestAnimationFrame;
+      if (typeof raf === 'function') raf(resolve);
+      else setTimeout(resolve, 0);
+    }
   });
+
+  mapInstance.fitBounds(bounds, { padding: 0 });
+  await fitPromise;
   mapInstance.renderInterfacePins?.();
 }
 
@@ -284,11 +297,7 @@ export function setupUI(map) {
       try {
         map.flowsReady = false;
         await fitAoiBounds(map);
-        await new Promise((resolve) => {
-          const raf = globalThis.requestAnimationFrame;
-          if (typeof raf === 'function') raf(resolve);
-          else setTimeout(resolve, 0);
-        });
+        // moveend already fires when the pan/zoom animation settles — no extra RAF needed.
         await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
         map.flowsReady = false;
