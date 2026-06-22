@@ -1,7 +1,24 @@
 import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
-//import { Deck } from '@deck.gl/core';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
+
+// Flow hover handler — updates tooltip with hex data
+export function handleFlowHover(info) {
+  const tooltip = document.getElementById('hex-tooltip');
+  if (!tooltip) return;
+
+  // info.object contains the data object (hex cell entry)
+  if (info.object && info.object.hex) {
+    tooltip.hidden = false;
+    const score = Math.round(info.object.s);
+    const friction = info.object.f;
+    tooltip.innerHTML = `<strong>Flow:</strong> ${score} paths · <strong>Friction:</strong> ${friction}`;
+    tooltip.style.left = `${info.x}px`;
+    tooltip.style.top = `${info.y}px`;
+  } else {
+    tooltip.hidden = true;
+  }
+}
 
 function buildCircularAoiPolygon(mapInstance, nodePoints) {
   const centerX = nodePoints.reduce((sum, p) => sum + p.point.x, 0) / nodePoints.length;
@@ -183,6 +200,7 @@ export function updateLayers() {
     data: flowData,
     extruded: false,
     pickable: true,
+    onHover: (info) => handleFlowHover(info),
     beforeId: this.targetLabelLayerId,
     stroked: false,
     getLineWidth: 0,

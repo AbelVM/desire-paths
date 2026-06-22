@@ -181,21 +181,44 @@ const init = () => {
     const availablePointLayerIds = pointLayerIds.filter((layerId) => desireMap.getLayer(layerId));
     if (availablePointLayerIds.length === 0) {
       setMapCursor(desireMap, 'crosshair');
-      return;
+    } else {
+      const features = desireMap.queryRenderedFeatures(e.point, {
+        layers: availablePointLayerIds,
+      });
+      setMapCursor(desireMap, features.length > 0 ? 'pointer' : 'crosshair');
     }
-
-    const features = desireMap.queryRenderedFeatures(e.point, {
-      layers: availablePointLayerIds,
-    });
-    setMapCursor(desireMap, features.length > 0 ? 'pointer' : 'crosshair');
   });
 
   desireMap.on('mouseout', () => {
     setMapCursor(desireMap, 'crosshair');
+    const tooltip = document.getElementById('hex-tooltip');
+    if (tooltip) tooltip.hidden = true;
   });
 
   // desireMap.on('moveend', e => { e.target.triggerFastScan(); });
 
+  // Remove nodes on right-click, and disable context menu
+  desireMap.on('contextmenu', (e) => {
+    e.preventDefault();
+    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    const node = desireMap.simulationNodes?.[cell];
+    if (node && node.type === desireMap.placementMode) {
+      node.weight = Math.max(0, node.weight - 1);
+    }
+    if (node && node.weight <= 0) {
+      delete desireMap.simulationNodes[cell];
+      desireMap.mappingReady = false;
+      desireMap.flowsReady = false;
+    } else if (node) {
+      desireMap.mappingReady = false;
+      desireMap.flowsReady = false;
+    }
+    desireMap.renderInterfacePins();
+    desireMap.readyToCompute = isReadyToCompute(desireMap);
+    desireMap.syncSimulationUI?.();
+  });
+
+  // Click handler — place/increase nodes, update onboarding state
   desireMap.on('click', (e) => {
     if (!document.getElementById('map')) return;
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
@@ -235,27 +258,6 @@ const init = () => {
       desireMap.mappingReady = false;
     }
 
-    desireMap.syncSimulationUI?.();
-  });
-
-  // Remove nodes on right-click, and disable context menu
-  desireMap.on('contextmenu', (e) => {
-    e.preventDefault();
-    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
-    const node = desireMap.simulationNodes?.[cell];
-    if (node && node.type === desireMap.placementMode) {
-      node.weight = Math.max(0, node.weight - 1);
-    }
-    if (node && node.weight <= 0) {
-      delete desireMap.simulationNodes[cell];
-      desireMap.mappingReady = false;
-      desireMap.flowsReady = false;
-    } else if (node) {
-      desireMap.mappingReady = false;
-      desireMap.flowsReady = false;
-    }
-    desireMap.renderInterfacePins();
-    desireMap.readyToCompute = isReadyToCompute(desireMap);
     desireMap.syncSimulationUI?.();
   });
 

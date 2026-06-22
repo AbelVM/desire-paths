@@ -90,11 +90,11 @@ export function setupUI(map) {
   const frictionLegendBody = document.getElementById('friction-legend-body');
   const weightInput = document.getElementById('node-weight');
   const weightReadout = document.getElementById('node-weight-readout');
-  const buildButton = document.getElementById('btn-build-mapping');
   const computeButton = document.getElementById('btn-compute');
   const exportButton = document.getElementById('btn-export-geojson');
   const clearButton = document.getElementById('btn-clear');
   const modeLabel = document.getElementById('mode-status');
+  const nodeCountChip = document.getElementById('node-count-chip');
   const loader = document.getElementById('scan-loader');
   const flowReadout = document.getElementById('max-flow-readout');
   const progress = document.getElementById('simulation-progress');
@@ -104,7 +104,13 @@ export function setupUI(map) {
   const alertTitle = document.getElementById('app-alert-title');
   const alertMessage = document.getElementById('app-alert-message');
   const alertDismiss = document.getElementById('app-alert-dismiss');
+  const onboardingOverlay = document.getElementById('onboarding-overlay');
   let alertTimer;
+
+  // Onboarding state
+  let onboardingStep = 1;
+  const totalOnboardingSteps = 3;
+  let onboardingDismissed = false;
 
   const clampWeight = (value) => Math.min(10, Math.max(1, Number.parseInt(value, 10) || 1));
 
@@ -115,20 +121,103 @@ export function setupUI(map) {
       button.setAttribute('aria-pressed', String(active));
     }
 
+    // Count nodes by type
+    const nodes = Object.values(map.simulationNodes ?? {});
+    let originCount = 0;
+    let destCount = 0;
+    for (const n of nodes) {
+      if (n.weight <= 0) continue;
+      if (n.type === 'origin' || n.type === 'both') originCount++;
+      if (n.type === 'destination' || n.type === 'both') destCount++;
+    }
+
+    const hasOrigins = originCount > 0;
+    const hasDestinations = destCount > 0;
+    const readyToCompute = hasOrigins && hasDestinations;
+
+    let modeText = '';
     if (map.placementMode === 'origin') {
-      modeLabel.innerText = 'Placement: Origin nodes';
+      modeText = `Placement: Origin nodes · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
       modeLabel.className = 'mode-indicator mode-origin';
-      return;
-    }
-
-    if (map.placementMode === 'destination') {
-      modeLabel.innerText = 'Placement: Destination nodes';
+    } else if (map.placementMode === 'destination') {
+      modeText = `Placement: Destination nodes · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
       modeLabel.className = 'mode-indicator mode-destination';
+    } else {
+      modeText = `Placement: Dual nodes`;
+      modeLabel.className = 'mode-indicator mode-both';
+    }
+
+    if (readyToCompute) {
+      modeText += ' · Ready';
+      if (modeLabel?.classList) modeLabel.classList.add('ready');
+    } else {
+      if (modeLabel?.classList) modeLabel.classList.remove('ready');
+    }
+
+    if (modeLabel) modeLabel.innerText = modeText;
+
+    // Update count chip
+    if (nodeCountChip) {
+      const originsEl = nodeCountChip.querySelector('.count-chip-origins');
+      const destsEl = nodeCountChip.querySelector('.count-chip-dests');
+      if (originsEl) originsEl.textContent = originCount;
+      if (destsEl) destsEl.textContent = destCount;
+      if (originCount + destCount > 0) {
+        nodeCountChip.classList.remove('hidden');
+      } else {
+        nodeCountChip.classList.add('hidden');
+      }
+    }
+
+    // Update onboarding step visibility
+    updateOnboardingStep();
+  };
+
+  const updateOnboardingStep = () => {
+    if (!onboardingOverlay) return;
+
+    // Don't auto-show if user has dismissed it
+    if (onboardingDismissed) {
+      onboardingOverlay.hidden = true;
       return;
     }
 
-    modeLabel.innerText = 'Placement: Dual nodes';
-    modeLabel.className = 'mode-indicator mode-both';
+    const nodes = Object.values(map.simulationNodes ?? {});
+    const activeNodes = nodes.filter((n) => n.weight > 0);
+    const hasOrigins = activeNodes.some((n) => n.type === 'origin' || n.type === 'both');
+    const hasDestinations = activeNodes.some((n) => n.type === 'destination' || n.type === 'both');
+
+    if (hasOrigins && !hasDestinations) {
+      onboardingStep = 2;
+    } else if (hasOrigins && hasDestinations) {
+      onboardingStep = 3;
+    } else {
+      onboardingStep = 1;
+    }
+
+    // Show overlay only during onboarding (up to step 3, before simulation runs)
+    const shouldShow = activeNodes.length > 0 && !map.flowsReady;
+    if (shouldShow) {
+      onboardingOverlay.hidden = false;
+    } else if (!hasOrigins && !hasDestinations) {
+      // Show overlay when there are no nodes at all
+      onboardingOverlay.hidden = false;
+    } else {
+      onboardingOverlay.hidden = true;
+    }
+
+    // Highlight active step
+    const steps = onboardingOverlay.querySelectorAll('.onboarding-step');
+    for (const step of steps) {
+      const stepNum = parseInt(step.dataset.step, 10);
+      step.classList.toggle('active', stepNum === onboardingStep);
+    }
+  };
+
+  // Dismiss handler — sets flag so overlay won't reopen on mode change
+  const dismissOnboarding = () => {
+    onboardingDismissed = true;
+    if (onboardingOverlay) onboardingOverlay.hidden = true;
   };
 
   const syncWeightUI = () => {
@@ -140,13 +229,16 @@ export function setupUI(map) {
 
   const syncFrictionUI = () => {
     const enabled = map.showFrictionMesh !== false;
-    frictionButton.innerText = enabled ? '⊖' : '⊕';
-    frictionButton.setAttribute('aria-pressed', String(enabled));
-    frictionButton.setAttribute(
-      'aria-label',
-      enabled ? 'Hide friction legend' : 'Show friction legend'
-    );
-    frictionButton.setAttribute('title', enabled ? 'Hide friction legend' : 'Show friction legend');
+    const iconEl = frictionButton?.querySelector?.('.toggle-icon');
+    const textEl = frictionButton?.querySelector?.('.toggle-text');
+
+    if (iconEl) iconEl.textContent = enabled ? '−' : '+';
+    if (textEl) {
+      textEl.textContent = enabled ? 'Hide' : 'Show';
+      textEl.classList.toggle('hidden', !enabled);
+    }
+    frictionButton?.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
+    frictionButton?.setAttribute('aria-pressed', String(enabled));
     if (frictionLegendBody) frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
       map.updateLayers();
@@ -166,10 +258,11 @@ export function setupUI(map) {
       progress.hidden = state.total <= 0 && state.phase === 'Idle';
     }
     if (progressLabel) {
-      progressLabel.innerText =
-        state.total > 0
-          ? `${state.phase} ${state.processed}/${state.total} agents (${Math.round(percent)}%)`
-          : state.phase;
+      if (state.total > 0) {
+        progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} agents · ${Math.round(percent)}%</span>`;
+      } else {
+        progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span>`;
+      }
     }
   };
 
@@ -181,15 +274,17 @@ export function setupUI(map) {
     const canExport = map.flowsReady === true && (map.pathDesireScores?.size ?? 0) > 0;
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
-    if (buildButton) buildButton.toggleAttribute('disabled', busy || !canBuild);
+    // Build Mapping button removed — simulation auto-builds on demand
     if (clearButton) clearButton.disabled = busy || !hasGrid;
-    computeButton.disabled = busy || !canCompute;
+    computeButton.disabled = busy || (!canCompute && !canBuild);
     if (exportButton) exportButton.disabled = busy || !canExport;
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     if (loader && !busy) {
       loader.style.display = 'none';
     }
     syncProgressUI();
+    // Sync mode UI to update node counts and readiness state
+    syncModeUI();
   };
 
   const hideAlertCard = () => {
@@ -216,14 +311,15 @@ export function setupUI(map) {
     for (const button of modeButtons) button.disabled = busy;
     frictionButton.disabled = busy;
     if (weightInput) weightInput.disabled = busy;
-    if (buildButton) buildButton.disabled = busy;
     if (exportButton) exportButton.disabled = busy;
     computeButton.disabled = busy;
     clearButton.disabled = busy;
     loader.innerText = message;
     loader.style.display = busy ? 'block' : 'none';
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
-    if (progressLabel) progressLabel.innerText = message;
+    if (progressLabel) {
+      progressLabel.innerHTML = `<span class="progress-phase">${message}</span>`;
+    }
     panel.setAttribute('aria-busy', String(busy));
   };
 
@@ -262,6 +358,9 @@ export function setupUI(map) {
     map.clearLayers();
     syncFlowReadout();
     syncSimulationUI();
+    // Reset onboarding to step 1
+    onboardingStep = 1;
+    onboardingDismissed = false;
   };
 
   for (const button of modeButtons) {
@@ -283,21 +382,21 @@ export function setupUI(map) {
     syncFrictionUI();
   });
 
-  if (buildButton) {
-    buildButton.addEventListener('click', async () => {
-      if (!hasBuildInputs(map.simulationNodes)) {
-        showAlertCard('Place at least one origin/dual node and one destination/dual node before building the mapping.', {
-          title: 'Missing endpoints',
-          tone: 'warning',
-        });
-        return;
-      }
+  computeButton.addEventListener('click', async () => {
+    if (!hasBuildInputs(map.simulationNodes)) {
+      showAlertCard('Place at least one origin/dual node and one destination/dual node before simulating flows.', {
+        title: 'Missing endpoints',
+        tone: 'warning',
+      });
+      return;
+    }
 
+    // Auto-build mapping if not already done
+    if (!map.mappingReady) {
       setBusyState(true, 'Building mapping...');
       try {
         map.flowsReady = false;
         await fitAoiBounds(map);
-        // moveend already fires when the pan/zoom animation settles — no extra RAF needed.
         await map.triggerFastScan();
         map.mappingReady = map.cellFrictionMap.size > 0;
         map.flowsReady = false;
@@ -309,6 +408,9 @@ export function setupUI(map) {
               tone: 'warning',
             }
           );
+          setBusyState(false);
+          syncSimulationUI();
+          return;
         }
       } catch (err) {
         map.flowsReady = false;
@@ -317,29 +419,14 @@ export function setupUI(map) {
           title: 'Build failed',
           tone: 'error',
         });
-      } finally {
         setBusyState(false);
         syncSimulationUI();
+        return;
       }
-    });
-  }
+    }
 
-  computeButton.addEventListener('click', async () => {
-    if (!map.mappingReady) {
-      showAlertCard('Build the mapping before simulating flows.', {
-        title: 'Mapping not built',
-        tone: 'warning',
-      });
-      return;
-    }
-    if (!hasBuildInputs(map.simulationNodes)) {
-      showAlertCard('Place at least one origin/dual node and one destination/dual node before simulating flows.', {
-        title: 'Missing endpoints',
-        tone: 'warning',
-      });
-      return;
-    }
-    setBusyState(true);
+    // Run simulation
+    setBusyState(true, 'Simulating flows...');
     try {
       await new Promise((resolve) => {
         const raf = globalThis.requestAnimationFrame;
@@ -393,6 +480,22 @@ export function setupUI(map) {
 
   if (alertDismiss) {
     alertDismiss.addEventListener('click', hideAlertCard);
+  }
+
+  // Onboarding dismiss button + backdrop click-to-dismiss
+  const onboardingDismiss = document.getElementById('onboarding-dismiss');
+  if (onboardingDismiss) {
+    onboardingDismiss.addEventListener('click', () => {
+      dismissOnboarding();
+    });
+  }
+  // Click outside card dismisses overlay
+  if (onboardingOverlay) {
+    onboardingOverlay.addEventListener('click', (e) => {
+      if (!e.target.closest('.onboarding-card')) {
+        dismissOnboarding();
+      }
+    });
   }
 
   map._showAlertCard = showAlertCard;
