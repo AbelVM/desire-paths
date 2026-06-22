@@ -125,6 +125,7 @@ class DesireMap {
   renderInterfacePins(...args) { return renderInterfacePins.call(this, ...args); }
   updateLayers(...args) { return updateLayers.call(this, ...args); }
   clearLayers(...args) { return clearLayers.call(this, ...args); }
+
   exportSimulationGeoJSON(...args) { return exportSimulationGeoJSON.call(this, ...args); }
   computeDesirePaths(...args) { return computeDesirePaths.call(this, ...args); }
   initializeAffordanceMap(...args) { return initializeAffordanceMap.call(this, ...args); }

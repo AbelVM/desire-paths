@@ -914,7 +914,7 @@ describe('ui.js', () => {
   });
 
   it('should enable export after flows are simulated', async () => {
-    const map = createMockMap({ flowsReady: true });
+    const map = createMockMap({ flowsReady: true, pathDesireScores: new Map([['h3test', 5]]) });
     const doc = setupMockDocument();
     vi.stubGlobal('document', doc);
     const { setupUI } = await import('../src/helpers/ui.js');

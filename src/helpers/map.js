@@ -211,27 +211,41 @@ export function updateLayers() {
   this.deckOverlayInstance?.setProps({ layers });
 }
 
-function getScore(ctx, cell) {
-  const scores = ctx.pathDesireScores;
+function getScore(cell) {
+  const scores = this.pathDesireScores;
   if (!scores) return 0;
   return typeof scores.get === 'function' ? scores.get(cell) || 0 : scores[cell] || 0;
 }
 
-export function buildSimulationGeoJSON(ctx) {
-  const viewHexes = ctx.getHexes?.() ?? Array.from(ctx.cellFrictionMap?.keys() ?? []);
+export function buildSimulationGeoJSON() {
+  const pathScores = this.pathDesireScores;
+  let scoreCells;
+  if (pathScores && typeof pathScores.keys === 'function') {
+    scoreCells = Array.from(pathScores.keys());
+  } else if (pathScores) {
+    scoreCells = Object.keys(pathScores);
+  }
+
+  const viewHexes = this.getHexes?.() ?? Array.from(this.cellFrictionMap?.keys() ?? []);
+
+  // Merge: scored cells + visible hexes that aren't already scored
+  const allHexes = new Set(scoreCells);
+  for (const h of viewHexes) {
+    if (!allHexes.has(h)) allHexes.add(h);
+  }
+
   const features = [];
 
-  for (let i = 0; i < viewHexes.length; i++) {
-    const cell = viewHexes[i];
-    const score = getScore(ctx, cell);
+  for (const cell of allHexes) {
+    const score = getScore.call(this, cell);
     if (!score) continue;
 
     const boundary = cellToBoundary(cell, true);
-    const frictionObj = ctx._frictionObj || {};
-    const affordanceObj = ctx._affordanceObj || {};
-    const friction = typeof frictionObj[cell] === 'number' ? frictionObj[cell] : ctx.cellFrictionMap?.get(cell) ?? 0;
+    const frictionObj = this._frictionObj || {};
+    const affordanceObj = this._affordanceObj || {};
+    const friction = typeof frictionObj[cell] === 'number' ? frictionObj[cell] : this.cellFrictionMap?.get(cell) ?? 0;
     const affordance =
-      typeof affordanceObj[cell] === 'number' ? affordanceObj[cell] : ctx.affordanceMap?.get(cell) ?? 0;
+      typeof affordanceObj[cell] === 'number' ? affordanceObj[cell] : this.affordanceMap?.get(cell) ?? 0;
 
     features.push({
       type: 'Feature',
@@ -254,8 +268,8 @@ export function buildSimulationGeoJSON(ctx) {
   };
 }
 
-export function exportSimulationGeoJSON(ctx) {
-  const geojson = buildSimulationGeoJSON(ctx);
+export function exportSimulationGeoJSON() {
+  const geojson = buildSimulationGeoJSON.call(this);
   const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

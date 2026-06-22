@@ -165,7 +165,7 @@ export function setupUI(map) {
     const mappingReady = map.mappingReady === true;
     const canBuild = hasBuildInputs(map.simulationNodes);
     const canCompute = mappingReady && canBuild;
-    const canExport = map.flowsReady === true;
+    const canExport = map.flowsReady === true && (map.pathDesireScores?.size ?? 0) > 0;
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
     if (buildButton) buildButton.toggleAttribute('disabled', busy || !canBuild);

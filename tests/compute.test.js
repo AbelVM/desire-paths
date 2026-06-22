@@ -901,7 +901,7 @@ describe('buildSimulationGeoJSON', () => {
       _affordanceObj: { [h3]: 0.4 },
     };
 
-    const geojson = buildSimulationGeoJSON(ctx);
+    const geojson = buildSimulationGeoJSON.call(ctx);
 
     expect(geojson.type).toBe('FeatureCollection');
     expect(geojson.features).toHaveLength(1);
@@ -921,7 +921,7 @@ describe('buildSimulationGeoJSON', () => {
       _affordanceObj: { [h3]: 0.4 },
     };
 
-    const geojson = buildSimulationGeoJSON(ctx);
+    const geojson = buildSimulationGeoJSON.call(ctx);
 
     expect(geojson.features).toHaveLength(0);
   });
