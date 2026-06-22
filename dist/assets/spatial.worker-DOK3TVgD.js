@@ -70,7 +70,7 @@
 		}
 		var F = Math.abs, p = Math.ceil, T = Math.floor, z = Math.min, G = 0, L = null, U = null;
 		r.preloadedImages = {}, r.preloadedAudios = {};
-		var R, S, Y = null, x = "data:application/octet-stream;base64,";
+		var S, R, Y = null, x = "data:application/octet-stream;base64,";
 		function O(A) {
 			return String.prototype.startsWith ? A.startsWith(x) : 0 === A.indexOf(x);
 		}
@@ -333,7 +333,7 @@
 				while (0);
 				return n[i >> 2] = ((0 | n[i >> 2]) + r | 0) % 6 | 0, n[(w = t) >> 2] = A, n[w + 4 >> 2] = e, 0;
 			}
-			function R(A, e, r, i) {
+			function S(A, e, r, i) {
 				A |= 0, e |= 0, r |= 0, i |= 0;
 				var t, f, a = 0, o = 0, l = 0, u = 0, s = 0, c = 0, d = 0, w = 0, g = 0;
 				if (f = p, p = p + 16 | 0, g = f + 8 | 0, n[(w = t = f) >> 2] = A, n[w + 4 >> 2] = e, (0 | r) < 0) return p = f, 2;
@@ -380,7 +380,7 @@
 				while (0);
 				return p = f, 0 | A;
 			}
-			function S(A, e, r, i) {
+			function R(A, e, r, i) {
 				A |= 0, e |= 0, i |= 0;
 				var t, f = 0, a = 0, o = 0, l = 0, u = 0, s = 0, c = 0, d = 0;
 				if (t = p, p = p + 16 | 0, o = t, !(r |= 0)) return n[i >> 2] = A, n[i + 4 >> 2] = e, p = t, 0;
@@ -428,7 +428,7 @@
 			}
 			function x(A, e, r, i, f, a, o) {
 				e |= 0, r |= 0, i |= 0, f |= 0, a |= 0, o |= 0;
-				var l, u, s, c, d, w, g, B, b, k, h = 0, D = 0, Q = 0, v = 0, E = 0, C = 0, P = 0, _ = 0, m = 0, I = 0, y = 0, F = 0, T = 0, z = 0, G = 0, L = 0, U = 0, R = 0, S = 0;
+				var l, u, s, c, d, w, g, B, b, k, h = 0, D = 0, Q = 0, v = 0, E = 0, C = 0, P = 0, _ = 0, m = 0, I = 0, y = 0, F = 0, T = 0, z = 0, G = 0, L = 0, U = 0, S = 0, R = 0;
 				if (k = p, p = p + 64 | 0, g = k + 48 | 0, B = k + 32 | 0, b = k + 24 | 0, l = k + 8 | 0, u = k, (0 | (D = 0 | n[(A |= 0) >> 2])) <= 0) return p = k, 0;
 				for (s = A + 4 | 0, c = g + 8 | 0, d = B + 8 | 0, w = l + 8 | 0, h = 0, T = 0;;) {
 					F = (Q = 0 | n[s >> 2]) + (T << 4) | 0, n[g >> 2] = n[F >> 2], n[g + 4 >> 2] = n[F + 4 >> 2], n[g + 8 >> 2] = n[F + 8 >> 2], n[g + 12 >> 2] = n[F + 12 >> 2], (0 | T) == (D + -1 | 0) ? (n[B >> 2] = n[Q >> 2], n[B + 4 >> 2] = n[Q + 4 >> 2], n[B + 8 >> 2] = n[Q + 8 >> 2], n[B + 12 >> 2] = n[Q + 12 >> 2]) : (F = Q + (T + 1 << 4) | 0, n[B >> 2] = n[F >> 2], n[B + 4 >> 2] = n[F + 4 >> 2], n[B + 8 >> 2] = n[F + 8 >> 2], n[B + 12 >> 2] = n[F + 12 >> 2]), D = 0 | iA(g, B, i, b);
@@ -437,7 +437,7 @@
 						else if (Q = 0 | n[(D = b) >> 2], (0 | (D = 0 | n[D + 4 >> 2])) > 0 | !(0 | D) & Q >>> 0 > 0) {
 							y = 0, F = 0;
 							e: for (;;) {
-								if (U = 1 / (+(Q >>> 0) + 4294967296 * +(0 | D)), S = +t[g >> 3], R = +((D = 0 | rr(0 | Q, 0 | D, 0 | y, 0 | F)) >>> 0) + 4294967296 * +(0 | M()), L = +(y >>> 0) + 4294967296 * +(0 | F), t[l >> 3] = U * (S * R) + U * (+t[B >> 3] * L), t[w >> 3] = U * (+t[c >> 3] * R) + U * (+t[d >> 3] * L), 0 | (D = 0 | ee(l, i, u))) {
+								if (U = 1 / (+(Q >>> 0) + 4294967296 * +(0 | D)), R = +t[g >> 3], S = +((D = 0 | rr(0 | Q, 0 | D, 0 | y, 0 | F)) >>> 0) + 4294967296 * +(0 | M()), L = +(y >>> 0) + 4294967296 * +(0 | F), t[l >> 3] = U * (R * S) + U * (+t[B >> 3] * L), t[w >> 3] = U * (+t[c >> 3] * S) + U * (+t[d >> 3] * L), 0 | (D = 0 | ee(l, i, u))) {
 									h = D;
 									break;
 								}
@@ -794,7 +794,7 @@
 						t = -1;
 					} while (0);
 					return p = i, 0 | (f = t);
-				}(A, a, 7 & f), -1 == (0 | f) ? (n[r >> 2] = 0, p = t, 0 | (a = 6)) : (0 | ie(A, a, i) && P(27795, 26932, 282, 26947), e = 0 | ur(0 | A, 0 | e, 52), M(), e &= 15, 0 | ZA(A, a) ? GA(i, e, f, 2, r) : SA(i, e, f, 2, r), p = t, 0 | (a = 0))) : (p = t, 0 | (a = 6));
+				}(A, a, 7 & f), -1 == (0 | f) ? (n[r >> 2] = 0, p = t, 0 | (a = 6)) : (0 | ie(A, a, i) && P(27795, 26932, 282, 26947), e = 0 | ur(0 | A, 0 | e, 52), M(), e &= 15, 0 | ZA(A, a) ? GA(i, e, f, 2, r) : RA(i, e, f, 2, r), p = t, 0 | (a = 0))) : (p = t, 0 | (a = 6));
 			}
 			function pA(A, e, r, i) {
 				e |= 0, i |= 0;
@@ -903,7 +903,7 @@ while (2 == (0 | UA(m, a, 0, 1)));
 									A = 12;
 									break A;
 							}
-							Re(k, D, i, A, C), TA(C, 0 | n[b >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2]);
+							Se(k, D, i, A, C), TA(C, 0 | n[b >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2]);
 						}
 						if ((0 | T) < (0 | u) && (aA(B, b), TA(b, 0 | n[m >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2])), n[_ >> 2] = n[m >> 2], n[_ + 4 >> 2] = n[m + 4 >> 2], n[_ + 8 >> 2] = n[m + 8 >> 2], n[_ + 12 >> 2] = n[m + 12 >> 2], (0 | (T = T + 1 | 0)) >= (0 | z)) {
 							A = 3;
@@ -951,7 +951,7 @@ while (2 == (0 | UA(m, a, 0, 1)));
 				}
 				return A = c + 4 | 0, n[l >> 2] = n[A >> 2], n[l + 4 >> 2] = n[A + 4 >> 2], n[l + 8 >> 2] = n[A + 8 >> 2], e = 0 | n[16880 + (e << 2) >> 2], uA(l, o ? 3 * e | 0 : e), oA(g, l, g), fA(g), i = o && ((0 | n[a >> 2]) + (0 | n[g >> 2]) + (0 | n[d >> 2]) | 0) == (0 | w) ? 1 : 2, p = u, 0 | i;
 			}
-			function RA(A, e) {
+			function SA(A, e) {
 				A |= 0, e |= 0;
 				var r = 0;
 				do
@@ -959,7 +959,7 @@ while (2 == (0 | UA(m, a, 0, 1)));
 				while (2 == (0 | r));
 				return 0 | r;
 			}
-			function SA(A, e, r, i, f) {
+			function RA(A, e, r, i, f) {
 				A |= 0, e |= 0, r |= 0, i |= 0, f |= 0;
 				var a, o, l, u, s, c, d, w, g, B, b, k, h, D, Q, v, E, C, M = 0, _ = 0, m = 0, I = 0, y = 0;
 				if (C = p, p = p + 240 | 0, D = C + 208 | 0, Q = C, v = C + 192 | 0, E = C + 176 | 0, g = C + 160 | 0, B = C + 144 | 0, b = C + 128 | 0, k = C + 112 | 0, h = C + 96 | 0, n[(M = C + 224 | 0) >> 2] = e, n[D >> 2] = n[A >> 2], n[D + 4 >> 2] = n[A + 4 >> 2], n[D + 8 >> 2] = n[A + 8 >> 2], n[D + 12 >> 2] = n[A + 12 >> 2], YA(D, M, Q), n[f >> 2] = 0, (0 | (w = i + r + (6 == (0 | i) & 1) | 0)) <= (0 | r)) p = C;
@@ -981,7 +981,7 @@ while (2 == (0 | UA(m, a, 0, 1)));
 									A = 8;
 									break A;
 							}
-							Re(E, g, i, A, h), 0 | Se(E, h) || 0 | Se(g, h) || (TA(h, 0 | n[D >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2]));
+							Se(E, g, i, A, h), 0 | Re(E, h) || 0 | Re(g, h) || (TA(h, 0 | n[D >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2]));
 						}
 						if ((0 | m) < (0 | o) && (aA(d, E), TA(E, 0 | n[v >> 2], a, 1, f + 8 + (n[f >> 2] << 4) | 0), n[f >> 2] = 1 + (0 | n[f >> 2])), (0 | (m = m + 1 | 0)) >= (0 | w)) {
 							A = 3;
@@ -1313,7 +1313,7 @@ while (0 | UA(r, o, 0, 0));
 						return GA(f, t, 0, 5, r), p = i, 0;
 					}
 				while (0);
-				return SA(f, t, 0, 6, r), p = i, 0;
+				return RA(f, t, 0, 6, r), p = i, 0;
 			}
 			function fe(A, e) {
 				e |= 0;
@@ -2189,12 +2189,12 @@ while (0 | UA(r, o, 0, 0));
 				}
 				return 6 == (0 | t) ? 0 | A : 0;
 			}
-			function Re(A, e, r, i, n) {
+			function Se(A, e, r, i, n) {
 				e |= 0, r |= 0, i |= 0, n |= 0;
 				var f, a, o, l, u, s, c, d = 0;
 				l = +t[(A |= 0) >> 3], o = +t[e >> 3] - l, a = +t[A + 8 >> 3], f = +t[e + 8 >> 3] - a, s = +t[r >> 3], d = ((d = +t[i >> 3] - s) * (a - (c = +t[r + 8 >> 3])) - (l - s) * (u = +t[i + 8 >> 3] - c)) / (o * u - f * d), t[n >> 3] = l + o * d, t[n + 8 >> 3] = a + f * d;
 			}
-			function Se(A, e) {
+			function Re(A, e) {
 				return e |= 0, +l(+(+t[(A |= 0) >> 3] - +t[e >> 3])) < 1.1920928955078125e-7 ? 0 | (e = +l(+(+t[A + 8 >> 3] - +t[e + 8 >> 3])) < 1.1920928955078125e-7) : 0 | (e = 0);
 			}
 			function Ye(A, e) {
@@ -3700,7 +3700,7 @@ while (0 | UA(r, o, 0, 0));
 						br(0 | i, -1, e << 2);
 						A: do
 							if (a) for (o = 0;;) {
-								if (RA(l = d + (o << 4) | 0, 0 | n[c >> 2]), l = 0 | n[l >> 2], -1 == (0 | (u = 0 | n[i >> 2])) | (0 | u) == (0 | l)) f = i;
+								if (SA(l = d + (o << 4) | 0, 0 | n[c >> 2]), l = 0 | n[l >> 2], -1 == (0 | (u = 0 | n[i >> 2])) | (0 | u) == (0 | l)) f = i;
 								else {
 									a = 0;
 									do {
@@ -3810,9 +3810,9 @@ while (0 | UA(r, o, 0, 0));
 					return f = p, p = p + 32 | 0, l = f, (a = 0 | Ee(A |= 0, e |= 0, A, e, o = f + 12 | 0)) || (a = 0 | Ee(A, e, r, i, l)) ? (p = f, 0 | (l = a)) : (i = 0 | er(0 | (i = 0 | MA(o, l)), ((0 | i) < 0) << 31 >> 31, 1, 0), o = 0 | M(), n[(l = t) >> 2] = i, n[l + 4 >> 2] = o, p = f, 0 | (l = 0));
 				},
 				_gridRing: function(A, e, r, i) {
-					return 0 | R(A |= 0, e |= 0, r |= 0, i |= 0) ? (br(0 | i, 0, 48 * r | 0), 0 | (i = 0 | S(A, e, r, i))) : 0 | (i = 0);
+					return 0 | S(A |= 0, e |= 0, r |= 0, i |= 0) ? (br(0 | i, 0, 48 * r | 0), 0 | (i = 0 | R(A, e, r, i))) : 0 | (i = 0);
 				},
-				_gridRingUnsafe: R,
+				_gridRingUnsafe: S,
 				_i64Add: er,
 				_i64Subtract: rr,
 				_isPentagon: ZA,
@@ -3923,11 +3923,11 @@ while (0 | UA(r, o, 0, 0));
 				},
 				_polygonToCells: function(A, e, r, i) {
 					A |= 0, e |= 0, i |= 0;
-					var t, f, a, o, l = 0, u = 0, s = 0, c = 0, d = 0, w = 0, g = 0, B = 0, b = 0, k = 0, h = 0, D = 0, Q = 0, v = 0, E = 0, C = 0, P = 0, _ = 0, m = 0, I = 0, y = 0, F = 0, T = 0, z = 0, U = 0, R = 0, S = 0;
+					var t, f, a, o, l = 0, u = 0, s = 0, c = 0, d = 0, w = 0, g = 0, B = 0, b = 0, k = 0, h = 0, D = 0, Q = 0, v = 0, E = 0, C = 0, P = 0, _ = 0, m = 0, I = 0, y = 0, F = 0, T = 0, z = 0, U = 0, S = 0, R = 0;
 					if (o = p, p = p + 112 | 0, t = o + 80 | 0, d = o + 72 | 0, f = o, a = o + 56 | 0, 0 | (l = 0 | pe(r |= 0))) return p = o, 0 | l;
-					if (!(S = 0 | qe(32 + (n[(w = A + 8 | 0) >> 2] << 5) | 0))) return p = o, 13;
-					if (Te(A, S), !(l = 0 | pe(r))) {
-						if (R = 0 | n[(U = A) + 4 >> 2], n[(l = d) >> 2] = n[U >> 2], n[l + 4 >> 2] = R, Fe(d, t), l = 0 | rA(t, e, f)) U = 0, R = 0;
+					if (!(R = 0 | qe(32 + (n[(w = A + 8 | 0) >> 2] << 5) | 0))) return p = o, 13;
+					if (Te(A, R), !(l = 0 | pe(r))) {
+						if (S = 0 | n[(U = A) + 4 >> 2], n[(l = d) >> 2] = n[U >> 2], n[l + 4 >> 2] = S, Fe(d, t), l = 0 | rA(t, e, f)) U = 0, S = 0;
 						else {
 							if (l = 0 | n[d >> 2], (0 | (u = 0 | n[w >> 2])) > 0) {
 								s = 0 | n[A + 12 >> 2], r = 0;
@@ -3936,23 +3936,23 @@ while (0 | UA(r, o, 0, 0));
 								while ((0 | r) != (0 | u));
 								r = l;
 							} else r = l;
-							u = 0 | n[(l = f) >> 2], (0 | (l = 0 | n[l + 4 >> 2])) < (0 | (s = ((0 | r) < 0) << 31 >> 31)) | (0 | l) == (0 | s) & u >>> 0 < r >>> 0 ? (n[(l = f) >> 2] = r, n[l + 4 >> 2] = s, l = s) : r = u, U = 0 | er(0 | r, 0 | l, 12, 0), R = 0 | M(), n[(l = f) >> 2] = U, n[l + 4 >> 2] = R, l = 0;
+							u = 0 | n[(l = f) >> 2], (0 | (l = 0 | n[l + 4 >> 2])) < (0 | (s = ((0 | r) < 0) << 31 >> 31)) | (0 | l) == (0 | s) & u >>> 0 < r >>> 0 ? (n[(l = f) >> 2] = r, n[l + 4 >> 2] = s, l = s) : r = u, U = 0 | er(0 | r, 0 | l, 12, 0), S = 0 | M(), n[(l = f) >> 2] = U, n[l + 4 >> 2] = S, l = 0;
 						}
 						if (!l) {
-							if (!(r = 0 | Ar(U, 8))) return $e(S), p = o, 13;
-							if (!(c = 0 | Ar(U, 8))) return $e(S), $e(r), p = o, 13;
-							n[(T = t) >> 2] = 0, n[T + 4 >> 2] = 0, z = 0 | n[(T = A) + 4 >> 2], n[(l = d) >> 2] = n[T >> 2], n[l + 4 >> 2] = z, l = 0 | x(d, U, R, e, t, r, c);
+							if (!(r = 0 | Ar(U, 8))) return $e(R), p = o, 13;
+							if (!(c = 0 | Ar(U, 8))) return $e(R), $e(r), p = o, 13;
+							n[(T = t) >> 2] = 0, n[T + 4 >> 2] = 0, z = 0 | n[(T = A) + 4 >> 2], n[(l = d) >> 2] = n[T >> 2], n[l + 4 >> 2] = z, l = 0 | x(d, U, S, e, t, r, c);
 							A: do
-								if (l) $e(r), $e(c), $e(S);
+								if (l) $e(r), $e(c), $e(R);
 								else {
 									e: do
 										if ((0 | n[w >> 2]) > 0) {
-											for (s = A + 12 | 0, u = 0; l = 0 | x((0 | n[s >> 2]) + (u << 3) | 0, U, R, e, t, r, c), u = u + 1 | 0, !(0 | l);) if ((0 | u) >= (0 | n[w >> 2])) break e;
-											$e(r), $e(c), $e(S);
+											for (s = A + 12 | 0, u = 0; l = 0 | x((0 | n[s >> 2]) + (u << 3) | 0, U, S, e, t, r, c), u = u + 1 | 0, !(0 | l);) if ((0 | u) >= (0 | n[w >> 2])) break e;
+											$e(r), $e(c), $e(R);
 											break A;
 										}
 									while (0);
-									(0 | R) > 0 | !(0 | R) & U >>> 0 > 0 && br(0 | c, 0, U << 3), T = 0 | n[(z = t) + 4 >> 2];
+									(0 | S) > 0 | !(0 | S) & U >>> 0 > 0 && br(0 | c, 0, U << 3), T = 0 | n[(z = t) + 4 >> 2];
 									e: do {
 										if ((0 | T) > 0 | !(0 | T) & (0 | n[z >> 2]) >>> 0 > 0) {
 											I = r, y = c, F = r, T = c, z = r, l = r, P = r, _ = c, m = c, r = c;
@@ -3974,22 +3974,22 @@ while (0 | UA(r, o, 0, 0));
 														i: do
 															if (!(0 | k) & !(0 | h)) c = u, d = s;
 															else {
-																if (g = 0 | or(0 | k, 0 | h, 0 | U, 0 | R), w = 0 | M(), !(!(0 | (d = 0 | n[(e = c = i + (g << 3) | 0) >> 2])) & !(0 | (e = 0 | n[e + 4 >> 2])))) {
+																if (g = 0 | or(0 | k, 0 | h, 0 | U, 0 | S), w = 0 | M(), !(!(0 | (d = 0 | n[(e = c = i + (g << 3) | 0) >> 2])) & !(0 | (e = 0 | n[e + 4 >> 2])))) {
 																	B = 0, b = 0;
 																	do {
-																		if ((0 | B) > (0 | R) | (0 | B) == (0 | R) & b >>> 0 > U >>> 0) break r;
+																		if ((0 | B) > (0 | S) | (0 | B) == (0 | S) & b >>> 0 > U >>> 0) break r;
 																		if ((0 | d) == (0 | k) & (0 | e) == (0 | h)) {
 																			c = u, d = s;
 																			break i;
 																		}
-																		g = 0 | ar(0 | (c = 0 | er(0 | g, 0 | w, 1, 0)), 0 | M(), 0 | U, 0 | R), w = 0 | M(), b = 0 | er(0 | b, 0 | B, 1, 0), B = 0 | M(), d = 0 | n[(e = c = i + (g << 3) | 0) >> 2], e = 0 | n[e + 4 >> 2];
+																		g = 0 | ar(0 | (c = 0 | er(0 | g, 0 | w, 1, 0)), 0 | M(), 0 | U, 0 | S), w = 0 | M(), b = 0 | er(0 | b, 0 | B, 1, 0), B = 0 | M(), d = 0 | n[(e = c = i + (g << 3) | 0) >> 2], e = 0 | n[e + 4 >> 2];
 																	} while (!(!(0 | d) & !(0 | e)));
 																}
 																if (!(0 | k) & !(0 | h)) {
 																	c = u, d = s;
 																	break;
 																}
-																ne(k, h, a), 0 | ze(A, S, a) && (b = 0 | er(0 | u, 0 | s, 1, 0), s = 0 | M(), n[(B = c) >> 2] = k, n[B + 4 >> 2] = h, n[(u = y + (u << 3) | 0) >> 2] = k, n[u + 4 >> 2] = h, u = b), c = u, d = s;
+																ne(k, h, a), 0 | ze(A, R, a) && (b = 0 | er(0 | u, 0 | s, 1, 0), s = 0 | M(), n[(B = c) >> 2] = k, n[B + 4 >> 2] = h, n[(u = y + (u << 3) | 0) >> 2] = k, n[u + 4 >> 2] = h, u = b), c = u, d = s;
 															}
 														while (0);
 														if ((D = D + 1 | 0) >>> 0 >= 7) break;
@@ -4007,18 +4007,18 @@ while (0 | UA(r, o, 0, 0));
 												if (n[(C = t) >> 2] = c, n[C + 4 >> 2] = d, !((0 | d) > 0 | !(0 | d) & c >>> 0 > 0)) break e;
 												D = r, Q = m, v = z, E = _, C = y, r = P, m = l, _ = F, P = D, l = Q, z = T, T = v, F = E, y = I, I = C;
 											}
-											$e(F), $e(T), $e(S), l = 1;
+											$e(F), $e(T), $e(R), l = 1;
 											break A;
 										}
 										l = c;
 									} while (0);
-									$e(S), $e(r), $e(l), l = 0;
+									$e(R), $e(r), $e(l), l = 0;
 								}
 							while (0);
 							return p = o, 0 | l;
 						}
 					}
-					return $e(S), p = o, 0 | l;
+					return $e(R), p = o, 0 | l;
 				},
 				_polygonToCellsExperimental: function(A, e, r, i, t, f) {
 					i |= 0, t |= 0, f |= 0;
@@ -4126,7 +4126,7 @@ while (0 | UA(r, o, 0, 0));
 				_vertexToLatLng: function(A, e, r) {
 					r |= 0;
 					var i, t, f, a, o = 0, l = 0;
-					return a = p, p = p + 192 | 0, t = a, f = a + 168 | 0, o = 0 | ur(0 | (A |= 0), 0 | (e |= 0), 56), M(), o &= 7, 0 | (i = 0 | ie(A, l = -2130706433 & e | 134217728, f)) ? (p = a, 0 | (l = i)) : (e = 0 | ur(0 | A, 0 | e, 52), M(), e &= 15, 0 | ZA(A, l) ? GA(f, e, o, 1, t) : SA(f, e, o, 1, t), l = t + 8 | 0, n[r >> 2] = n[l >> 2], n[r + 4 >> 2] = n[l + 4 >> 2], n[r + 8 >> 2] = n[l + 8 >> 2], n[r + 12 >> 2] = n[l + 12 >> 2], p = a, 0 | (l = 0));
+					return a = p, p = p + 192 | 0, t = a, f = a + 168 | 0, o = 0 | ur(0 | (A |= 0), 0 | (e |= 0), 56), M(), o &= 7, 0 | (i = 0 | ie(A, l = -2130706433 & e | 134217728, f)) ? (p = a, 0 | (l = i)) : (e = 0 | ur(0 | A, 0 | e, 52), M(), e &= 15, 0 | ZA(A, l) ? GA(f, e, o, 1, t) : RA(f, e, o, 1, t), l = t + 8 | 0, n[r >> 2] = n[l >> 2], n[r + 4 >> 2] = n[l + 4 >> 2], n[r + 8 >> 2] = n[l + 8 >> 2], n[r + 12 >> 2] = n[l + 12 >> 2], p = a, 0 | (l = 0));
 				},
 				establishStackSpace: function(A, e) {
 					p = A |= 0;
@@ -4263,7 +4263,7 @@ while (0 | UA(r, o, 0, 0));
 					B[A >> 2] = e;
 					break;
 				case "i64":
-					S = [e >>> 0, (R = e, +F(R) >= 1 ? R > 0 ? (0 | z(+T(R / 4294967296), 4294967295)) >>> 0 : ~~+p((R - +(~~R >>> 0)) / 4294967296) >>> 0 : 0)], B[A >> 2] = S[0], B[A + 4 >> 2] = S[1];
+					R = [e >>> 0, (S = e, +F(S) >= 1 ? S > 0 ? (0 | z(+T(S / 4294967296), 4294967295)) >>> 0 : ~~+p((S - +(~~S >>> 0)) / 4294967296) >>> 0 : 0)], B[A >> 2] = R[0], B[A + 4 >> 2] = R[1];
 					break;
 				case "float":
 					b[A >> 2] = e;
@@ -4955,67 +4955,58 @@ while (0 | UA(r, o, 0, 0));
 	}
 	var g = /[^0-9a-fA-F]/;
 	function B(A) {
-		if (Array.isArray(A) && 2 === A.length && Number.isInteger(A[0]) && Number.isInteger(A[1])) return A;
-		if ("string" != typeof A || g.test(A)) return [0, 0];
-		var e = parseInt(A.substring(0, A.length - 8), o);
-		return [parseInt(A.substring(A.length - 8), o), e];
-	}
-	function b(A) {
 		if (A >= 0) return A.toString(o);
-		var e = k(8, (A &= 2147483647).toString(o));
+		var e = b(8, (A &= 2147483647).toString(o));
 		return (parseInt(e[0], o) + 8).toString(o) + e.substring(1);
 	}
-	function k(A, e) {
+	function b(A, e) {
 		for (var r = A - e.length, i = "", n = 0; n < r; n++) i += "0";
 		return i + e;
 	}
-	function h(e, r, i) {
-		for (var n = e.length, t = A._calloc(n, u), f = i ? 1 : 0, a = i ? 0 : 1, o = 0; o < 2 * n; o += 2) A.HEAPF64.set([e[o / 2][f], e[o / 2][a]].map(M), t / 8 + o);
+	function k(e, r, i) {
+		for (var n = e.length, t = A._calloc(n, u), f = i ? 1 : 0, a = i ? 0 : 1, o = 0; o < 2 * n; o += 2) A.HEAPF64.set([e[o / 2][f], e[o / 2][a]].map(E), t / 8 + o);
 		return A.HEAPU32.set([n, t], r / 4), r;
 	}
-	function D(e, r) {
+	function h(e, r) {
 		void 0 === r && (r = 0);
 		var i = A.getValue(e + l * r, "i32"), n = A.getValue(e + l * r + 4, "i32");
 		return n ? function(A, e) {
-			return b(e) + k(8, b(A));
+			return B(e) + b(8, B(A));
 		}(i, n) : null;
 	}
-	function Q(A) {
+	function D(A) {
 		return a.readInt64AsDoubleFromPointer(A);
 	}
-	function v(A, e) {
+	function Q(A, e) {
 		for (var r = [], i = 0; i < e; i++) {
-			var n = D(A, i);
+			var n = h(A, i);
 			null !== n && r.push(n);
 		}
 		return r;
 	}
-	function E(e, r) {
-		var i = B(e), n = i[0], t = i[1], o = A._malloc(8);
+	function v(e, r) {
+		var i = function(A) {
+			if (Array.isArray(A) && 2 === A.length && Number.isInteger(A[0]) && Number.isInteger(A[1])) return A;
+			if ("string" != typeof A || g.test(A)) return [0, 0];
+			var e = parseInt(A.substring(0, A.length - 8), o);
+			return [parseInt(A.substring(A.length - 8), o), e];
+		}(e), n = i[0], t = i[1], u = A._malloc(8);
 		try {
-			f(a.maxGridDiskSize(r, o));
-			var u = w(Q(o)), s = A._calloc(u, l);
+			f(a.maxGridDiskSize(r, u));
+			var s = w(D(u)), c = A._calloc(s, l);
 			try {
-				return f(a.gridDisk(n, t, r, s)), v(s, u);
+				return f(a.gridDisk(n, t, r, c)), Q(c, s);
 			} finally {
-				A._free(s);
+				A._free(c);
 			}
 		} finally {
-			A._free(o);
+			A._free(u);
 		}
 	}
-	function C(e, r) {
-		var i = 0 === r ? 1 : 6 * r, n = A._calloc(i, l);
-		try {
-			return f(a.gridRing.apply(a, B(e).concat([r], [n]))), v(n, i);
-		} finally {
-			A._free(n);
-		}
-	}
-	function M(A) {
+	function E(A) {
 		return A * Math.PI / 180;
 	}
-	var P = class {
+	var C = class {
 		#A;
 		#e;
 		#r;
@@ -5056,17 +5047,17 @@ while (0 | UA(r, o, 0, 0));
 			}
 		}
 	};
-	const _ = {
+	const M = {
 		PAVEMENT: 1,
 		LIGHT_PARK: 2.5,
 		HEAVY_GRASS: 4,
 		IMPASSABLE: 999999
 	};
-	function m(A) {
+	function P(A) {
 		const e = parseInt(A ?? "0", 10);
 		return Number.isFinite(e) ? String(e) : "0";
 	}
-	function I(A) {
+	function _(A) {
 		return [
 			"pedestrian",
 			"footway",
@@ -5075,18 +5066,18 @@ while (0 | UA(r, o, 0, 0));
 			"path"
 		].includes(A) ? "PAVEMENT" : "bridleway" === A || "cycleway" === A ? "LIGHT_PARK" : "steps" === A ? "HEAVY_GRASS" : "PAVEMENT";
 	}
-	function y(A) {
+	function m(A) {
 		const e = A.sourceLayer || "", { layer: r, class: i, subclass: n, brunnel: t } = A.properties, f = null == i ? "" : String(i), a = null == n ? "" : String(n);
 		if (function(A) {
 			const { indoor: e } = A;
 			return 1 === e || "true" === e || !0 === e;
 		}(A.properties)) return {
 			cost: "IMPASSABLE",
-			layer: m(r)
+			layer: P(r)
 		};
 		if ("transportation" === e) {
 			const e = function(A, e) {
-				let r = m(A);
+				let r = P(A);
 				return "0" === r && ("bridge" === e && (r = "1"), "tunnel" === e && (r = "-1")), r;
 			}(r, t);
 			if (function(A) {
@@ -5103,7 +5094,7 @@ while (0 | UA(r, o, 0, 0));
 				layer: e
 			};
 			if ("path" === f) return {
-				cost: I(a),
+				cost: _(a),
 				layer: e
 			};
 			if ("ford" === t) return {
@@ -5195,7 +5186,7 @@ while (0 | UA(r, o, 0, 0));
 			}(f, a);
 			if (A) return {
 				cost: A,
-				layer: m(r)
+				layer: P(r)
 			};
 		}
 		if ("landuse" === e) {
@@ -5234,25 +5225,25 @@ while (0 | UA(r, o, 0, 0));
 			}(f);
 			if (A) return {
 				cost: A,
-				layer: m(r)
+				layer: P(r)
 			};
 		}
 		return "building" === e || "water" === e ? {
 			cost: "IMPASSABLE",
-			layer: m(r)
+			layer: P(r)
 		} : {
 			cost: "PAVEMENT",
-			layer: m(r)
+			layer: P(r)
 		};
 	}
-	const F = new Set([
+	const I = new Set([
 		"transportation",
 		"building",
 		"water",
 		"landcover",
 		"landuse"
-	]), p = Object.create(null), T = [];
-	function z(e) {
+	]), y = Object.create(null), F = [];
+	function p(e) {
 		let r = Infinity, i = Infinity, n = -Infinity, o = -Infinity, u = 0;
 		for (let A = 0; A < e.length; A++) {
 			const t = e[A] || [];
@@ -5263,7 +5254,7 @@ while (0 | UA(r, o, 0, 0));
 			}
 		}
 		if (!isFinite(r)) return [];
-		const d = `${r.toFixed(4)}:${i.toFixed(4)}:${n.toFixed(4)}:${o.toFixed(4)}:${u}`, g = p[d];
+		const d = `${r.toFixed(4)}:${i.toFixed(4)}:${n.toFixed(4)}:${o.toFixed(4)}:${u}`, g = y[d];
 		if (g) return g;
 		const B = function(e, r, i) {
 			if (function(A) {
@@ -5271,17 +5262,17 @@ while (0 | UA(r, o, 0, 0));
 			}(r), i = Boolean(i), 0 === e.length || 0 === e[0].length) return [];
 			var n = function(e, r) {
 				var i, n = e.length - 1, t = A._calloc(s), f = 0 + c, a = f + 4;
-				if (h(e[0], t + 0, r), n > 0) {
+				if (k(e[0], t + 0, r), n > 0) {
 					i = A._calloc(n, c);
-					for (var o = 0; o < n; o++) h(e[o + 1], i + c * o, r);
+					for (var o = 0; o < n; o++) k(e[o + 1], i + c * o, r);
 				}
 				return A.setValue(t + f, n, "i32"), A.setValue(t + a, i, "i32"), t;
 			}("number" == typeof e[0][0] ? [e] : e, i), o = A._malloc(8);
 			try {
 				f(a.maxPolygonToCellsSize(n, r, 0, o));
-				var u = w(Q(o)), d = A._calloc(u, l);
+				var u = w(D(o)), d = A._calloc(u, l);
 				try {
-					return f(a.polygonToCells(n, r, 0, d)), v(d, u);
+					return f(a.polygonToCells(n, r, 0, d)), Q(d, u);
 				} finally {
 					A._free(d);
 				}
@@ -5298,13 +5289,13 @@ while (0 | UA(r, o, 0, 0));
 				}(n);
 			}
 		}(e, 15, !0);
-		if (p[d] = B, T.push(d), T.length > 512) {
-			const A = T.shift();
-			delete p[A];
+		if (y[d] = B, F.push(d), F.length > 512) {
+			const A = F.shift();
+			delete y[A];
 		}
 		return B;
 	}
-	function G(A) {
+	function T(A) {
 		const e = Object.create(null);
 		if (!A) return e;
 		if ("function" == typeof A.entries) {
@@ -5315,44 +5306,44 @@ while (0 | UA(r, o, 0, 0));
 		for (let i = 0; i < r.length; i++) e[r[i]] = A[r[i]];
 		return e;
 	}
-	function L(A, e) {
-		const r = Object.create(null), i = /* @__PURE__ */ new Set(), n = new P();
+	function z(A, e) {
+		const r = Object.create(null), i = /* @__PURE__ */ new Set(), n = new C();
 		for (r[A] = 0, n.insert(A, 0); n.size() > 0;) {
 			const A = n.extractMin();
 			if (i.has(A)) continue;
 			i.add(A);
-			const t = r[A], f = E(A, 1);
+			const t = r[A], f = v(A, 1);
 			for (let i = 0; i < f.length; i++) {
 				const a = f[i];
 				if (a === A) continue;
 				const o = e[a];
-				if ("number" != typeof o || o >= _.IMPASSABLE) continue;
+				if ("number" != typeof o || o >= M.IMPASSABLE) continue;
 				const l = t + o;
 				(!Object.hasOwn(r, a) || l < r[a]) && (r[a] = l, n.insert(a, l));
 			}
 		}
 		return r;
 	}
-	function U(A) {
+	function G(A) {
 		if (!A) return 0;
 		if ("number" == typeof A[0]) return A[0];
 		const e = Object.values(A);
 		return e.length > 0 ? Math.min(...e) : 0;
 	}
-	function R({ features: A = [], viewHexes: e = [] } = {}) {
+	function L({ features: A = [], viewHexes: e = [] } = {}) {
 		const r = Object.create(null);
 		for (let t = 0; t < e.length; t++) r[e[t]] = 1;
 		const i = Object.create(null);
 		for (let t = 0; t < A.length; t++) {
 			const e = A[t];
 			if (!e || !e.geometry) continue;
-			if (!F.has(e.sourceLayer)) continue;
-			const n = y(e);
+			if (!I.has(e.sourceLayer)) continue;
+			const n = m(e);
 			if (!n || !n.layer || !n.cost) continue;
-			const f = n.layer, a = _[n.cost];
+			const f = n.layer, a = M[n.cost];
 			if (void 0 === a) continue;
 			const o = e.geometry, l = (A) => {
-				const e = z(A);
+				const e = p(A);
 				for (let n = 0; n < e.length; n++) {
 					const A = e[n];
 					if (!r[A]) continue;
@@ -5369,16 +5360,32 @@ while (0 | UA(r, o, 0, 0));
 		const n = Object.create(null);
 		for (let t = 0; t < e.length; t++) {
 			const A = e[t], r = i[A];
-			n[A] = U(r);
+			n[A] = G(r);
 		}
 		return {
 			multiFrictionEntries: i,
 			cellFrictionEntries: n
 		};
 	}
-	function S({ frictionEntries: A, radius: e = 1, sigma: r = 1, addFactor: i = 3 }) {
-		const n = G(A), t = [];
-		for (const c in n) n[c] >= _.IMPASSABLE && t.push(c);
+	const U = Object.create(null), S = [];
+	function R(A, e) {
+		const r = `${A}:${e}`;
+		let i = U[r];
+		if (i) return i;
+		try {
+			i = v(A, e);
+		} catch (n) {
+			i = [];
+		}
+		if (U[r] = i, S.push(r), S.length > 2048) {
+			const A = S.shift();
+			delete U[A];
+		}
+		return i;
+	}
+	function Y({ frictionEntries: A, radius: e = 1, sigma: r = 1, addFactor: i = 3 }) {
+		const n = T(A), t = [];
+		for (const c in n) n[c] >= M.IMPASSABLE && t.push(c);
 		const f = Object.create(null);
 		if (0 === t.length) return {
 			blurWeights: f,
@@ -5387,22 +5394,23 @@ while (0 | UA(r, o, 0, 0));
 		const a = new Array(e + 1);
 		for (let c = 1; c <= e; c++) a[c] = Math.exp(-.5 * Math.pow(c / r, 2));
 		for (let c = 0; c < t.length; c++) {
-			const A = t[c];
-			for (let r = 1; r <= e; r++) {
-				let e;
-				try {
-					e = C(A, r);
-				} catch (s) {
-					continue;
-				}
-				const i = a[r];
-				for (let A = 0; A < e.length; A++) {
-					const r = e[A], t = n[r];
-					"number" != typeof t || t >= _.IMPASSABLE || (f[r] = (f[r] ?? 0) + i);
-				}
+			const A = t[c], r = R(A, e);
+			for (let i = 1; i < r.length; i++) {
+				const t = r[i], o = n[t];
+				if ("number" != typeof o || o >= M.IMPASSABLE) continue;
+				let l = 1;
+				if (e > 1) try {
+					const r = R(A, e - 1);
+					for (let A = 0; A < r.length; A++) if (r[A] === t) {
+						l = e - 1;
+						break;
+					}
+				} catch (s) {}
+				const u = a[l];
+				f[t] = (f[t] ?? 0) + u;
 			}
 		}
-		const o = [], l = _.IMPASSABLE - 1, u = Object.keys(f);
+		const o = [], l = M.IMPASSABLE - 1, u = Object.keys(f);
 		for (let c = 0; c < u.length; c++) {
 			const A = u[c], e = Math.min(l, (n[A] ?? 0) + f[A] * i);
 			o.push([A, e]);
@@ -5417,10 +5425,10 @@ while (0 | UA(r, o, 0, 0));
 		try {
 			let A;
 			if ("fast-scan" === e.kind) A = function({ features: A = [], viewHexes: e = [] } = {}) {
-				const { multiFrictionEntries: r, cellFrictionEntries: i } = R({
+				const { multiFrictionEntries: r, cellFrictionEntries: i } = L({
 					features: A,
 					viewHexes: e
-				}), n = S({ frictionEntries: i });
+				}), n = Y({ frictionEntries: i });
 				return {
 					multiFrictionEntries: r,
 					cellFrictionEntries: i,
@@ -5429,22 +5437,22 @@ while (0 | UA(r, o, 0, 0));
 				};
 			}(e.payload || {});
 			else if ("fast-scan-chunk" === e.kind) A = function({ features: A = [], viewHexes: e = [] } = {}) {
-				return R({
+				return L({
 					features: A,
 					viewHexes: e
 				});
 			}(e.payload || {});
 			else if ("gradient-batch" === e.kind) A = function({ frictionEntries: A, targets: e }) {
-				const r = G(A), i = Object.create(null);
+				const r = T(A), i = Object.create(null);
 				for (let n = 0; n < e.length; n++) {
 					const A = e[n];
-					i[A] = L(A, r);
+					i[A] = z(A, r);
 				}
 				return i;
 			}(e.payload || {});
 			else {
 				if ("impassable-blur" !== e.kind) throw new Error(`Unknown spatial task: ${e.kind}`);
-				A = S(e.payload || {});
+				A = Y(e.payload || {});
 			}
 			self.postMessage({
 				ok: !0,

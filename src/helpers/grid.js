@@ -112,8 +112,9 @@ export async function triggerFastScan() {
   this._mappingGeneration = (this._mappingGeneration ?? 0) + 1;
   clearComputeCaches.call(this);
 
-  // Reset friction maps
+  // Reset friction maps in a single pass over viewHexes
   this.cellFrictionMap.clear();
+  const multiEntries = build.multiFrictionEntries ?? Object.create(null);
 
   // Reuse existing multiFrictionMap when AOI hasn't changed to avoid re-allocating objects
   const aoiKey = this._cachedAoiKey ?? (this.aoi_polygon ? _aoiKey(this.aoi_polygon) : '');
@@ -128,43 +129,8 @@ export async function triggerFastScan() {
     }
   }
 
-  const multiEntries = build.multiFrictionEntries ?? Object.create(null);
-  const multiKeys = Object.keys(multiEntries);
-  for (let m = 0; m < multiKeys.length; m++) {
-    const cell = multiKeys[m];
-    const target = this.multiFrictionMap.get(cell);
-    if (!target) continue;
-    const layerMap = multiEntries[cell];
-    const layerKeys = Object.keys(layerMap);
-    for (let l = 0; l < layerKeys.length; l++) target[layerKeys[l]] = layerMap[layerKeys[l]];
-  }
-
-  // Snapshot multiFrictionMap to a plain object for hot lookups
-  this._multiFrictionObj = Object.create(null);
-  for (const [k, v] of this.multiFrictionMap) this._multiFrictionObj[k] = v;
-
-  // Populate cellFrictionMap from worker output using the viewHexes order
-  this._frictionObj = Object.create(null);
-  const cellEntries = build.cellFrictionEntries ?? Object.create(null);
-  for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
-    const h = viewHexes[i];
-    const minCost = cellEntries[h] ?? 0;
-    this.cellFrictionMap.set(h, minCost);
-    this._frictionObj[h] = minCost;
-  }
-
-  // Apply gaussian blur from impassable cells to adjacent cells (updates friction map)
+  // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
   const blurWeights = build.blurWeights ?? Object.create(null);
-  const blurUpdates = build.blurUpdates ?? [];
-  for (let i = 0; i < blurUpdates.length; i++) {
-    const [cell, newF] = blurUpdates[i];
-    this.cellFrictionMap.set(cell, newF);
-    this._frictionObj[cell] = newF;
-  }
-
-  this.affordanceMap.clear();
-  this._affordanceObj = Object.create(null);
-  this._cellState = Object.create(null);
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
   const pavement = AFFORDANCE.PAVEMENT;
   const lightPark = AFFORDANCE.LIGHT_PARK;
@@ -175,23 +141,54 @@ export async function triggerFastScan() {
   const hg = FRICTION_COSTS.HEAVY_GRASS;
   const midPL = (p + l) / 2;
   const midLH = (l + hg) / 2;
+
+  this._frictionObj = Object.create(null);
+  this._multiFrictionObj = Object.create(null);
+  this.affordanceMap.clear();
+  this._affordanceObj = Object.create(null);
+  this._cellState = Object.create(null);
+
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];
-    const fr = this._frictionObj?.[cell] ?? 0;
-    const multi = this._multiFrictionObj?.[cell] ?? null;
+    // Merge multi-friction layer values into the map entry
+    const target = this.multiFrictionMap.get(cell);
+    if (target) {
+      const layerMap = multiEntries[cell];
+      if (layerMap) {
+        const lk = Object.keys(layerMap);
+        for (let l2 = 0; l2 < lk.length; l2++) target[lk[l2]] = layerMap[lk[l2]];
+      }
+    }
+
+    // Effective friction: min across all layers, or 0 if no data
+    let fr = 0;
+    if (target) {
+      const vals = Object.values(target);
+      fr = vals.length > 0 ? Math.min(...vals) : 0;
+    } else {
+      // Fallback: look up from build result directly
+      fr = build.cellFrictionEntries?.[cell] ?? 0;
+    }
+
+    this._frictionObj[cell] = fr;
+    this.cellFrictionMap.set(cell, fr);
+    this._multiFrictionObj[cell] = target || Object.create(null);
+
+    // Affordance classification
     let aff;
     if (fr >= FRICTION_COSTS.IMPASSABLE) aff = impassable;
     else if (fr < midPL) aff = pavement;
     else if (fr < midLH) aff = lightPark;
     else aff = heavyGrass;
+
     const weight = blurWeights[cell];
     if (weight != null) {
-      const reduction = Math.min(aff, weight * penalty);
-      aff = Math.max(0.0, aff - reduction);
+      aff = Math.max(0.0, aff - Math.min(aff, weight * penalty));
     }
+
     this.affordanceMap.set(cell, aff);
     this._affordanceObj[cell] = aff;
-    this._cellState[cell] = { friction: fr, affordance: aff, desire: 0, multi };
+    this._cellState[cell] = { friction: fr, affordance: aff, desire: 0, multi: target || null };
   }
 
   this.updateLayers();

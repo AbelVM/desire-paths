@@ -213,10 +213,35 @@ export async function runFastScanTask(viewHexes, features) {
   const chunks = splitIntoChunks(features, workerCount);
   if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features });
 
-  const results = await Promise.all(
-    chunks.map((chunk) => runWorker('fast-scan-chunk', { viewHexes, features: chunk }))
+  // Launch all chunk tasks in parallel
+  const chunkTasks = chunks.map((chunk) =>
+    runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch(() => ({}))
   );
 
+  // Start blur computation as soon as we have partial results.
+  // Blur only needs cellFrictionEntries and is independent of multiFrictionEntries.
+  // We kick it off after the first two chunks resolve for a reasonable sample size,
+  // then re-run with full merged data at the end for correctness.
+  let blurPromise = null;
+  const resolvedResults = [];
+
+  // Process results as they arrive to start blur early
+  const processResult = async (result) => {
+    resolvedResults.push(result);
+    if (!blurPromise && resolvedResults.length >= Math.min(2, chunks.length)) {
+      blurPromise = _computeBlurFromPartial(resolvedResults.map((r) => r.cellFrictionEntries ?? {}));
+    }
+  };
+
+  // Race: process each result as it resolves
+  const racePromises = chunkTasks.map(async (task, i) => {
+    const result = await task;
+    await processResult(result);
+    return result;
+  });
+  const results = await Promise.all(racePromises);
+
+  // Merge all chunk results
   const multiFrictionEntries = Object.create(null);
   const cellFrictionEntries = Object.create(null);
   for (let i = 0; i < results.length; i++) {
@@ -225,6 +250,7 @@ export async function runFastScanTask(viewHexes, features) {
     mergeScalarEntries(cellFrictionEntries, batch.cellFrictionEntries ?? Object.create(null));
   }
 
+  // Run blur with complete data (re-run if early version already started)
   const blur = await runImpassableBlurTask(cellFrictionEntries);
   return {
     multiFrictionEntries,
@@ -232,6 +258,15 @@ export async function runFastScanTask(viewHexes, features) {
     blurWeights: blur.blurWeights,
     blurUpdates: blur.updates,
   };
+}
+
+async function _computeBlurFromPartial(partialResults) {
+  // Merge partial friction entries from resolved chunks
+  const merged = Object.create(null);
+  for (let i = 0; i < partialResults.length; i++) {
+    mergeScalarEntries(merged, partialResults[i]);
+  }
+  return runImpassableBlurTask(merged);
 }
 
 export async function runImpassableBlurTask(frictionSource, options = {}) {

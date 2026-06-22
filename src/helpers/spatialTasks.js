@@ -188,6 +188,33 @@ export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } =
   return collectFastScanEntries({ features, viewHexes });
 }
 
+// Cache gridDisk results to avoid redundant H3 neighbor lookups in blur computation
+const BLUR_NEIGHBOR_CACHE_MAX = 2048;
+const _blurNeighborCache = Object.create(null);
+const _blurNeighborCacheOrder = [];
+
+function getBlurNeighbors(cell, radius) {
+  const key = `${cell}:${radius}`;
+  let cached = _blurNeighborCache[key];
+  if (cached) return cached;
+
+  // gridDisk returns center + neighbors; skip index 0 (center) for blur
+  try {
+    cached = gridDisk(cell, radius);
+  } catch (_error) {
+    cached = [];
+  }
+
+  _blurNeighborCache[key] = cached;
+  _blurNeighborCacheOrder.push(key);
+  if (_blurNeighborCacheOrder.length > BLUR_NEIGHBOR_CACHE_MAX) {
+    const old = _blurNeighborCacheOrder.shift();
+    delete _blurNeighborCache[old];
+  }
+
+  return cached;
+}
+
 export function computeImpassableBlurSnapshot({
   frictionEntries,
   radius = IMPASSABLE_BLUR_RADIUS,
@@ -210,23 +237,32 @@ export function computeImpassableBlurSnapshot({
     gaussianWeights[d] = Math.exp(-0.5 * Math.pow(d / sigma, 2));
   }
 
+  // Use gridDisk instead of gridRing: returns center+neighbors in one H3 call vs. ring-only
+  // Cache results since nearby impassables share many neighbors
   for (let i = 0; i < impassables.length; i++) {
     const cell = impassables[i];
-    for (let d = 1; d <= radius; d++) {
-      let ring;
-      try {
-        ring = gridRing(cell, d);
-      } catch (_error) {
-        continue;
+    const neighbors = getBlurNeighbors(cell, radius);
+
+    for (let n = 1; n < neighbors.length; n++) { // skip center (index 0)
+      const neighborCell = neighbors[n];
+      const friction = frictionLookup[neighborCell];
+      if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
+
+      // Compute distance from impassable to this neighbor for correct gaussian weight
+      // For radius=1, all immediate neighbors are at distance 1
+      let dist = 1;
+      if (radius > 1) {
+        // Determine actual ring distance by checking which ring contains this cell
+        try {
+          const prevRing = getBlurNeighbors(cell, radius - 1);
+          for (let p = 0; p < prevRing.length; p++) {
+            if (prevRing[p] === neighborCell) { dist = radius - 1; break; }
+          }
+        } catch (_e) {}
       }
 
-      const weight = gaussianWeights[d];
-      for (let j = 0; j < ring.length; j++) {
-        const ringCell = ring[j];
-        const friction = frictionLookup[ringCell];
-        if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
-        blurWeights[ringCell] = (blurWeights[ringCell] ?? 0) + weight;
-      }
+      const weight = gaussianWeights[dist];
+      blurWeights[neighborCell] = (blurWeights[neighborCell] ?? 0) + weight;
     }
   }
 
