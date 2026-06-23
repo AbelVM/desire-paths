@@ -42,7 +42,7 @@
         <div id="mode-status" class="mode-indicator mode-origin">
           Placement: Origin nodes · 0 placed
         </div>
-        <div id="node-count-chip" class="count-chip hidden">
+        <div id="node-count-chip" class="count-chip">
           <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
         </div>
       </div>
@@ -52,7 +52,7 @@
         <div class="placement-mode-group" role="group" aria-label="Placement mode">
           <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin" aria-pressed="true">Origin</button>
           <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination" aria-pressed="false">Destination</button>
-          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="both" aria-pressed="false">Dual</button>
+          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual" aria-pressed="false">Dual</button>
         </div>
         <div class="weight-control">
           <div class="weight-control-head">
@@ -64,7 +64,7 @@
             <span>1</span>
             <span>10</span>
           </div>
-          <div class="weight-hint">Click existing nodes to increase · Right-click to decrease</div>
+          <div class="weight-hint">Click nodes to adjust weight · Use ↑↓ arrows or right-click for options</div>
         </div>
       </div>
 
@@ -112,7 +112,6 @@
           aria-pressed="true"
         >
           <span class="toggle-icon">−</span>
-          <span class="toggle-text hidden">Hide</span>
         </button>
       </div>
       <div id="friction-legend-body">
@@ -162,15 +161,15 @@
         </button>
         <div class="onboarding-step active" data-step="1">
           <span class="step-number">1</span>
-          <span class="step-text">Select a placement mode above, then click walkable ground to place an origin node</span>
+          <span class="step-text">Select a placement mode above, then click walkable ground to place an origin node. Use ↑↓ arrows to adjust weight.</span>
         </div>
         <div class="onboarding-step" data-step="2">
           <span class="step-number">2</span>
-          <span class="step-text">Switch to Destination and place a destination node on another walkable location</span>
+          <span class="step-text">Switch to Destination and place a destination node on another walkable location. Right-click nodes for quick options.</span>
         </div>
         <div class="onboarding-step" data-step="3">
           <span class="step-number">3</span>
-          <span class="step-text">Press Simulate Flows to watch agents discover desire paths through the terrain</span>
+          <span class="step-text">Press Simulate Flows to watch agents discover desire paths through the terrain. Ctrl+Click a node to select and move it.</span>
         </div>
       </div>
     </div>

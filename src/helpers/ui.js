@@ -1,4 +1,6 @@
 import { clearComputeCaches } from './compute.js';
+import { latLngToCell } from 'h3-js';
+import { H3_STRIDE_RESOLUTION } from './constants.js';
 
 function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
@@ -11,8 +13,8 @@ function isActiveNode(node) {
 function hasBuildInputs(nodes = {}) {
   const activeNodes = Object.values(nodes ?? {});
   return (
-    activeNodes.some((node) => isActiveNode(node) && (node.type === 'origin' || node.type === 'both')) &&
-    activeNodes.some((node) => isActiveNode(node) && (node.type === 'destination' || node.type === 'both'))
+    activeNodes.some((node) => isActiveNode(node) && (node.type === 'origin' || node.type === 'dual')) &&
+    activeNodes.some((node) => isActiveNode(node) && (node.type === 'destination' || node.type === 'dual'))
   );
 }
 
@@ -107,6 +109,60 @@ export function setupUI(map) {
   const onboardingOverlay = document.getElementById('onboarding-overlay');
   let alertTimer;
 
+  // --- Toast Notification System ---
+  const toastContainer = document.createElement('div');
+  toastContainer.id = 'toast-container';
+  toastContainer.className = 'toast-container';
+  document.body.appendChild(toastContainer);
+
+  const showToastNotification = (message, type = 'info', duration = 3000) => {
+    // Remove all existing toasts — only ever show one at a time
+    while (toastContainer.firstChild) {
+      toastContainer.removeChild(toastContainer.firstChild);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    else if (type === 'warning') icon = '⚠️';
+    else if (type === 'error') icon = '❌';
+    
+    toast.innerHTML = `
+      <span class="toast-icon">${icon}</span>
+      <div class="toast-message">${message}</div>
+      <button class="toast-close" type="button" aria-label="Dismiss notification">×</button>
+    `;
+    
+    toastContainer.appendChild(toast);
+    
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+    
+    const timeoutId = setTimeout(() => {
+      hideToastNotification(toast);
+    }, duration);
+    
+    const closeBtn = toast.querySelector('.toast-close');
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        clearTimeout(timeoutId);
+        hideToastNotification(toast);
+      };
+    }
+  };
+
+  const hideToastNotification = (toast) => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (toast.parentNode === toastContainer) {
+        toastContainer.removeChild(toast);
+      }
+    }, 300);
+  };
+
   // Onboarding state
   let onboardingStep = 1;
   const totalOnboardingSteps = 3;
@@ -127,8 +183,8 @@ export function setupUI(map) {
     let destCount = 0;
     for (const n of nodes) {
       if (n.weight <= 0) continue;
-      if (n.type === 'origin' || n.type === 'both') originCount++;
-      if (n.type === 'destination' || n.type === 'both') destCount++;
+      if (n.type === 'origin' || n.type === 'dual') originCount++;
+      if (n.type === 'destination' || n.type === 'dual') destCount++;
     }
 
     const hasOrigins = originCount > 0;
@@ -137,14 +193,15 @@ export function setupUI(map) {
 
     let modeText = '';
     if (map.placementMode === 'origin') {
-      modeText = `Placement: Origin nodes · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
+      modeText = `Origin · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
       modeLabel.className = 'mode-indicator mode-origin';
     } else if (map.placementMode === 'destination') {
-      modeText = `Placement: Destination nodes · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
+      modeText = `Destination · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
       modeLabel.className = 'mode-indicator mode-destination';
     } else {
-      modeText = `Placement: Dual nodes`;
-      modeLabel.className = 'mode-indicator mode-both';
+      const dualNodes = nodes.filter(n => n.weight > 0 && n.type === 'dual').length;
+      modeText = `Dual · ${dualNodes} placed`;
+      modeLabel.className = 'mode-indicator mode-dual';
     }
 
     if (readyToCompute) {
@@ -152,21 +209,37 @@ export function setupUI(map) {
       if (modeLabel?.classList) modeLabel.classList.add('ready');
     } else {
       if (modeLabel?.classList) modeLabel.classList.remove('ready');
+      
+      // Show helpful hint based on what's missing
+      if (!hasOrigins && !hasDestinations) {
+        modeText += ' · Place a node';
+      } else if (!hasOrigins) {
+        modeText += ' · Add origin';
+      } else if (!hasDestinations) {
+        modeText += ' · Add destination';
+      }
     }
 
-    if (modeLabel) modeLabel.innerText = modeText;
+    if (modeLabel) {
+      modeLabel.innerText = modeText;
+      
+      // Add keyboard shortcut hint when nodes are placed
+      const hasNodes = originCount + destCount > 0;
+      if (hasNodes && !readyToCompute) {
+        modeLabel.setAttribute('title', 'Ctrl+Click node to select · ↑↓ arrows adjust weight');
+      } else if (readyToCompute) {
+        modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Ctrl+Click node to move');
+      } else {
+        modeLabel.removeAttribute('title');
+      }
+    }
 
-    // Update count chip
+    // Update count chip (always visible)
     if (nodeCountChip) {
       const originsEl = nodeCountChip.querySelector('.count-chip-origins');
       const destsEl = nodeCountChip.querySelector('.count-chip-dests');
       if (originsEl) originsEl.textContent = originCount;
       if (destsEl) destsEl.textContent = destCount;
-      if (originCount + destCount > 0) {
-        nodeCountChip.classList.remove('hidden');
-      } else {
-        nodeCountChip.classList.add('hidden');
-      }
     }
 
     // Update onboarding step visibility
@@ -184,8 +257,8 @@ export function setupUI(map) {
 
     const nodes = Object.values(map.simulationNodes ?? {});
     const activeNodes = nodes.filter((n) => n.weight > 0);
-    const hasOrigins = activeNodes.some((n) => n.type === 'origin' || n.type === 'both');
-    const hasDestinations = activeNodes.some((n) => n.type === 'destination' || n.type === 'both');
+    const hasOrigins = activeNodes.some((n) => n.type === 'origin' || n.type === 'dual');
+    const hasDestinations = activeNodes.some((n) => n.type === 'destination' || n.type === 'dual');
 
     if (hasOrigins && !hasDestinations) {
       onboardingStep = 2;
@@ -220,6 +293,196 @@ export function setupUI(map) {
     if (onboardingOverlay) onboardingOverlay.hidden = true;
   };
 
+  // --- Context Menu & Node Dragging System ---
+  let activeContextMenuItem = null;
+  let contextMenuClickHandler = null;
+  let contextMenuContextMenuHandler = null;
+  let draggingNodeCell = null;
+
+  // Create context menu element if not exists
+  const createContextMenu = () => {
+    if (document.getElementById('context-menu')) return document.getElementById('context-menu');
+    
+    const menu = document.createElement('div');
+    menu.id = 'context-menu';
+    menu.className = 'context-menu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `
+      <button id="context-change-type" class="context-btn" type="button">Change Type</button>
+      <button id="context-adjust-weight" class="context-btn" type="button">Adjust Weight</button>
+      <button id="context-remove-node" class="context-btn context-danger" type="button">Remove Node</button>
+    `;
+    document.body.appendChild(menu);
+    return menu;
+  };
+
+  // Show context menu at position with node actions
+  const showContextMenu = (e, node) => {
+    e.preventDefault();
+    if (!node || !isActiveNode(node)) return;
+
+    activeContextMenuItem = node;
+
+    createContextMenu();
+    const contextMenu = document.getElementById('context-menu');
+    if (!contextMenu) return;
+
+    // Remove stale listeners before adding fresh ones
+    if (contextMenuClickHandler) {
+      document.removeEventListener('click', contextMenuClickHandler);
+    }
+    if (contextMenuContextMenuHandler) {
+      document.removeEventListener('contextmenu', contextMenuContextMenuHandler);
+    }
+
+    // Position menu within viewport bounds, using originalEvent for client coordinates
+    const offsetX = 12;
+    const offsetY = -8;
+    const cx = e.originalEvent?.clientX ?? e.clientX ?? 0;
+    const cy = e.originalEvent?.clientY ?? e.clientY ?? 0;
+    let left = cx + offsetX;
+    let top = cy + offsetY;
+
+    const menuWidth = contextMenu.offsetWidth || 160;
+    const menuHeight = contextMenu.offsetHeight || 80;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    if (left + menuWidth > viewportWidth) left = cx - offsetX - menuWidth;
+    if (top + menuHeight > viewportHeight) top = cy - offsetY - menuHeight;
+
+    contextMenu.style.left = `${left}px`;
+    contextMenu.style.top = `${top}px`;
+
+    // Set up menu items using addEventListener for reliable handler attachment
+    const changeTypeBtn = document.getElementById('context-change-type');
+    const adjustWeightBtn = document.getElementById('context-adjust-weight');
+    const removeNodeBtn = document.getElementById('context-remove-node');
+
+    if (changeTypeBtn) {
+      // Remove any previous listener to avoid stacking
+      const prevChange = changeTypeBtn.dataset.prevHandler;
+      if (prevChange) changeTypeBtn.removeEventListener('click', window[prevChange]);
+      delete changeTypeBtn.dataset.prevHandler;
+      changeTypeBtn.onclick = null;
+
+      // Capture type at setup time to prevent cascading mutations from stacked listeners
+      const currentType = node.type;
+      const nextType = currentType === 'origin' ? 'destination' : 
+                       currentType === 'destination' ? 'dual' : 'origin';
+      const label = nextType.charAt(0).toUpperCase() + nextType.slice(1);
+
+      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      window[handlerName] = (ev) => {
+        ev.stopPropagation();
+        hideContextMenu();
+
+        // Find the cell key for this node and apply the pre-computed type change
+        const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === node);
+        if (!cellKey || !map.simulationNodes[cellKey]) return;
+
+        map.simulationNodes[cellKey].type = nextType;
+
+        map.mappingReady = false;
+        map.flowsReady = false;
+        map.renderInterfacePins?.();
+        syncSimulationUI?.();
+        showToastNotification(`Node changed to ${label}`, 'success');
+      };
+      changeTypeBtn.innerHTML = `Change to ${label}`;
+      changeTypeBtn.addEventListener('click', window[handlerName]);
+      changeTypeBtn.dataset.prevHandler = handlerName;
+    }
+
+    if (adjustWeightBtn) {
+      const prevAdjust = adjustWeightBtn.dataset.prevHandler;
+      if (prevAdjust) adjustWeightBtn.removeEventListener('click', window[prevAdjust]);
+      delete adjustWeightBtn.dataset.prevHandler;
+
+      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const nodeRef = node;
+      window[handlerName] = (ev) => {
+        ev.stopPropagation();
+        hideContextMenu();
+        weightInput?.focus();
+        showToastNotification(`Current weight: ${nodeRef.weight}. Use arrow keys or range slider to adjust.`, 'info');
+      };
+      adjustWeightBtn.addEventListener('click', window[handlerName]);
+      adjustWeightBtn.dataset.prevHandler = handlerName;
+    }
+
+    if (removeNodeBtn) {
+      const prevRemove = removeNodeBtn.dataset.prevHandler;
+      if (prevRemove) removeNodeBtn.removeEventListener('click', window[prevRemove]);
+      delete removeNodeBtn.dataset.prevHandler;
+
+      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const nodeRef = node;
+      window[handlerName] = (ev) => {
+        ev.stopPropagation();
+        hideContextMenu();
+        try {
+          // Find and immediately delete the node
+          const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === nodeRef);
+          if (!cellKey || !map.simulationNodes[cellKey]) return;
+
+          delete map.simulationNodes[cellKey];
+          showToastNotification('Node removed', 'warning');
+
+          map.mappingReady = false;
+          map.flowsReady = false;
+          map.renderInterfacePins?.();
+          syncSimulationUI?.();
+        } catch (err) {
+          console.error('[context menu] remove node failed:', err);
+          showToastNotification('Failed to remove node', 'error');
+        }
+      };
+      removeNodeBtn.addEventListener('click', window[handlerName]);
+      removeNodeBtn.dataset.prevHandler = handlerName;
+    }
+
+    // Show menu immediately (no animation race)
+    contextMenu.hidden = false;
+    contextMenu.style.opacity = '1';
+
+    // Single delegated listeners — remove stale ones first to avoid stacking
+    const handleClickOutside = (ev) => {
+      if (!contextMenu.contains(ev.target)) hideContextMenu();
+    };
+    const handleContextMenu = () => hideContextMenu();
+
+    contextMenuClickHandler = handleClickOutside;
+    contextMenuContextMenuHandler = handleContextMenu;
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('contextmenu', handleContextMenu);
+  };
+
+  // Hide context menu with fade-out animation (idempotent — no-op if already hidden)
+  const hideContextMenu = () => {
+    const contextMenu = document.getElementById('context-menu');
+    if (!contextMenu || contextMenu.hidden) return;
+
+    contextMenu.style.opacity = '0';
+    setTimeout(() => {
+      if (contextMenu && contextMenu.style.opacity === '0') {
+        contextMenu.hidden = true;
+        contextMenu.style.opacity = '';
+      }
+      // Clean up window-stored button handlers to avoid memory leaks
+      const btnIds = ['context-change-type', 'context-adjust-weight', 'context-remove-node'];
+      for (const id of btnIds) {
+        const btn = document.getElementById(id);
+        if (btn?.dataset.prevHandler && window[btn.dataset.prevHandler]) {
+          delete window[btn.dataset.prevHandler];
+        }
+        delete btn?.dataset.prevHandler;
+      }
+    }, 140);
+  };
+
+  // --- Keyboard Shortcuts ---
   const syncWeightUI = () => {
     const weight = clampWeight(map.placementWeight);
     map.placementWeight = weight;
@@ -230,24 +493,35 @@ export function setupUI(map) {
   const syncFrictionUI = () => {
     const enabled = map.showFrictionMesh !== false;
     const iconEl = frictionButton?.querySelector?.('.toggle-icon');
-    const textEl = frictionButton?.querySelector?.('.toggle-text');
 
-    if (iconEl) iconEl.textContent = enabled ? '−' : '+';
-    if (textEl) {
-      textEl.textContent = enabled ? 'Hide' : 'Show';
-      textEl.classList.toggle('hidden', !enabled);
+    // Add active state for better visual feedback
+    if (frictionButton) {
+      frictionButton.classList.toggle('is-active', enabled);
+    }
+    
+    if (iconEl) {
+      iconEl.textContent = enabled ? '−' : '+';
+      iconEl.style.transform = 'rotate(360deg)';
+      setTimeout(() => iconEl.style.transform = '', 140);
     }
     frictionButton?.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
     frictionButton?.setAttribute('aria-pressed', String(enabled));
     if (frictionLegendBody) frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
-      map.updateLayers();
+      const startTime = performance.now();
+      const animateUpdate = () => {
+        if (performance.now() - startTime < 300) {
+          map.updateLayers?.();
+          requestAnimationFrame(animateUpdate);
+        }
+      };
+      requestAnimationFrame(animateUpdate);
     }
   };
 
   const syncFlowReadout = () => {
     const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
-    flowReadout.innerText = `Peak Flow Intensity: ${peak}`;
+    flowReadout.innerText = `Peak Flow: ${peak} agents · ${map.flowsReady ? 'Simulation complete' : 'No simulation yet'}`;
   };
 
   const syncProgressUI = () => {
@@ -260,8 +534,21 @@ export function setupUI(map) {
     if (progressLabel) {
       if (state.total > 0) {
         progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} agents · ${Math.round(percent)}%</span>`;
+      } else if (map.flowsReady === true) {
+        progressLabel.innerHTML = `<span class="progress-phase">Simulation complete</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Export or reset to start new</span>`;
       } else {
-        progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span>`;
+        const hasOrigins = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'origin' || n.type === 'dual') && n.weight > 0);
+        const hasDests = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'destination' || n.type === 'dual') && n.weight > 0);
+        
+        if (!hasOrigins && !hasDests) {
+          progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Place origin and destination nodes on the map</span>`;
+        } else if (hasOrigins && hasDests) {
+          progressLabel.innerHTML = `<span class="progress-phase">Ready to simulate</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Press Simulate Flows</span>`;
+        } else if (hasOrigins) {
+          progressLabel.innerHTML = `<span class="progress-phase">Need destination</span><span class="progress-detail">Place a destination node to enable simulation</span>`;
+        } else {
+          progressLabel.innerHTML = `<span class="progress-phase">Need origin</span><span class="progress-detail">Place an origin node to begin</span>`;
+        }
       }
     }
   };
@@ -287,23 +574,15 @@ export function setupUI(map) {
     syncModeUI();
   };
 
+  const showAlertCard = (message, { title = 'Notice', tone = 'warning', timeout = 5000 } = {}) => {
+    showToastNotification(message, tone, timeout);
+  };
+
   const hideAlertCard = () => {
     if (!alertCard) return;
     window.clearTimeout(alertTimer);
     alertCard.hidden = true;
     alertCard.dataset.tone = '';
-  };
-
-  const showAlertCard = (message, { title = 'Notice', tone = 'warning', timeout = 5000 } = {}) => {
-    if (!alertCard || !alertTitle || !alertMessage) return;
-    window.clearTimeout(alertTimer);
-    alertTitle.innerText = title;
-    alertMessage.innerText = message;
-    alertCard.dataset.tone = tone;
-    alertCard.hidden = false;
-    if (timeout > 0) {
-      alertTimer = window.setTimeout(hideAlertCard, timeout);
-    }
   };
 
   const setBusyState = (busy, message = 'Sampling walkable surfaces...') => {
@@ -370,6 +649,30 @@ export function setupUI(map) {
     });
   }
 
+  // --- Keyboard Shortcuts ---
+  document.addEventListener('keydown', (e) => {
+    if (document.activeElement === weightInput || document.activeElement === weightReadout) {
+      let currentValue = parseInt(weightInput.value, 10);
+      if (isNaN(currentValue)) currentValue = 1;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        map.placementWeight = Math.min(10, currentValue + 1);
+        syncWeightUI?.();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        map.placementWeight = Math.max(1, currentValue - 1);
+        syncWeightUI?.();
+      }
+    }
+
+    // Escape to hide context menu
+    if (e.key === 'Escape') {
+      draggingNodeCell = null;
+      hideContextMenu?.();
+    }
+  });
+
   if (weightInput) {
     weightInput.addEventListener('input', () => {
       map.placementWeight = clampWeight(weightInput.value);
@@ -382,12 +685,149 @@ export function setupUI(map) {
     syncFrictionUI();
   });
 
+  // Drag pins on mousedown/mousemove/mouseup
+  let isDragging = false;
+  let dragStartCell = null;
+  let dragMoved = false;
+
+  const handleDragStart = (e) => {
+    if (!isFiniteLngLat(e.lngLat)) return;
+    
+    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    const node = map.simulationNodes?.[cell];
+    if (node && isActiveNode(node)) {
+      isDragging = true;
+      dragStartCell = cell;
+      dragMoved = false;
+      document.getElementById('map')?.classList.add('map-cursor-grabbing');
+    }
+  };
+
+  const handleDragMove = (e) => {
+    if (!isDragging || !dragStartCell) return;
+    
+    if (!isFiniteLngLat(e.lngLat)) return;
+    
+    // Check if moved more than threshold — mark as drag
+    const dx = e.originalEvent?.clientX ?? 0;
+    const dy = e.originalEvent?.clientY ?? 0;
+    dragMoved = true;
+
+    // Snap to nearest H3 cell
+    const newCell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    if (newCell !== dragStartCell && map.simulationNodes[newCell]) {
+      // Target cell already has a node — stop dragging here
+      isDragging = false;
+      document.getElementById('map')?.classList.remove('map-cursor-grabbing');
+      return;
+    }
+
+    const node = map.simulationNodes[dragStartCell];
+    if (node) {
+      delete map.simulationNodes[dragStartCell];
+      map.simulationNodes[newCell] = { ...node };
+      dragStartCell = newCell;
+      map.renderInterfacePins?.();
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (!isDragging) return;
+    
+    isDragging = false;
+    document.getElementById('map')?.classList.remove('map-cursor-grabbing');
+    map.mappingReady = false;
+    map.flowsReady = false;
+    // Expose drag flag so main.js click handler can skip node manipulation
+    map.dragOccurred = dragMoved;
+  };
+
+  map.on?.('mousedown', handleDragStart);
+  window.addEventListener?.('mousemove', handleDragMove, { passive: true });
+  window.addEventListener?.('mouseup', handleDragEnd);
+
+  // Right-click on map shows context menu for nodes at cursor position
+  map.on?.('contextmenu', (e) => {
+    if (!document.getElementById('map')) return;
+
+    let node = null;
+
+    // Strategy 1: Try lngLat from the event (works for canvas clicks)
+    if (isFiniteLngLat(e.lngLat)) {
+      const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+      node = map.simulationNodes?.[cell];
+    }
+
+    // Strategy 2: If lngLat failed or no active node found, query rendered pin features at click position
+    if (!node || !isActiveNode(node)) {
+      const containerRect = document.getElementById('map')?.getBoundingClientRect();
+      let point;
+      if (e.point) {
+        // e.point is canvas-relative — use directly
+        point = e.point;
+      } else if (containerRect && (e.originalEvent?.clientX ?? 0)) {
+        // Convert viewport coords to canvas-relative pixel coords
+        const cx = e.originalEvent.clientX - containerRect.left;
+        const cy = e.originalEvent.clientY - containerRect.top;
+        point = [cx, cy];
+      }
+
+      if (point) {
+        try {
+          // Query a slightly larger area for better hit detection on pin circles
+          const features = map.queryRenderedFeatures(point, { layers: ['pin-circles'] });
+          if (features.length > 0) {
+            // Find the closest feature to the click point
+            let closest = null;
+            let minDist = Infinity;
+            for (const feat of features) {
+              const [lng, lat] = feat.geometry.coordinates;
+              const projected = map.project([lat, lng]);
+              const dist = Math.hypot(projected.x - point[0], projected.y - point[1]);
+              if (dist < minDist) {
+                minDist = dist;
+                closest = { lng, lat };
+              }
+            }
+            if (closest) {
+              const cell = latLngToCell(closest.lat, closest.lng, H3_STRIDE_RESOLUTION);
+              node = map.simulationNodes?.[cell];
+            }
+          }
+        } catch (_) { /* queryRenderedFeatures may fail in tests */ }
+      }
+    }
+
+    if (node && isActiveNode(node)) {
+      e.preventDefault();
+      showContextMenu(e, node);
+    } else {
+      hideContextMenu();
+    }
+  });
+
+  // Left-click on the map canvas — ignore when context menu is open or clicking on a pin feature
+  map.on?.('click', (e) => {
+    const ctxMenu = document.getElementById('context-menu');
+    if (ctxMenu && !ctxMenu.hidden) return;
+
+    let coords = e.lngLat;
+    // Clicks on rendered features may not carry lngLat — skip them
+    if (!isFiniteLngLat(coords)) {
+      const pt = e.point ?? [e.originalEvent?.clientX ?? 0, e.originalEvent?.clientY ?? 0];
+      coords = map.unproject?.(pt);
+    }
+    if (!isFiniteLngLat(coords)) return;
+
+    // Check if clicking on an existing active node — ignore (handled by drag / context menu)
+    const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
+    const existingNode = map.simulationNodes?.[cell];
+    if (existingNode && isActiveNode(existingNode)) return;
+  });
+
   computeButton.addEventListener('click', async () => {
     if (!hasBuildInputs(map.simulationNodes)) {
-      showAlertCard('Place at least one origin/dual node and one destination/dual node before simulating flows.', {
-        title: 'Missing endpoints',
-        tone: 'warning',
-      });
+      showToastNotification('Place at least one origin/dual node and one destination/dual node before simulating flows.', 'warning');
       return;
     }
 
@@ -401,13 +841,7 @@ export function setupUI(map) {
         map.mappingReady = map.cellFrictionMap.size > 0;
         map.flowsReady = false;
         if (!map.mappingReady) {
-          showAlertCard(
-            'The current layout did not produce a mapping. Add more nodes and try again.',
-            {
-              title: 'Mapping unavailable',
-              tone: 'warning',
-            }
-          );
+          showToastNotification('The current layout did not produce a mapping. Add more nodes and try again.', 'warning');
           setBusyState(false);
           syncSimulationUI();
           return;
@@ -415,10 +849,7 @@ export function setupUI(map) {
       } catch (err) {
         map.flowsReady = false;
         console.error('Mapping build failed:', err);
-        showAlertCard('Mapping build failed. Please try again.', {
-          title: 'Build failed',
-          tone: 'error',
-        });
+        showToastNotification('Mapping build failed. Please try again.', 'error');
         setBusyState(false);
         syncSimulationUI();
         return;
@@ -438,10 +869,7 @@ export function setupUI(map) {
     } catch (err) {
       map.flowsReady = false;
       console.error('Desire path computation failed:', err);
-      showAlertCard('Simulation error. Please try again.', {
-        title: 'Simulation failed',
-        tone: 'error',
-      });
+      showToastNotification('Simulation error. Please try again.', 'error');
     } finally {
       syncFlowReadout();
       setBusyState(false);
@@ -452,24 +880,15 @@ export function setupUI(map) {
   if (exportButton) {
     exportButton.addEventListener('click', () => {
       if (map.flowsReady !== true) {
-        showAlertCard('Simulate flows before exporting GeoJSON.', {
-          title: 'No flows to export',
-          tone: 'warning',
-        });
+        showToastNotification('Simulate flows before exporting GeoJSON.', 'warning');
         return;
       }
       try {
         const geojson = map.exportSimulationGeoJSON();
-        showAlertCard(`Exported ${geojson.features.length} flow cells as GeoJSON.`, {
-          title: 'GeoJSON exported',
-          tone: 'success',
-        });
+        showToastNotification(`Exported ${geojson.features.length} flow cells as GeoJSON.`, 'success');
       } catch (err) {
         console.error('GeoJSON export failed:', err);
-        showAlertCard('GeoJSON export failed. Please try again.', {
-          title: 'Export failed',
-          tone: 'error',
-        });
+        showToastNotification('GeoJSON export failed. Please try again.', 'error');
       }
     });
   }

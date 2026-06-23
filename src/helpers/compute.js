@@ -497,10 +497,10 @@ export async function computeDesirePaths() {
   }
 
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'both'].includes(this.simulationNodes[k].type)
+    ['destination', 'dual'].includes(this.simulationNodes[k].type)
   );
   const agents = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'both'].includes(this.simulationNodes[k].type)
+    ['origin', 'dual'].includes(this.simulationNodes[k].type)
   );
 
   const hexes = this.cellFrictionMap.size;
@@ -1177,10 +1177,10 @@ export function clearGradientCache() {
 // --- Incremental assignment & contribution helpers ---
 function _computeAssignedCounts() {
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'both'].includes(this.simulationNodes[k].type)
+    ['destination', 'dual'].includes(this.simulationNodes[k].type)
   );
   const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'both'].includes(this.simulationNodes[k].type)
+    ['origin', 'dual'].includes(this.simulationNodes[k].type)
   );
 
   if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
@@ -1275,7 +1275,7 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
   }
 
   const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'both'].includes(this.simulationNodes[k].type)
+    ['origin', 'dual'].includes(this.simulationNodes[k].type)
   );
   const perTarget = Object.create(null);
   const hexCount = this.cellFrictionMap?.size || 1;
@@ -1410,7 +1410,7 @@ export function addDestination(targetCell, weight = 1) {
     this.simulationNodes[targetCell] = { type: 'destination', weight };
   else {
     if (this.simulationNodes[targetCell].type === 'origin')
-      this.simulationNodes[targetCell].type = 'both';
+      this.simulationNodes[targetCell].type = 'dual';
     else this.simulationNodes[targetCell].type = 'destination';
     this.simulationNodes[targetCell].weight = weight;
   }
@@ -1422,10 +1422,10 @@ export function addDestination(targetCell, weight = 1) {
   const oldAssigned = this._assignedCounts || Object.create(null);
 
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'both'].includes(this.simulationNodes[k].type)
+    ['destination', 'dual'].includes(this.simulationNodes[k].type)
   );
   const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'both'].includes(this.simulationNodes[k].type)
+    ['origin', 'dual'].includes(this.simulationNodes[k].type)
   );
 
   const changed = new Set();
@@ -1464,7 +1464,7 @@ export function updateDestinationWeight(targetCell, newWeight) {
 
 export function removeDestination(targetCell) {
   if (!this.simulationNodes || !this.simulationNodes[targetCell]) return { removed: false };
-  if (this.simulationNodes[targetCell].type === 'both')
+  if (this.simulationNodes[targetCell].type === 'dual')
     this.simulationNodes[targetCell].type = 'origin';
   else delete this.simulationNodes[targetCell];
 
@@ -1472,10 +1472,10 @@ export function removeDestination(targetCell) {
   const oldAssigned = this._assignedCounts || Object.create(null);
 
   const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'both'].includes(this.simulationNodes[k].type)
+    ['destination', 'dual'].includes(this.simulationNodes[k].type)
   );
   const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'both'].includes(this.simulationNodes[k].type)
+    ['origin', 'dual'].includes(this.simulationNodes[k].type)
   );
 
   const changed = new Set();

@@ -110,12 +110,23 @@ export function renderInterfacePins() {
           '#28a745',
           'destination',
           '#dc3545',
-          'both',
+          'dual',
           '#ffc107',
           '#000',
         ],
         'circle-stroke-width': 2,
         'circle-stroke-color': '#fff',
+        'circle-opacity': [
+          'case',
+          ['==', ['get', 'type'], 'origin'],
+          0.9,
+          ['==', ['get', 'type'], 'destination'],
+          0.9,
+          ['==', ['get', 'type'], 'dual'],
+          0.95,
+          0.7
+        ],
+        'circle-blur': 0.1,
       },
     });
     this.addLayer({
@@ -126,8 +137,29 @@ export function renderInterfacePins() {
         'text-field': ['concat', ['get', 'weight'], 'p'],
         'text-size': 10,
         'text-allow-overlap': true,
+        'text-transform': 'uppercase',
+        'text-font': ['literal', ['IBM Plex Sans Bold']],
       },
       paint: { 'text-color': '#ffffff' },
+    });
+    // Add glow effect for dual nodes
+    this.addLayer({
+      id: 'pin-glow',
+      type: 'circle',
+      source: 'pins',
+      paint: {
+        'circle-radius': ['+', 7, ['*', ['get', 'weight'], 2.5]],
+        'circle-color': [
+          'match',
+          ['get', 'type'],
+          'dual',
+          'rgba(246, 200, 95, 0.3)',
+          'rgba(0, 0, 0, 0)'
+        ],
+        'circle-blur': 15,
+        'circle-opacity': 0.6,
+      },
+      filter: ['==', ['get', 'type'], 'dual']
     });
   } else {
     this.getSource('pins').setData({

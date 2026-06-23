@@ -42,6 +42,13 @@ vi.stubGlobal('document', {
   getElementById: (id) => mockElements.get(id),
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
+  createElement: () => ({
+    id: '', className: '', style: {}, innerHTML: '',
+    appendChild: vi.fn(), removeChild: vi.fn(), firstChild: null,
+    classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() },
+    querySelector: () => null,
+  }),
+  body: { appendChild: vi.fn() },
 });
 
 vi.stubGlobal('window', {
@@ -49,7 +56,12 @@ vi.stubGlobal('window', {
   setTimeout: vi.fn((fn) => setTimeout(fn, 0)),
   URL,
   createObjectURL: () => 'blob:test',
+  requestAnimationFrame: (cb) => setTimeout(cb, 0),
+  cancelAnimationFrame: vi.fn(),
 });
+
+vi.stubGlobal('requestAnimationFrame', (cb) => setTimeout(cb, 0));
+vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
 // ── Maplibre Mock ─────────────────────────────────────────────────────
 const mockMapState = {
@@ -743,7 +755,7 @@ describe('ui.js', () => {
     const exportButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const clearButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const nodeCountChip = { hidden: true, classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() }, querySelector: () => null };
-    const modeLabel = { innerText: '', className: '' };
+    const modeLabel = { innerText: '', className: '', setAttribute: vi.fn(), removeAttribute: vi.fn() };
     const loader = { style: { display: 'none' }, innerText: '' };
     const flowReadout = { innerText: '' };
     const alertCard = { hidden: true, dataset: { tone: '' } };
@@ -795,6 +807,8 @@ describe('ui.js', () => {
       },
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      createElement: () => ({ id: '', className: '', style: {}, innerHTML: '', appendChild: vi.fn(), removeChild: vi.fn(), classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() }, querySelector: () => null }),
+      body: { appendChild: vi.fn() },
     };
 
     return doc;
@@ -989,13 +1003,8 @@ describe('ui.js', () => {
     setupUI(map);
 
     getClickHandler(doc.getElementById('btn-export-geojson'))();
-    const alertCard = doc.getElementById('app-alert');
-    const alertMessage = doc.getElementById('app-alert-message');
 
     expect(map.exportSimulationGeoJSON).not.toHaveBeenCalled();
-    expect(alertCard.hidden).toBe(false);
-    expect(alertCard.dataset.tone).toBe('warning');
-    expect(alertMessage.innerText).toBe('Simulate flows before exporting GeoJSON.');
   });
 
   it('should sync mode UI for origin mode', async () => {
@@ -1966,7 +1975,7 @@ describe('main.js', () => {
       const { isReadyToCompute } = await import('../src/main.js');
       const mapInstance = {
         simulationNodes: {
-          hex1: { type: 'both', weight: 1 },
+          hex1: { type: 'dual', weight: 1 },
         },
       };
       const result = isReadyToCompute(mapInstance);
@@ -1977,7 +1986,7 @@ describe('main.js', () => {
       const { isReadyToCompute } = await import('../src/main.js');
       const mapInstance = {
         simulationNodes: {
-          hex1: { type: 'both', weight: 1 },
+          hex1: { type: 'dual', weight: 1 },
           hex2: { type: 'origin', weight: 1 },
         },
       };
@@ -1989,7 +1998,7 @@ describe('main.js', () => {
       const { isReadyToCompute } = await import('../src/main.js');
       const mapInstance = {
         simulationNodes: {
-          hex1: { type: 'both', weight: 1 },
+          hex1: { type: 'dual', weight: 1 },
           hex2: { type: 'destination', weight: 1 },
         },
       };

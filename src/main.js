@@ -197,32 +197,23 @@ const init = () => {
 
   // desireMap.on('moveend', e => { e.target.triggerFastScan(); });
 
-  // Remove nodes on right-click, and disable context menu
-  desireMap.on('contextmenu', (e) => {
-    e.preventDefault();
-    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
-    const node = desireMap.simulationNodes?.[cell];
-    if (node && node.type === desireMap.placementMode) {
-      node.weight = Math.max(0, node.weight - 1);
-    }
-    if (node && node.weight <= 0) {
-      delete desireMap.simulationNodes[cell];
-      desireMap.mappingReady = false;
-      desireMap.flowsReady = false;
-    } else if (node) {
-      desireMap.mappingReady = false;
-      desireMap.flowsReady = false;
-    }
-    desireMap.renderInterfacePins();
-    desireMap.readyToCompute = isReadyToCompute(desireMap);
-    desireMap.syncSimulationUI?.();
-  });
-
-  // Click handler — place/increase nodes, update onboarding state
+  // Click handler — place new nodes only (weight managed via context menu)
   desireMap.on('click', (e) => {
     if (!document.getElementById('map')) return;
-    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
-    let structureChanged = false;
+
+    // Ignore clicks while context menu is open or during drag
+    const ctxMenu = document.getElementById('context-menu');
+    if (ctxMenu && !ctxMenu.hidden) return;
+    if (desireMap.dragOccurred) {
+      desireMap.dragOccurred = false;
+      return;
+    }
+
+    let coords = e.lngLat;
+    // Clicks on rendered features may not carry lngLat — skip them
+    if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return;
+
+    const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
 
     if (!isAccessible(desireMap, e)) {
       desireMap.showAlertCard('This spot is blocked. Pick a walkable location instead.', {
@@ -233,29 +224,15 @@ const init = () => {
     }
 
     const nodes = desireMap.simulationNodes;
-    const existingNode = nodes[cell];
-    if (existingNode) {
-      if (existingNode.type === desireMap.placementMode) {
-        existingNode.weight = Math.min(10, existingNode.weight + 1);
-        desireMap.mappingReady = false;
-        desireMap.flowsReady = false;
-      } else {
-        existingNode.type = desireMap.placementMode;
-        structureChanged = true;
-      }
-    } else {
+    // Only place new nodes — existing nodes are managed via context menu
+    if (!nodes[cell]) {
       nodes[cell] = {
         type: desireMap.placementMode,
         weight: Math.min(10, Math.max(1, Math.round(desireMap.placementWeight ?? 1))),
       };
-      structureChanged = true;
-    }
 
-    desireMap.renderInterfacePins();
-    desireMap.readyToCompute = isReadyToCompute(desireMap);
-
-    if (structureChanged) {
-      desireMap.mappingReady = false;
+      desireMap.renderInterfacePins();
+      desireMap.readyToCompute = isReadyToCompute(desireMap);
     }
 
     desireMap.syncSimulationUI?.();
@@ -268,8 +245,8 @@ const init = () => {
 const isReadyToCompute = (mapInstance) => {
   const nodes = Object.values(mapInstance.simulationNodes ?? {});
   const activeNodes = nodes.filter((n) => n.weight > 0);
-  const hasOrigin = activeNodes.some((n) => n.type === 'origin' || n.type === 'both');
-  const hasDestination = activeNodes.some((n) => n.type === 'destination' || n.type === 'both');
+  const hasOrigin = activeNodes.some((n) => n.type === 'origin' || n.type === 'dual');
+  const hasDestination = activeNodes.some((n) => n.type === 'destination' || n.type === 'dual');
   return hasOrigin && hasDestination;
 };
 

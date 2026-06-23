@@ -283,7 +283,7 @@ describe('addDestination', () => {
     expect(map.simulationNodes[h3].weight).toBe(2);
   });
 
-  it('should upgrade origin to both when adding destination at same cell', () => {
+  it('should create dual when adding destination at existing origin cell', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
       simulationNodes: { [h3]: { type: 'origin', weight: 1 } },
@@ -295,7 +295,7 @@ describe('addDestination', () => {
       globalPeakFlow: 1,
     };
     addDestination.call(map, h3, 1);
-    expect(map.simulationNodes[h3].type).toBe('both');
+    expect(map.simulationNodes[h3].type).toBe('dual');
   });
 
   it('should update weight when adding destination at existing destination cell', () => {
@@ -329,7 +329,7 @@ describe('addDestination', () => {
       globalPeakFlow: 1,
     };
     addDestination.call(map, h3, 1);
-    expect(map.simulationNodes[h3].type).toBe('both');
+    expect(map.simulationNodes[h3].type).toBe('dual');
     expect(map.globalPeakFlow).toBeGreaterThan(1);
   });
 });
@@ -387,7 +387,7 @@ describe('removeDestination', () => {
   it('should downgrade both to origin when removing destination', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const map = {
-      simulationNodes: { [h3]: { type: 'both', weight: 1 } },
+      simulationNodes: { [h3]: { type: 'dual', weight: 1 } },
       _gradientCacheObj: Object.create(null),
       cellFrictionMap: new Map([[h3, 1]]),
       pathDesireScores: new Map(),
