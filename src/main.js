@@ -52,6 +52,8 @@ class DesireMap {
   set placementMode(v) { this.#map.placementMode = v; }
   get placementWeight() { return this.#map.placementWeight; }
   set placementWeight(v) { this.#map.placementWeight = v; }
+  get dragOccurred() { return this.#map.dragOccurred; }
+  set dragOccurred(v) { this.#map.dragOccurred = v; }
   get aoi() { return this.#map.aoi; }
   set aoi(v) { this.#map.aoi = v; }
   get readyToCompute() { return this.#map.readyToCompute; }
@@ -164,6 +166,7 @@ const init = () => {
   desireMap.placementWeight = 1;
   desireMap.aoi = undefined;
   desireMap.readyToCompute = false;
+  desireMap.dragOccurred = false;
 
   desireMap.addControl(desireMap.deckOverlayInstance);
   setMapCursor(desireMap, 'crosshair');

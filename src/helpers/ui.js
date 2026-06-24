@@ -685,7 +685,8 @@ export function setupUI(map) {
     syncFrictionUI();
   });
 
-  // Drag pins on mousedown/mousemove/mouseup
+  // Drag pins on mousedown/mousemove/mouseup — use maplibre native events so they
+  // fire even when the deck.gl overlay (which renders pin circles) intercepts canvas clicks.
   let isDragging = false;
   let dragStartCell = null;
   let dragMoved = false;
@@ -696,6 +697,7 @@ export function setupUI(map) {
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
     const node = map.simulationNodes?.[cell];
     if (node && isActiveNode(node)) {
+      e.preventDefault?.();
       isDragging = true;
       dragStartCell = cell;
       dragMoved = false;
@@ -708,9 +710,6 @@ export function setupUI(map) {
     
     if (!isFiniteLngLat(e.lngLat)) return;
     
-    // Check if moved more than threshold — mark as drag
-    const dx = e.originalEvent?.clientX ?? 0;
-    const dy = e.originalEvent?.clientY ?? 0;
     dragMoved = true;
 
     // Snap to nearest H3 cell
@@ -742,9 +741,11 @@ export function setupUI(map) {
     map.dragOccurred = dragMoved;
   };
 
-  map.on?.('mousedown', handleDragStart);
-  window.addEventListener?.('mousemove', handleDragMove, { passive: true });
-  window.addEventListener?.('mouseup', handleDragEnd);
+  if (map.on) {
+    map.on('mousedown', handleDragStart);
+    map.on('mousemove', handleDragMove);
+  }
+  window.addEventListener?.('mouseup', handleDragEnd, { passive: true });
 
   // Right-click on map shows context menu for nodes at cursor position
   map.on?.('contextmenu', (e) => {
@@ -810,6 +811,7 @@ export function setupUI(map) {
   map.on?.('click', (e) => {
     const ctxMenu = document.getElementById('context-menu');
     if (ctxMenu && !ctxMenu.hidden) return;
+    if (isDragging) return; // Skip if currently dragging a node
 
     let coords = e.lngLat;
     // Clicks on rendered features may not carry lngLat — skip them
