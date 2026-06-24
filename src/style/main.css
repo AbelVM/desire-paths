@@ -42,6 +42,7 @@ html {
   left: 0;
 }
 
+/* Cursor states — all target the map container so they override maplibre/deck.gl defaults */
 #map.map-cursor-crosshair,
 #map.map-cursor-crosshair canvas,
 #map.map-cursor-crosshair .maplibregl-canvas,
@@ -54,6 +55,30 @@ html {
 #map.map-cursor-pointer .maplibregl-canvas,
 #map.map-cursor-pointer .maplibregl-canvas-container {
   cursor: pointer !important;
+}
+
+/* Grab — hovering over a draggable node pin (idle state) */
+#map.map-cursor-grab,
+#map.map-cursor-grab canvas,
+#map.map-cursor-grab .maplibregl-canvas,
+#map.map-cursor-grab .maplibregl-canvas-container {
+  cursor: grab !important;
+}
+
+/* Grabbing — actively dragging a node pin */
+#map.map-cursor-grabbing,
+#map.map-cursor-grabbing canvas,
+#map.map-cursor-grabbing .maplibregl-canvas,
+#map.map-cursor-grabbing .maplibregl-canvas-container {
+  cursor: grabbing !important;
+}
+
+/* Wait — computing / processing */
+#map.map-cursor-wait,
+#map.map-cursor-wait canvas,
+#map.map-cursor-wait .maplibregl-canvas,
+#map.map-cursor-wait .maplibregl-canvas-container {
+  cursor: wait !important;
 }
 
 .panel {
@@ -308,6 +333,23 @@ html {
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
   color: var(--text-soft);
+  border: 1px solid transparent;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.btn-segment:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.05));
+}
+
+.btn-segment:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .btn-segment.is-active[data-placement-mode='origin'] {
@@ -418,7 +460,22 @@ html {
 .btn-segment:disabled,
 .weight-control input[type='range']:disabled,
 .btn-wide:disabled {
-  cursor: wait;
+  cursor: not-allowed !important;
+}
+
+/* Button disabled state — more distinct visual cue */
+.btn:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.45;
+  transform: none;
+  box-shadow: none;
+  pointer-events: auto; /* Allow hover for tooltip visibility even when disabled */
+}
+
+/* Segment buttons also get a dimmed border when disabled */
+.btn-segment:disabled {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+  border-color: rgba(255, 255, 255, 0.04);
 }
 
 .btn {
@@ -465,13 +522,6 @@ html {
 .alert-card-dismiss:focus-visible {
   outline: 2px solid rgba(246, 200, 95, 0.9);
   outline-offset: 2px;
-}
-
-.btn:disabled {
-  cursor: wait;
-  opacity: 0.6;
-  transform: none;
-  box-shadow: none;
 }
 
 .legend {
@@ -1157,11 +1207,11 @@ html {
   color: #ffffff;
 }
 
-/* Drag cursor styles */
+/* Drag cursor styles — superseded by the unified cursor classes at the top of this file */
 #map.map-cursor-grab {
-  cursor: grab !important;
+  /* grab is now handled via setMapCursor('grab') in main.js mousemove handler */
 }
 
 #map.map-cursor-grabbing {
-  cursor: grabbing !important;
+  /* grabbing is now handled via setMapCursor('grabbing') in ui.js drag handlers */
 }

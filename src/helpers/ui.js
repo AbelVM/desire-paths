@@ -85,7 +85,7 @@ async function fitAoiBounds(mapInstance) {
   mapInstance.renderInterfacePins?.();
 }
 
-export function setupUI(map) {
+export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const panel = document.querySelector('.panel');
   const modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
   const frictionButton = document.getElementById('btn-toggle-friction');
@@ -570,6 +570,8 @@ export function setupUI(map) {
       loader.style.display = 'none';
     }
     syncProgressUI();
+    // Reset wait cursor when computation finishes so hover states resume normally
+    if (!busy) setMapCursorWait?.(map, false);
     // Sync mode UI to update node counts and readiness state
     syncModeUI();
   };
@@ -596,6 +598,8 @@ export function setupUI(map) {
     loader.innerText = message;
     loader.style.display = busy ? 'block' : 'none';
     computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    // Update cursor during computation
+    setMapCursorWait?.(map, busy);
     if (progressLabel) {
       progressLabel.innerHTML = `<span class="progress-phase">${message}</span>`;
     }
@@ -693,15 +697,22 @@ export function setupUI(map) {
 
   const handleDragStart = (e) => {
     if (!isFiniteLngLat(e.lngLat)) return;
-    
+
+    // Don't intercept right-click — it would suppress the native contextmenu event
+    if ((e.originalEvent?.button ?? 0) !== 0) return;
+
+    // Block drag while computing
+    if (map.isComputing) return;
+
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
     const node = map.simulationNodes?.[cell];
     if (node && isActiveNode(node)) {
       e.preventDefault?.();
       isDragging = true;
+      map.isDragging = true;
       dragStartCell = cell;
       dragMoved = false;
-      document.getElementById('map')?.classList.add('map-cursor-grabbing');
+      setMapCursor?.(map, 'grabbing');
     }
   };
 
@@ -717,7 +728,8 @@ export function setupUI(map) {
     if (newCell !== dragStartCell && map.simulationNodes[newCell]) {
       // Target cell already has a node — stop dragging here
       isDragging = false;
-      document.getElementById('map')?.classList.remove('map-cursor-grabbing');
+      map.isDragging = false;
+      setMapCursor?.(map, 'grab');
       return;
     }
 
@@ -734,7 +746,8 @@ export function setupUI(map) {
     if (!isDragging) return;
     
     isDragging = false;
-    document.getElementById('map')?.classList.remove('map-cursor-grabbing');
+    map.isDragging = false;
+    setMapCursor?.(map, 'grab');
     map.mappingReady = false;
     map.flowsReady = false;
     // Expose drag flag so main.js click handler can skip node manipulation
@@ -750,6 +763,9 @@ export function setupUI(map) {
   // Right-click on map shows context menu for nodes at cursor position
   map.on?.('contextmenu', (e) => {
     if (!document.getElementById('map')) return;
+
+    // Block context menu while computing
+    if (map.isComputing) return;
 
     let node = null;
 

@@ -137,8 +137,16 @@ class DesireMap {
 
 export function setMapCursor(mapInstance, cursor) {
   const target = mapInstance.getContainer();
-  target.classList.toggle('map-cursor-pointer', cursor === 'pointer');
-  target.classList.toggle('map-cursor-crosshair', cursor === 'crosshair');
+  // Clear all cursor classes first
+  target.classList.remove('map-cursor-pointer', 'map-cursor-grab', 'map-cursor-grabbing', 'map-cursor-wait', 'map-cursor-crosshair');
+  if (cursor) {
+    target.classList.add(`map-cursor-${cursor}`);
+  }
+}
+
+export function setMapCursorWait(mapInstance, waiting) {
+  const target = mapInstance.getContainer();
+  target.classList.toggle('map-cursor-wait', waiting);
 }
 
 const init = () => {
@@ -181,6 +189,12 @@ const init = () => {
   });
 
   desireMap.on('mousemove', (e) => {
+    // Respect isDragging flag set by ui.js — don't override cursor during drag
+    if (desireMap.isDragging) return;
+
+    // During computation, always show wait cursor regardless of hover target
+    if (desireMap.isComputing) return;
+
     const availablePointLayerIds = pointLayerIds.filter((layerId) => desireMap.getLayer(layerId));
     if (availablePointLayerIds.length === 0) {
       setMapCursor(desireMap, 'crosshair');
@@ -188,12 +202,17 @@ const init = () => {
       const features = desireMap.queryRenderedFeatures(e.point, {
         layers: availablePointLayerIds,
       });
-      setMapCursor(desireMap, features.length > 0 ? 'pointer' : 'crosshair');
+      // Pins are draggable — show grab cursor when hovering them
+      setMapCursor(desireMap, features.length > 0 ? 'grab' : 'crosshair');
     }
   });
 
   desireMap.on('mouseout', () => {
-    setMapCursor(desireMap, 'crosshair');
+    if (desireMap.isComputing) {
+      setMapCursorWait(desireMap, true);
+    } else {
+      setMapCursor(desireMap, 'crosshair');
+    }
     const tooltip = document.getElementById('hex-tooltip');
     if (tooltip) tooltip.hidden = true;
   });
@@ -241,7 +260,7 @@ const init = () => {
     desireMap.syncSimulationUI?.();
   });
 
-  setupUI(desireMap);
+  setupUI(desireMap, { setMapCursor, setMapCursorWait });
 };
 
 // Check if there are at least one source and one sink to compute desire paths

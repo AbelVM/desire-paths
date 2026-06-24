@@ -2086,37 +2086,102 @@ describe('main.js', () => {
   });
 
   describe('setMapCursor', () => {
-    it('should toggle map-cursor-pointer class when cursor is pointer', async () => {
+    it('should set map-cursor-pointer class and remove others when cursor is pointer', async () => {
       const { setMapCursor } = await import('../src/main.js');
-      const toggleSpy = vi.fn();
+      const calls = [];
+      const mockClassList = {
+        add: (c) => calls.push(['add', c]),
+        remove: (c) => calls.push(['remove', c]),
+      };
       const mapInstance = {
-        getContainer: () => ({ classList: { toggle: toggleSpy } }),
+        getContainer: () => ({ classList: mockClassList }),
       };
       setMapCursor(mapInstance, 'pointer');
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-pointer', true);
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-crosshair', false);
+      expect(calls).toContainEqual(['add', 'map-cursor-pointer']);
     });
 
-    it('should toggle map-cursor-crosshair class when cursor is crosshair', async () => {
+    it('should set map-cursor-grab class when cursor is grab', async () => {
       const { setMapCursor } = await import('../src/main.js');
-      const toggleSpy = vi.fn();
+      const calls = [];
+      const mockClassList = {
+        add: (c) => calls.push(['add', c]),
+        remove: (c) => calls.push(['remove', c]),
+      };
       const mapInstance = {
-        getContainer: () => ({ classList: { toggle: toggleSpy } }),
+        getContainer: () => ({ classList: mockClassList }),
+      };
+      setMapCursor(mapInstance, 'grab');
+      expect(calls).toContainEqual(['add', 'map-cursor-grab']);
+    });
+
+    it('should set map-cursor-wait class when cursor is wait', async () => {
+      const { setMapCursor } = await import('../src/main.js');
+      const calls = [];
+      const mockClassList = {
+        add: (c) => calls.push(['add', c]),
+        remove: (c) => calls.push(['remove', c]),
+      };
+      const mapInstance = {
+        getContainer: () => ({ classList: mockClassList }),
+      };
+      setMapCursor(mapInstance, 'wait');
+      expect(calls).toContainEqual(['add', 'map-cursor-wait']);
+    });
+
+    it('should clear all cursor classes when cursor is null', async () => {
+      const { setMapCursor } = await import('../src/main.js');
+      const calls = [];
+      const mockClassList = {
+        add: (c) => calls.push(['add', c]),
+        remove: (c) => calls.push(['remove', c]),
+      };
+      const mapInstance = {
+        getContainer: () => ({ classList: mockClassList }),
+      };
+      setMapCursor(mapInstance, null);
+      expect(calls).toContainEqual(['remove', 'map-cursor-pointer']);
+    });
+
+    it('should set map-cursor-crosshair class when cursor is crosshair', async () => {
+      const { setMapCursor } = await import('../src/main.js');
+      const calls = [];
+      const mockClassList = {
+        add: (c) => calls.push(['add', c]),
+        remove: (c) => calls.push(['remove', c]),
+      };
+      const mapInstance = {
+        getContainer: () => ({ classList: mockClassList }),
       };
       setMapCursor(mapInstance, 'crosshair');
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-pointer', false);
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-crosshair', true);
+      expect(calls).toContainEqual(['add', 'map-cursor-crosshair']);
+    });
+  });
+
+  describe('setMapCursorWait', () => {
+    it('should add map-cursor-wait class when waiting is true', async () => {
+      const { setMapCursorWait } = await import('../src/main.js');
+      const calls = [];
+      const mockClassList = {
+        toggle: (c, v) => calls.push(['toggle', c, v]),
+      };
+      const mapInstance = {
+        getContainer: () => ({ classList: mockClassList }),
+      };
+      setMapCursorWait(mapInstance, true);
+      expect(calls).toContainEqual(['toggle', 'map-cursor-wait', true]);
     });
 
-    it('should handle cursor value other than pointer or crosshair', async () => {
-      const { setMapCursor } = await import('../src/main.js');
-      const toggleSpy = vi.fn();
-      const mapInstance = {
-        getContainer: () => ({ classList: { toggle: toggleSpy } }),
+    it('should remove map-cursor-wait class when waiting is false', async () => {
+      const { setMapCursorWait } = await import('../src/main.js');
+      const calls = [];
+      const mockClassList = {
+        toggle: (c, v) => calls.push(['toggle', c, v]),
       };
-      setMapCursor(mapInstance, 'default');
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-pointer', false);
-      expect(toggleSpy).toHaveBeenCalledWith('map-cursor-crosshair', false);
+      const mapInstance = {
+        getContainer: () => ({ classList: mockClassList }),
+      };
+      setMapCursorWait(mapInstance, false);
+      expect(calls).toContainEqual(['toggle', 'map-cursor-wait', false]);
     });
   });
 
