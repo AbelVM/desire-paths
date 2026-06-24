@@ -483,6 +483,9 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
 export async function computeDesirePaths() {
+  // Reset flow map before every simulation so results don't accumulate across runs
+  this.pathDesireScores = new Map();
+
   // Guard: ensure the friction map has been built before simulating
   if (!this.cellFrictionMap || this.cellFrictionMap.size === 0) {
     this.flowsReady = false;
