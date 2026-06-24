@@ -145,7 +145,7 @@ html {
   flex: 0 0 auto;
   width: 54px;
   height: 54px;
-  border-radius: 18px;
+  border-radius: 50%;
   background:
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.45), transparent 28%),
     radial-gradient(
