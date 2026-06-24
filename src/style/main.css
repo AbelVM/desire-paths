@@ -687,8 +687,8 @@ html {
   margin-top: 0;
 }
 
-/* Readiness indicator on mode status */
-.mode-indicator.ready {
+/* Readiness indicator on node count chip */
+.count-chip.is-ready {
   border-color: rgba(88, 214, 141, 0.5) !important;
   box-shadow: 0 0 12px rgba(88, 214, 141, 0.15);
 }

@@ -134,7 +134,7 @@ export function renderInterfacePins() {
       type: 'symbol',
       source: 'pins',
       layout: {
-        'text-field': ['concat', ['get', 'weight'], 'p'],
+        'text-field': ['concat', '×', ['get', 'weight']],
         'text-size': 10,
         'text-allow-overlap': true,
         'text-transform': 'uppercase',

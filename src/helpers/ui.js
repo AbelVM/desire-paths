@@ -206,9 +206,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     if (readyToCompute) {
       modeText += ' · Ready';
-      if (modeLabel?.classList) modeLabel.classList.add('ready');
+      // Highlight the count chip instead of the mode label — origin mode is already green,
+      // which makes a green border on mode-status misleading.
+      if (nodeCountChip) nodeCountChip.classList.add('is-ready');
     } else {
       if (modeLabel?.classList) modeLabel.classList.remove('ready');
+      if (nodeCountChip) nodeCountChip.classList.remove('is-ready');
       
       // Show helpful hint based on what's missing
       if (!hasOrigins && !hasDestinations) {
