@@ -1098,6 +1098,30 @@ html {
   pointer-events: none;
 }
 
+.context-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line);
+  border: none;
+  padding: 0;
+}
+
+.context-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  margin-right: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.context-btn:hover .context-icon {
+  color: var(--accent);
+}
+
 .context-btn {
   width: 100%;
   min-height: 36px;

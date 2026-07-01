@@ -315,7 +315,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `
       <button id="context-change-type" class="context-btn" type="button">Change Type</button>
-      <button id="context-adjust-weight" class="context-btn" type="button">Adjust Weight</button>
+      <div class="context-divider"></div>
+      <button id="context-increase-weight" class="context-btn" type="button"><span class="context-icon">＋</span> Increase Weight</button>
+      <button id="context-decrease-weight" class="context-btn" type="button"><span class="context-icon">－</span> Decrease Weight</button>
+      <div class="context-divider"></div>
       <button id="context-remove-node" class="context-btn context-danger" type="button">Remove Node</button>
     `;
     document.body.appendChild(menu);
@@ -362,7 +365,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     // Set up menu items using addEventListener for reliable handler attachment
     const changeTypeBtn = document.getElementById('context-change-type');
-    const adjustWeightBtn = document.getElementById('context-adjust-weight');
+    const increaseWeightBtn = document.getElementById('context-increase-weight');
+    const decreaseWeightBtn = document.getElementById('context-decrease-weight');
     const removeNodeBtn = document.getElementById('context-remove-node');
 
     if (changeTypeBtn) {
@@ -400,21 +404,56 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       changeTypeBtn.dataset.prevHandler = handlerName;
     }
 
-    if (adjustWeightBtn) {
-      const prevAdjust = adjustWeightBtn.dataset.prevHandler;
-      if (prevAdjust) adjustWeightBtn.removeEventListener('click', window[prevAdjust]);
-      delete adjustWeightBtn.dataset.prevHandler;
-
-      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (increaseWeightBtn || decreaseWeightBtn) {
+      // Capture node reference at setup time
       const nodeRef = node;
-      window[handlerName] = (ev) => {
-        ev.stopPropagation();
-        hideContextMenu();
-        weightInput?.focus();
-        showToastNotification(`Current weight: ${nodeRef.weight}. Use arrow keys or range slider to adjust.`, 'info');
+
+      const makeWeightHandler = (delta) => {
+        return (ev) => {
+          ev.stopPropagation();
+          hideContextMenu();
+
+          const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === nodeRef);
+          if (!cellKey || !map.simulationNodes[cellKey]) return;
+
+          const newWeight = clampWeight(nodeRef.weight + delta);
+          if (newWeight !== nodeRef.weight) {
+            nodeRef.weight = newWeight;
+            map.mappingReady = false;
+            map.flowsReady = false;
+            map.renderInterfacePins?.();
+            syncSimulationUI?.();
+            showToastNotification(`Weight: ${newWeight}`, 'info');
+          } else {
+            const label = delta > 0 ? 'already at maximum' : 'already at minimum';
+            showToastNotification(`Weight is ${label} (1–10)`, 'warning');
+          }
+        };
       };
-      adjustWeightBtn.addEventListener('click', window[handlerName]);
-      adjustWeightBtn.dataset.prevHandler = handlerName;
+
+      const incHandlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_inc`;
+      window[incHandlerName] = makeWeightHandler(+1);
+      if (increaseWeightBtn) {
+        increaseWeightBtn.addEventListener('click', window[incHandlerName]);
+        increaseWeightBtn.dataset.prevHandler = incHandlerName;
+      }
+
+      const decHandlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dec`;
+      window[decHandlerName] = makeWeightHandler(-1);
+      if (decreaseWeightBtn) {
+        decreaseWeightBtn.addEventListener('click', window[decHandlerName]);
+        decreaseWeightBtn.dataset.prevHandler = decHandlerName;
+      }
+
+      // Clean up stale handlers on next open
+      const prevInc = increaseWeightBtn?.dataset.prevHandler;
+      if (prevInc && prevInc !== incHandlerName) {
+        try { delete window[prevInc]; } catch (_) {}
+      }
+      const prevDec = decreaseWeightBtn?.dataset.prevHandler;
+      if (prevDec && prevDec !== decHandlerName) {
+        try { delete window[prevDec]; } catch (_) {}
+      }
     }
 
     if (removeNodeBtn) {
@@ -476,7 +515,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         contextMenu.style.opacity = '';
       }
       // Clean up window-stored button handlers to avoid memory leaks
-      const btnIds = ['context-change-type', 'context-adjust-weight', 'context-remove-node'];
+      const btnIds = ['context-change-type', 'context-increase-weight', 'context-decrease-weight', 'context-remove-node'];
       for (const id of btnIds) {
         const btn = document.getElementById(id);
         if (btn?.dataset.prevHandler && window[btn.dataset.prevHandler]) {
