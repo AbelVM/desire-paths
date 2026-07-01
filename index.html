@@ -1,38 +1,43 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- Primary meta -->
-    <title>Desire Paths — Interactive Agent-Based Flow Simulator</title>
-    <meta name="description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
-    <meta name="keywords" content="desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS, Dijkstra, walkability analysis" />
-    <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- Theme & mobile -->
-    <meta name="theme-color" content="#0a0e17" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- Primary meta -->
+  <title>Desire Paths — Interactive Agent-Based Flow Simulator</title>
+  <meta name="description"
+    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+  <meta name="keywords"
+    content="desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS, Dijkstra, walkability analysis" />
+  <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
 
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!-- Theme & mobile -->
+  <meta name="theme-color" content="#0a0e17" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
-    <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
-    <meta property="og:description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
-    <meta property="og:site_name" content="Desire Paths" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
-    <meta name="twitter:description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
+  <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+  <meta property="og:description"
+    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+  <meta property="og:site_name" content="Desire Paths" />
 
-    <!-- JSON-LD Structured Data -->
-    <script type="application/ld+json">
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+  <meta name="twitter:description"
+    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "WebApplication",
@@ -56,34 +61,39 @@
     }
     </script>
 
-    <link href="src/style/main.css" rel="stylesheet" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body>
-    <div
-      id="app-alert"
-      class="alert-card"
-      role="alert"
-      aria-live="assertive"
-      aria-atomic="true"
-      hidden
-    >
-      <div class="alert-card-copy">
-        <div id="app-alert-title" class="alert-card-title">Notice</div>
-        <div id="app-alert-message" class="alert-card-message"></div>
-      </div>
-      <button id="app-alert-dismiss" class="alert-card-dismiss" type="button">
-        Dismiss
-      </button>
-    </div>
+  <link href="src/style/main.css" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+</head>
 
-    <div class="panel-container">
-      <div class="panel">
+<body>
+
+  <div class="loading">
+    <div class="spinner">
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+    </div>
+  </div>
+
+  <div id="app-alert" class="alert-card" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+    <div class="alert-card-copy">
+      <div id="app-alert-title" class="alert-card-title">Notice</div>
+      <div id="app-alert-message" class="alert-card-message"></div>
+    </div>
+    <button id="app-alert-dismiss" class="alert-card-dismiss" type="button">
+      Dismiss
+    </button>
+  </div>
+
+  <div class="panel-container">
+    <div class="panel">
       <div class="panel-header">
         <div>
           <div class="panel-kicker">Cartographic flow lab</div>
@@ -101,16 +111,20 @@
           Placement: Origin nodes · 0 placed
         </div>
         <div id="node-count-chip" class="count-chip">
-          <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
+          <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
+            class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
         </div>
       </div>
 
       <div class="panel-section">
         <div class="section-label">Placement</div>
         <div class="placement-mode-group" role="group" aria-label="Placement mode">
-          <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin" aria-pressed="true">Origin</button>
-          <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination" aria-pressed="false">Destination</button>
-          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual" aria-pressed="false">Dual</button>
+          <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin"
+            aria-pressed="true">Origin</button>
+          <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination"
+            aria-pressed="false">Destination</button>
+          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
+            aria-pressed="false">Dual</button>
         </div>
         <div class="weight-control">
           <div class="weight-control-head">
@@ -122,7 +136,8 @@
             <span>1</span>
             <span>10</span>
           </div>
-          <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change weight, type, or remove them</div>
+          <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change
+            weight, type, or remove them</div>
         </div>
       </div>
 
@@ -138,16 +153,8 @@
       <div class="panel-footer">
         <div id="scan-loader">Sampling walkable surfaces...</div>
         <div class="simulation-progress-wrap">
-          <div
-            id="simulation-progress"
-            class="simulation-progress"
-            role="progressbar"
-            aria-label="Simulation progress"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow="0"
-            hidden
-          >
+          <div id="simulation-progress" class="simulation-progress" role="progressbar" aria-label="Simulation progress"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
             <span id="simulation-progress-bar"></span>
           </div>
           <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
@@ -157,86 +164,73 @@
         </div>
       </div>
     </div><!-- /.panel -->
-    </div><!-- /.panel-container -->
+  </div><!-- /.panel-container -->
 
-    <div class="legend">
-      <div class="legend-title-row">
-        <div class="legend-title">Friction resistance map</div>
-        <button
-          id="btn-toggle-friction"
-          class="legend-icon-button legend-toggle-btn"
-          type="button"
-          aria-label="Hide friction legend"
-          aria-pressed="true"
-        >
-          <span class="toggle-icon">−</span>
-        </button>
+  <div class="legend">
+    <div class="legend-title-row">
+      <div class="legend-title">Friction resistance map</div>
+      <button id="btn-toggle-friction" class="legend-icon-button legend-toggle-btn" type="button"
+        aria-label="Hide friction legend" aria-pressed="true">
+        <span class="toggle-icon">−</span>
+      </button>
+    </div>
+    <div id="friction-legend-body">
+      <div class="legend-item">
+        <span class="legend-color" style="background: rgba(231, 76, 60, 0.75)"></span>
+        Hard structure (Cost: ∞)
       </div>
-      <div id="friction-legend-body">
-        <div class="legend-item">
-          <span
-            class="legend-color"
-            style="background: rgba(231, 76, 60, 0.75)"
-          ></span>
-          Hard structure (Cost: ∞)
-        </div>
-        <div class="legend-item">
-          <span
-            class="legend-color"
-            style="background: rgba(39, 174, 96, 0.55)"
-          ></span>
-          Dense vegetation (Cost: 4.0)
-        </div>
-        <div class="legend-item">
-          <span
-            class="legend-color"
-            style="background: rgba(166, 216, 84, 0.45)"
-          ></span>
-          Permeable greenspace (Cost: 2.5)
-        </div>
-        <div class="legend-item">
-          <span
-            class="legend-color"
-            style="background: rgba(0, 150, 255, 0.15)"
-          ></span>
-          Walkable baseline
-        </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: rgba(39, 174, 96, 0.55)"></span>
+        Dense vegetation (Cost: 4.0)
       </div>
-
-      <div class="legend-title legend-title-spaced">Continuous flow network</div>
-      <div class="legend-gradient"></div>
-      <div class="legend-labels">
-        <span>0 Paths</span>
-        <span id="legend-max-label">Max Flow</span>
+      <div class="legend-item">
+        <span class="legend-color" style="background: rgba(166, 216, 84, 0.45)"></span>
+        Permeable greenspace (Cost: 2.5)
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: rgba(0, 150, 255, 0.15)"></span>
+        Walkable baseline
       </div>
     </div>
 
-    <!-- Empty-state onboarding overlay -->
-    <div id="onboarding-overlay" class="onboarding-overlay" hidden>
-      <div class="onboarding-card">
-        <button id="onboarding-dismiss" type="button" class="onboarding-close" aria-label="Dismiss guide">
-          &times;
-        </button>
-        <div class="onboarding-step active" data-step="1">
-          <span class="step-number">1</span>
-          <span class="step-text">Choose Origin, Destination, or Dual mode, then click the map to place your first node. Use the slider below to set its weight before placing more nodes.</span>
-        </div>
-        <div class="onboarding-step" data-step="2">
-          <span class="step-number">2</span>
-          <span class="step-text">Switch to Destination mode and click anywhere on the map to add your second node. You can adjust weight with ↑↓ arrows or right-click any placed node for more options.</span>
-        </div>
-        <div class="onboarding-step" data-step="3">
-          <span class="step-number">3</span>
-          <span class="step-text">Hit Simulate Flows to run the agent simulation and watch desire paths emerge from the friction field. Drag any placed node to reposition it, or right-click for weight and type controls.</span>
-        </div>
+    <div class="legend-title legend-title-spaced">Continuous flow network</div>
+    <div class="legend-gradient"></div>
+    <div class="legend-labels">
+      <span>0 Paths</span>
+      <span id="legend-max-label">Max Flow</span>
+    </div>
+  </div>
+
+  <!-- Empty-state onboarding overlay -->
+  <div id="onboarding-overlay" class="onboarding-overlay" hidden>
+    <div class="onboarding-card">
+      <button id="onboarding-dismiss" type="button" class="onboarding-close" aria-label="Dismiss guide">
+        &times;
+      </button>
+      <div class="onboarding-step active" data-step="1">
+        <span class="step-number">1</span>
+        <span class="step-text">Choose Origin, Destination, or Dual mode, then click the map to place your first node.
+          Use the slider below to set its weight before placing more nodes.</span>
+      </div>
+      <div class="onboarding-step" data-step="2">
+        <span class="step-number">2</span>
+        <span class="step-text">Switch to Destination mode and click anywhere on the map to add your second node. You
+          can adjust weight with ↑↓ arrows or right-click any placed node for more options.</span>
+      </div>
+      <div class="onboarding-step" data-step="3">
+        <span class="step-number">3</span>
+        <span class="step-text">Hit Simulate Flows to run the agent simulation and watch desire paths emerge from the
+          friction field. Drag any placed node to reposition it, or right-click for weight and type controls.</span>
       </div>
     </div>
+  </div>
 
-    <!-- Hex hover tooltip -->
-    <div id="hex-tooltip" class="hex-tooltip" hidden></div>
+  <!-- Hex hover tooltip -->
+  <div id="hex-tooltip" class="hex-tooltip" hidden></div>
 
-    <div id="map"></div>
+  <div id="map"></div>
 
-    <script type="module" src="src/main.js"></script>
-  </body>
+  <script type="module" src="src/main.js"></script>
+</body>
+
 </html>

@@ -149,7 +149,11 @@ export function setMapCursor(mapInstance, cursor) {
 
 export function setMapCursorWait(mapInstance, waiting) {
   const target = mapInstance.getContainer();
+  const spinner = document.querySelector('.loading');
   target.classList.toggle('map-cursor-wait', waiting);
+  if (spinner) {
+    spinner.style.display = waiting ? 'block' : 'none';
+  } 
 }
 
 const init = () => {
