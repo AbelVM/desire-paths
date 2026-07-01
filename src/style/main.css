@@ -166,12 +166,12 @@ html {
   font-size: clamp(1.4rem, 3vw, 2.25rem);
   line-height: 1.05;
   letter-spacing: -0.04em;
-  color: var(--text-strong);
+  color: var(--accent);
 }
 
 .panel p {
   margin: 0;
-  max-width: 30ch;
+  /* max-width: 30ch; */
   font-size: 13px;
   line-height: 1.75;
   color: var(--muted);
@@ -1000,7 +1000,7 @@ html {
   width: 100%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--progress-grad-start), var(--progress-grad-mid), var(--progress-grad-end));
+  background: linear-gradient(90deg, var(--primary), var(--accent));
   transform: scaleX(0);
   transform-origin: left center;
   transition: transform 180ms ease, filter 140ms ease;
