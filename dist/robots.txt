@@ -1,0 +1,5 @@
+# https://abelvm.github.io/desire-paths/ — Desire Paths agent-based simulation tool
+User-agent: *
+Allow: /
+
+Sitemap: https://abelvm.github.io/desire-paths/sitemap.xml

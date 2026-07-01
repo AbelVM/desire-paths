@@ -3,15 +3,72 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>H3 Stride-Calibrated Flow Engine</title>
-    <script type="module" crossorigin src="./assets/index-B5__48ZI.js"></script>
+
+    <!-- Primary meta -->
+    <title>Desire Paths — Interactive Agent-Based Flow Simulator</title>
+    <meta name="description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+    <meta name="keywords" content="desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS, Dijkstra, walkability analysis" />
+    <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
+
+    <!-- Theme & mobile -->
+    <meta name="theme-color" content="#0a0e17" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
+    <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+    <meta property="og:description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+    <meta property="og:site_name" content="Desire Paths" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+    <meta name="twitter:description" content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Desire Paths",
+      "description": "An interactive agent-based simulation tool that models how pedestrians naturally carve desire paths across terrain. Place origin and destination nodes on real-world maps, then watch friction fields form and emergent foot traffic patterns emerge.",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "applicationCategory": "VisualizationApplication",
+      "operatingSystem": "Any modern web browser",
+      "browserRequirements": "Requires JavaScript. Requires WebGL 2.0 support.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "keywords": "desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS",
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vargas"
+      }
+    }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="./assets/index-CyJdyaH8.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DdACKOZr.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-IObZBmML.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-DaX43X4L.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-h3js-CF-3cRuF.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-U8rKgh-I.js">
-    <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DztCqNAe.css">
-    <link rel="stylesheet" crossorigin href="./assets/index-iQzxPZF3.css">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-Uo15bBoF.js">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-D5xWExjc.js">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-CwER3Ptd.js">
+    <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-C2yQyY3K.css">
   </head>
   <body>
     <div
@@ -49,7 +106,7 @@
         <div id="mode-status" class="mode-indicator mode-origin">
           Placement: Origin nodes · 0 placed
         </div>
-        <div id="node-count-chip" class="count-chip hidden">
+        <div id="node-count-chip" class="count-chip">
           <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
         </div>
       </div>
@@ -59,7 +116,7 @@
         <div class="placement-mode-group" role="group" aria-label="Placement mode">
           <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin" aria-pressed="true">Origin</button>
           <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination" aria-pressed="false">Destination</button>
-          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="both" aria-pressed="false">Dual</button>
+          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual" aria-pressed="false">Dual</button>
         </div>
         <div class="weight-control">
           <div class="weight-control-head">
@@ -71,7 +128,7 @@
             <span>1</span>
             <span>10</span>
           </div>
-          <div class="weight-hint">Click existing nodes to increase · Right-click to decrease</div>
+          <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change weight, type, or remove them</div>
         </div>
       </div>
 
@@ -119,7 +176,6 @@
           aria-pressed="true"
         >
           <span class="toggle-icon">−</span>
-          <span class="toggle-text hidden">Hide</span>
         </button>
       </div>
       <div id="friction-legend-body">
@@ -169,15 +225,15 @@
         </button>
         <div class="onboarding-step active" data-step="1">
           <span class="step-number">1</span>
-          <span class="step-text">Select a placement mode above, then click walkable ground to place an origin node</span>
+          <span class="step-text">Choose Origin, Destination, or Dual mode, then click the map to place your first node. Use the slider below to set its weight before placing more nodes.</span>
         </div>
         <div class="onboarding-step" data-step="2">
           <span class="step-number">2</span>
-          <span class="step-text">Switch to Destination and place a destination node on another walkable location</span>
+          <span class="step-text">Switch to Destination mode and click anywhere on the map to add your second node. You can adjust weight with ↑↓ arrows or right-click any placed node for more options.</span>
         </div>
         <div class="onboarding-step" data-step="3">
           <span class="step-number">3</span>
-          <span class="step-text">Press Simulate Flows to watch agents discover desire paths through the terrain</span>
+          <span class="step-text">Hit Simulate Flows to run the agent simulation and watch desire paths emerge from the friction field. Drag any placed node to reposition it, or right-click for weight and type controls.</span>
         </div>
       </div>
     </div>

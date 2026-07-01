@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="80" fill="#0a0e17"/>
+  <!-- Hexagonal grid pattern -->
+  <g stroke="#3b82f6" stroke-width="2" opacity="0.6">
+    <!-- Central hexagon -->
+    <polygon points="256,140 356,200 356,312 256,372 156,312 156,200" fill="#3b82f6" fill-opacity="0.3"/>
+    <!-- Surrounding hexagons -->
+    <polygon points="156,84 256,144 256,256 156,316 56,256 56,144" fill="#3b82f6" fill-opacity="0.15"/>
+    <polygon points="356,84 456,144 456,256 356,316 256,256 256,144" fill="#3b82f6" fill-opacity="0.15"/>
+    <polygon points="106,296 206,356 206,468 106,528 6,468 6,356" fill="#3b82f6" fill-opacity="0.1"/>
+    <polygon points="406,296 506,356 506,468 406,528 306,468 306,356" fill="#3b82f6" fill-opacity="0.1"/>
+    <polygon points="106,56 206,116 206,228 106,288 6,228 6,116" fill="#3b82f6" fill-opacity="0.1"/>
+    <polygon points="406,56 506,116 506,228 406,288 306,228 306,116" fill="#3b82f6" fill-opacity="0.1"/>
+  </g>
+  <!-- Desire path flow lines -->
+  <path d="M156,200 Q200,240 256,256 Q312,272 356,312" stroke="#10b981" stroke-width="4" fill="none" opacity="0.8"/>
+  <path d="M256,140 Q280,180 256,256 Q232,332 156,372" stroke="#ef4444" stroke-width="4" fill="none" opacity="0.8"/>
+  <!-- Origin node -->
+  <circle cx="156" cy="312" r="12" fill="#ef4444"/>
+  <circle cx="156" cy="312" r="6" fill="white"/>
+  <!-- Destination node -->
+  <circle cx="356" cy="312" r="12" fill="#10b981"/>
+  <circle cx="356" cy="312" r="6" fill="white"/>
+</svg>
