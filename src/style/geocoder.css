@@ -1,0 +1,137 @@
+/* Geocoder styles - aligned with Desire Paths UI design */
+.maplibregl-ctrl-geocoder {
+  font-family: 'IBM Plex Sans', sans-serif;
+  background: linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(10, 14, 20, 0.95));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  width: 100%;
+  min-width: 240px;
+  z-index: 1000;
+  overflow: hidden;
+  transition: all 140ms ease;
+}
+
+.maplibregl-ctrl-geocoder:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Input field - preserve MapLibre's search icon positioning */
+.maplibregl-ctrl-geocoder--input {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background-color: transparent;
+  border: none;
+  padding: 12px 45px 12px 40px; /* Increased right padding for close button */
+  height: 50px;
+  width: 100%;
+  outline: none;
+}
+
+.maplibregl-ctrl-geocoder--input:focus {
+  color: var(--text);
+  background-color: rgba(246, 200, 95, 0.05);
+}
+
+/* Suggestions dropdown */
+.maplibregl-ctrl-geocoder .suggestions {
+  background: linear-gradient(180deg, rgba(18, 24, 32, 0.98), rgba(10, 14, 20, 0.96));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  margin-top: 8px;
+  padding: 8px 0;
+  z-index: 1001;
+  backdrop-filter: blur(16px);
+}
+
+/* Suggestion items */
+.maplibregl-ctrl-geocoder .suggestions > li > a {
+  padding: 10px 16px;
+  color: var(--text);
+  font-size: 13px;
+  transition: all 140ms ease;
+  border-radius: 8px;
+  margin: 2px 8px;
+}
+
+.maplibregl-ctrl-geocoder .suggestions > li > a:hover,
+.maplibregl-ctrl-geocoder .suggestions > .active > a {
+  background: rgba(246, 200, 95, 0.1);
+  color: var(--accent-strong);
+}
+
+/* Geocoder icon - preserve MapLibre's original positioning and styling */
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--pin-right > * {
+  z-index: 2;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+}
+
+/* Close button - dark themed override */
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--button {
+  background: transparent;
+  margin-top: 0 !important;
+}
+
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--icon-close {
+  fill: var(--text-muted);
+  transition: fill 140ms ease;
+  margin-top: 0 !important;
+}
+
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--button:hover .maplibregl-ctrl-geocoder--icon-close,
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--icon-close:hover {
+  fill: var(--accent-strong);
+}
+
+/* Search icon - preserve MapLibre's left positioning */
+.maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--icon-search {
+  position: absolute;
+  top: 13px;
+  left: 12px;
+  width: 23px;
+  height: 23px;
+  fill: var(--text-muted);
+  transition: fill 140ms ease;
+}
+
+.maplibregl-ctrl-geocoder:hover .maplibregl-ctrl-geocoder--icon-search {
+  fill: var(--accent);
+}
+
+/* Collapsed state */
+.maplibregl-ctrl-geocoder.maplibregl-ctrl-geocoder--collapsed {
+  width: 50px;
+  min-width: 50px;
+  background: linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(10, 14, 20, 0.95));
+  border-color: var(--line);
+}
+
+/* Dark theme adjustments */
+.maplibregl-ctrl-geocoder,
+.maplibregl-ctrl-geocoder .suggestions {
+  color-scheme: dark;
+}
+
+/* Animation for suggestions */
+@keyframes geocoderSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.maplibregl-ctrl-geocoder .suggestions {
+  animation: geocoderSlideDown 140ms ease;
+}
