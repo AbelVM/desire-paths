@@ -172,6 +172,7 @@ const init = () => {
     interleaved: true,
     layers: [],
   });
+  desireMap.addControl(desireMap.deckOverlayInstance);
   desireMap.targetLabelLayerId = undefined;
   desireMap.placementMode = 'origin';
   desireMap.placementWeight = 1;

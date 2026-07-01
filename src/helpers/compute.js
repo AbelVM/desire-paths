@@ -484,7 +484,14 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
  */
 export async function computeDesirePaths() {
   // Reset flow map before every simulation so results don't accumulate across runs
-  this.pathDesireScores = new Map();
+  // Preserve the original container type if provided (Map or plain object).
+  if (this.pathDesireScores && typeof this.pathDesireScores.clear === 'function') {
+    this.pathDesireScores.clear();
+  } else if (this.pathDesireScores && typeof this.pathDesireScores === 'object') {
+    for (const k in this.pathDesireScores) delete this.pathDesireScores[k];
+  } else {
+    this.pathDesireScores = new Map();
+  }
 
   // Guard: ensure the friction map has been built before simulating
   if (!this.cellFrictionMap || this.cellFrictionMap.size === 0) {

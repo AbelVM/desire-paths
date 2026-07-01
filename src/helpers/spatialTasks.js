@@ -64,6 +64,20 @@ export function normalizeFrictionEntries(source) {
   const lookup = Object.create(null);
   if (!source) return lookup;
 
+  // Support flattened transferable payloads from the main thread:
+  // { __flat: true, keys: [...], vals: TypedArray|ArrayBuffer }
+  if (
+    source &&
+    source.__flat &&
+    Array.isArray(source.keys) &&
+    (ArrayBuffer.isView(source.vals) || source.vals instanceof ArrayBuffer)
+  ) {
+    const keys = source.keys;
+    const vals = ArrayBuffer.isView(source.vals) ? source.vals : new Float32Array(source.vals);
+    for (let i = 0; i < keys.length; i++) lookup[keys[i]] = vals[i];
+    return lookup;
+  }
+
   if (typeof source.entries === 'function') {
     for (const [cell, value] of source) lookup[cell] = value;
     return lookup;

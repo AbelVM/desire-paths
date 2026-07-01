@@ -4,6 +4,7 @@ import {
   computeGradientBatch,
   computeImpassableBlurSnapshot,
   normalizeFrictionEntries,
+  computeAoiHexes,
 } from './spatialTasks.js';
 
 const MAX_WORKERS = Math.min(
@@ -69,6 +70,27 @@ function splitIntoChunks(items, chunkCount) {
   return chunks;
 }
 
+// Flatten large payloads for cheaper structured-clone by converting plain
+// friction lookup objects into a transferable typed-array representation.
+function flattenPayloadAndTransfers(payload) {
+  if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
+  const fe = payload.frictionEntries;
+  if (!fe || typeof fe !== 'object') return { payload, transfer: [] };
+
+  // If already flattened, nothing to do
+  if (fe.__flat && Array.isArray(fe.keys) && (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer))
+    return { payload, transfer: [] };
+
+  const keys = Object.keys(fe);
+  if (keys.length === 0) return { payload, transfer: [] };
+
+  const vals = new Float32Array(keys.length);
+  for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
+
+  const newPayload = Object.assign({}, payload, { frictionEntries: { __flat: true, keys, vals } });
+  return { payload: newPayload, transfer: [vals.buffer] };
+}
+
 function mergeFastScanEntries(target, source) {
   const sourceKeys = Object.keys(source);
   for (let k = 0; k < sourceKeys.length; k++) {
@@ -100,7 +122,8 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
-  throw new Error(`Unknown spatial task: ${kind}`);
+    if (kind === 'aoi-hexes') return computeAoiHexes(payload || null);
+    throw new Error(`Unknown spatial task: ${kind}`);
 }
 
 function runWorker(kind, payload) {
@@ -155,7 +178,9 @@ function runWorker(kind, payload) {
         worker.addEventListener('error', handleError);
 
         try {
-          worker.postMessage({ kind, payload });
+          const { payload: sendPayload, transfer } = flattenPayloadAndTransfers(payload);
+          if (transfer && transfer.length) worker.postMessage({ kind, payload: sendPayload }, transfer);
+          else worker.postMessage({ kind, payload: sendPayload });
         } catch (error) {
           settled = true;
           cleanup();
@@ -177,7 +202,7 @@ export async function runGradientBatches(targets, frictionSource) {
 
   // Guard: empty friction source means no walkable cells; return empty gradients
   if (Object.keys(frictionEntries).length === 0) return Object.create(null);
-  const workerCount = Math.min(2, targets.length);
+  const workerCount = Math.min(MAX_WORKERS, targets.length);
   if (workerCount <= 1) return runLocally('gradient-batch', { targets, frictionEntries });
 
   const chunks = splitIntoChunks(targets, workerCount);
