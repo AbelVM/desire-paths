@@ -191,7 +191,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     const hasOrigins = originCount > 0;
     const hasDestinations = destCount > 0;
-    const readyToCompute = map.mappingReady === true && hasBuildInputs(map.simulationNodes);
+    const readyToCompute = map.readyToCompute === true;
 
     let modeText = '';
     if (map.placementMode === 'origin') {

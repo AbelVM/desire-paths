@@ -943,6 +943,64 @@ describe('ui.js', () => {
     expect(nodeCountChip.querySelector('.count-chip-dests').textContent).toBe('1');
   });
 
+  it('should not show ready mode status when readyToCompute is false even after mapping is built', async () => {
+    const map = createMockMap({
+      mappingReady: true,
+      readyToCompute: false,
+      simulationNodes: {
+        [mockHexes[0]]: { type: 'origin', weight: 1 },
+        [mockHexes[1]]: { type: 'destination', weight: 1 },
+      },
+    });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const modeLabel = doc.getElementById('mode-status');
+    const nodeCountChip = doc.getElementById('node-count-chip');
+
+    expect(modeLabel.innerText).not.toContain('Ready');
+    expect(nodeCountChip.classList.remove).toHaveBeenCalledWith('is-ready');
+  });
+
+  it('should keep onboarding overlay hidden after dismissal during UI sync', async () => {
+    const map = createMockMap({ mappingReady: false, flowsReady: false });
+    const doc = setupMockDocument();
+    const onboardingDismiss = { addEventListener: vi.fn() };
+    const onboardingOverlay = {
+      hidden: true,
+      querySelectorAll: vi.fn(() => [
+        { dataset: { step: '1' }, classList: { toggle: vi.fn() } },
+        { dataset: { step: '2' }, classList: { toggle: vi.fn() } },
+        { dataset: { step: '3' }, classList: { toggle: vi.fn() } },
+      ]),
+      addEventListener: vi.fn(),
+    };
+
+    doc.getElementById = (id) => {
+      if (id === 'onboarding-overlay') return onboardingOverlay;
+      if (id === 'onboarding-dismiss') return onboardingDismiss;
+      return setupMockDocument().getElementById(id);
+    };
+    doc.querySelector = (sel) => {
+      if (sel === '#onboarding-overlay') return onboardingOverlay;
+      return setupMockDocument().querySelector(sel);
+    };
+
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const clickHandler = onboardingDismiss.addEventListener.mock.calls.find(([eventName]) => eventName === 'click')?.[1];
+    expect(clickHandler).toBeDefined();
+    clickHandler();
+
+    // Simulate a UI sync after dismissal
+    map.syncSimulationUI?.();
+    expect(onboardingOverlay.hidden).toBe(true);
+  });
+
   it('should show not ready mode status when only origin is placed', async () => {
     const map = createMockMap({
       mappingReady: false,
