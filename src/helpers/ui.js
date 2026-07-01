@@ -231,9 +231,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       // Add keyboard shortcut hint when nodes are placed
       const hasNodes = originCount + destCount > 0;
       if (hasNodes && !readyToCompute) {
-        modeLabel.setAttribute('title', 'Ctrl+Click node to select · ↑↓ arrows adjust weight');
+        modeLabel.setAttribute('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
       } else if (readyToCompute) {
-        modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Ctrl+Click node to move');
+        modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Drag nodes to reposition');
       } else {
         modeLabel.removeAttribute('title');
       }
