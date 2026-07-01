@@ -23,6 +23,15 @@ const workerPool = [];
 const idleWorkers = [];
 const waitingAcquires = [];
 
+// Optional progress handler: receives {progress:true, phase, processed, total}
+let _progressHandler = null;
+export function setSpatialWorkerProgressHandler(fn) {
+  _progressHandler = typeof fn === 'function' ? fn : null;
+}
+export function clearSpatialWorkerProgressHandler() {
+  _progressHandler = null;
+}
+
 function createWorkerSlot() {
   const worker = new Worker(new URL('../workers/spatial.worker.js', import.meta.url), {
     type: 'module',
@@ -149,11 +158,18 @@ function runWorker(kind, payload) {
         };
 
         const handleMessage = (event) => {
+          const data = event.data ?? {};
+          // Forward progress events to registered handler and do not settle
+          if (data && data.progress) {
+            try {
+              if (typeof _progressHandler === 'function') _progressHandler(data);
+            } catch (_e) {}
+            return;
+          }
           if (settled) return;
           settled = true;
           cleanup();
           releaseWorkerSlot(slot);
-          const data = event.data ?? {};
           if (data.ok) resolve(data.result);
           else reject(new Error(data.error ?? 'Spatial worker task failed'));
         };

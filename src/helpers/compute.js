@@ -17,7 +17,11 @@ import {
   YIELD_EVERY_AGENTS,
   SIM_YIELD_MS,
 } from './constants.js';
-import { runGradientBatches } from './spatialWorker.js';
+import {
+  runGradientBatches,
+  setSpatialWorkerProgressHandler,
+  clearSpatialWorkerProgressHandler,
+} from './spatialWorker.js';
 
 // --- Deterministic seeded RNG (LCG) ---
 function _lcg(seed) {
@@ -571,12 +575,40 @@ export async function computeDesirePaths() {
     if (!this._gradientCacheObj[d]) missingDestinations.push(d);
   }
   if (missingDestinations.length > 0) {
-    const gradients = await runGradientBatches(
-      missingDestinations,
-      this._frictionObj || this.cellFrictionMap
-    );
-    for (const d of missingDestinations) {
-      this._gradientCacheObj[d] = gradients[d] || Object.create(null);
+    // Register worker progress handler so worker-emitted progress updates
+    // are surfaced to the simulation UI. Cleared on completion or error.
+    try {
+      setSpatialWorkerProgressHandler((m) => {
+        try {
+          if (m && m.progress) {
+            updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Computing gradients...');
+            this.syncSimulationUI?.();
+          }
+        } catch (_e) {
+          // ignore UI sync errors
+        }
+      });
+
+      const gradients = await runGradientBatches(
+        missingDestinations,
+        this._frictionObj || this.cellFrictionMap
+      );
+      for (const d of missingDestinations) {
+        this._gradientCacheObj[d] = gradients[d] || Object.create(null);
+      }
+    } catch (err) {
+      // Centralized error handling: surface to UI and ensure handler cleared
+      try {
+        clearSpatialWorkerProgressHandler();
+      } catch (_e) {}
+      if (typeof this.showAlertCard === 'function') {
+        try {
+          this.showAlertCard(err?.message || String(err), { title: 'Simulation error', tone: 'error' });
+        } catch (_e) {}
+      } else if (typeof console !== 'undefined') {
+        console.error('Gradient computation failed:', err);
+      }
+      throw err;
     }
   }
 
@@ -709,6 +741,9 @@ export async function computeDesirePaths() {
   this.globalPeakFlow = peak > 0 ? peak : 1;
 
   updateSimulationProgress(this, totalAgents, totalAgents, 'Complete');
+  try {
+    clearSpatialWorkerProgressHandler();
+  } catch (_e) {}
   this.updateLayers();
   this.flowsReady = true;
 }

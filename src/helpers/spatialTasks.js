@@ -11,6 +11,16 @@ import {
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
+// Emit lightweight progress messages when running inside a Worker.
+function emitProgress(phase, processed, total) {
+  try {
+    if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+      self.postMessage({ progress: true, phase, processed, total });
+    }
+  } catch (_e) {
+    // best-effort only
+  }
+}
 /**
  * Convert AOI polygon to H3 hexes — designed for worker execution.
  * Cached via getCachedPolyCells so repeated calls with same geometry are fast.
@@ -130,10 +140,14 @@ export function computeGradientBatch({ frictionEntries, targets }) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const gradients = Object.create(null);
 
-  for (let i = 0; i < targets.length; i++) {
+  const total = targets ? targets.length : 0;
+  const emitEvery = Math.max(1, Math.floor(total / 20));
+  for (let i = 0; i < total; i++) {
     const targetCell = targets[i];
     gradients[targetCell] = computeDijkstraGradientForLookup(targetCell, frictionLookup);
+    if (i % emitEvery === 0) emitProgress('gradient-batch', i + 1, total);
   }
+  if (total > 0) emitProgress('gradient-batch', total, total);
 
   return gradients;
 }
@@ -281,7 +295,9 @@ export function computeImpassableBlurSnapshot({
 
   // Use gridDisk instead of gridRing: returns center+neighbors in one H3 call vs. ring-only
   // Cache results since nearby impassables share many neighbors
-  for (let i = 0; i < impassables.length; i++) {
+  const totalImp = impassables.length;
+  const emitEveryImp = Math.max(1, Math.floor(totalImp / 20));
+  for (let i = 0; i < totalImp; i++) {
     const cell = impassables[i];
     const neighbors = getBlurNeighbors(cell, radius);
 
@@ -306,7 +322,10 @@ export function computeImpassableBlurSnapshot({
       const weight = gaussianWeights[dist];
       blurWeights[neighborCell] = (blurWeights[neighborCell] ?? 0) + weight;
     }
+
+    if (i % emitEveryImp === 0) emitProgress('impassable-blur', i + 1, totalImp);
   }
+  if (totalImp > 0) emitProgress('impassable-blur', totalImp, totalImp);
 
   const updates = [];
   const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
