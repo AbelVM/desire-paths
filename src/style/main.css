@@ -372,9 +372,9 @@ html {
 }
 
 .btn-segment.is-active[data-placement-mode='origin'] {
-  background: var(--primary-soft);
-  color: var(--primary);
-  border-color: rgb(from var(--primary-rgb) r g b / 0.28);
+  background: var(--origin-soft);
+  color: var(--origin-text);
+  border-color: var(--origin-border);
 }
 
 .btn-segment.is-active[data-placement-mode='destination'] {
@@ -512,24 +512,38 @@ html {
   transition: transform 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   transform: translateY(-1px);
   background: rgb(from var(--white-rgb) r g b / 0.06);
   color: var(--text-strong);
 }
 
-.btn-accent {
-  background: var(--primary);
-  color: var(--bg);
-  border-color: transparent;
+.btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
-.btn-accent:hover {
+.btn-accent {
+  background: rgb(from var(--primary-rgb) r g b / 0.22);
+  color: var(--primary);
+  border-color: rgb(from var(--primary-rgb) r g b / 0.28);
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: rgb(from var(--primary-rgb) r g b / 0.25);
+  color: #ffffff;
+  border-color: rgb(from var(--primary-rgb) r g b / 0.28);
   box-shadow: 0 12px 40px rgb(from var(--black-rgb) r g b / 0.45);
 }
 
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgb(from var(--black-rgb) r g b / 0.22);
+  color: var(--text-strong);
+  border-color: var(--line);
+}
+
 .btn-ghost {
-  background: rgb(from var(--white-rgb) r g b / 0.03);
+  background: rgb(from var(--black-rgb) r g b / 0.10);
   color: var(--text);
   border-color: var(--line);
 }
@@ -540,15 +554,64 @@ html {
   border-color: rgba(234, 93, 93, 0.28);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: rgba(234, 93, 93, 0.25);
   color: #ffffff;
 }
 
 .btn:focus-visible,
+.btn-segment:focus-visible,
 .alert-card-dismiss:focus-visible {
   outline: none;
   box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.btn.is-active {
+  transform: translateY(0);
+}
+
+/* Ensure btn-group controls share visual pattern: semi-transparent default -> solid on hover */
+.btn-group .btn {
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.btn-group .btn.btn-accent {
+  background: rgba(var(--primary-rgb), 0.18);
+  color: var(--primary);
+  border-color: rgba(var(--primary-rgb), 0.32);
+}
+.btn-group .btn.btn-accent:hover:not(:disabled),
+.btn-group .btn.btn-accent.is-active {
+  background: var(--primary);
+  color: var(--text-strong);
+  border-color: rgba(var(--primary-rgb), 0.75);
+  box-shadow: 0 12px 40px rgb(from var(--black-rgb) r g b / 0.45);
+}
+
+.btn-group .btn.btn-ghost {
+  background: rgba(var(--white-rgb), 0.08);
+  color: var(--text);
+  border-color: var(--line);
+}
+.btn-group .btn.btn-ghost:hover:not(:disabled),
+.btn-group .btn.btn-ghost.is-active {
+  background: rgba(var(--white-rgb), 0.18);
+  color: var(--text-strong);
+  border-color: var(--line);
+  box-shadow: 0 12px 40px rgb(from var(--black-rgb) r g b / 0.3);
+}
+
+.btn-group .btn.btn-danger {
+  background-color: rgba(234, 93, 93, 0.15);
+  color: #ea5d5d;
+  border-color: rgba(234, 93, 93, 0.28);
+}
+.btn-group .btn.btn-danger:hover:not(:disabled),
+.btn-group .btn.btn-danger.is-active {
+  background: rgba(234, 93, 93, 0.25);
+  color: #ffffff;
+  border-color: transparent;
 }
 
 /* ── Legend ─────────────────────────────────────────────── */
