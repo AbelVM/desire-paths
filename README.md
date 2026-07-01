@@ -6,50 +6,64 @@
 
 An interactive **agent-based simulation** that models how pedestrians naturally carve **desire paths** across terrain. Place origin and destination nodes on real-world maps, then watch friction fields form and emergent foot traffic patterns emerge from the interaction of agents navigating through walkable surfaces.
 
-Based on the research by [Bossowski et al. (CEUS 2025)](docs/paper.md), this tool visualizes how **agent-based modeling** can predict pedestrian routing behavior for urban planning, landscape architecture, and GIS analysis.
+Based on the research by [Bossowski et al. (CEUS 2025)](docs/paper.pdf), this tool visualizes how **agent-based modeling** can predict pedestrian routing behavior for urban planning, landscape architecture, and GIS analysis.
 
 ## Live Demo
 
 Try it now at **[abelvm.github.io/desire-paths](https://abelvm.github.io/desire-paths/)** — no installation required. Works in any modern browser with WebGL 2.0 support.
 
-## Features
+## How to Use
 
-- **Interactive H3 hex grid** — click to place origin and destination nodes on a MapLibre GL map overlaid on real-world terrain
-- **Friction field visualization** — terrain surface costs (buildings, vegetation, greenspace, walkable ground) rendered as a resistance heat map with distinct color coding
-- **Agent-based simulation** — synthetic agents step through the terrain using Dijkstra gradients, leaving wear trails that later agents prefer via positive feedback loops
-- **Real-world mapping** — geocoder search to find any location; surface classification from OpenFreeMap vector tiles (transportation, landcover, landuse layers)
-- **GeoJSON export** — download flow networks for use in ArcGIS, QGIS, or other planning tools
+### 1. Choose a Location
 
-## How It Works
+The map loads centered on Madrid by default. Use the **search bar** at the top-right to find any city, park, or neighborhood worldwide. The app queries OpenStreetMap's Nominatim service for geocoding.
 
-### 1. Place Nodes
+### 2. Place Nodes
 
-Switch between **Origin**, **Destination**, or **Dual** placement mode. Click on the map to drop nodes representing starting points and destinations for pedestrian traffic. Adjust node weight (attraction strength) with left/right-click.
+Select a placement mode from the left panel:
 
-The area of interest (AOI) forms a circular projection around all placed nodes — wider than a bounding box but tighter than a diagonal rectangle, optimizing simulation scope.
+- **Origin** — places starting points (red markers)
+- **Destination** — places endpoints (green markers)  
+- **Dual** — each placed node acts as both origin and destination (purple marker with glow)
 
-### 2. Build Mapping
+Click on walkable ground to drop nodes. Use the **Node Weight slider** (1–10) before placing to control attraction strength — higher weight means more agents spawn from that point.
 
-"Build Mapping" scans the visible map tiles and classifies surface types from vector tile layers:
-
-- **Friction map** — each H3 hex gets a traversal cost (impassable for buildings/water at ∞, 4.0 for dense vegetation, 2.5 for permeable greenspace, 1.0 baseline for walkable surfaces)
-- **Affordance map** — initial terrain affordance that guides agent heading based on surface type
+**Interact with placed nodes:**
+- **Left-click** an existing node to increase its weight (+1)
+- **Right-click** a node for a context menu: change type, adjust weight, or remove it
+- **Drag and drop** any node to reposition it on the map
 
 ### 3. Simulate Flows
 
-"Simulate Flows" runs the ABM (Agent-Based Model) loop:
+With at least one origin (or dual) node and one destination (or dual) node placed, click **"Simulate Flows"**. The app will:
 
-1. Dijkstra gradients computed per destination (parallelized across Web Workers)
-2. Each origin spawns weighted agents toward each reachable destination
-3. Agents step one hex at a time, choosing neighbors by gradient descent + stochastic softmax sampling with heading bias
-4. Traversed cells accumulate wear → later agents prefer worn paths (**positive feedback loop**)
-5. Path desire scores batch-applied and rendered as continuous flow visualization
+1. Auto-build a friction map from the visible map tiles
+2. Classify terrain surfaces into walkable vs. impassable zones
+3. Run hundreds of synthetic agents through the terrain using gradient-based pathfinding with stochastic sampling
+4. Agents leave wear trails that later agents prefer — creating emergent desire paths through positive feedback
 
-The simulation uses cooperative scheduling — yielding to the main thread every ~45ms to keep the UI responsive during computation.
+A progress bar shows simulation status (mapping → simulating → complete). The **Peak Flow** readout reports total agents simulated and completion status.
 
-### 4. Export
+### 4. Explore Results
 
-"Export GeoJSON" writes the flow network as a FeatureCollection of H3 hexagon polygons with `desireScore` properties, suitable for import into GIS or urban planning tools.
+After simulation completes:
+- **Flow network** is rendered as a continuous heat map on the hex grid
+- **Friction resistance map** can be toggled on/off via the legend button (−/+)
+- Hover hexagons to inspect their properties
+- Click **"Export GeoJSON"** to download the flow cells with `desireScore` values for use in GIS tools
+
+### 5. Reset
+
+Click **"Reset Grid"** to clear all nodes, flows, and cached state. Start a new simulation from scratch.
+
+## Features
+
+- **Interactive H3 hex grid** — click to place origin/destination/dual nodes on a MapLibre GL map overlaid on real-world terrain
+- **Friction field visualization** — terrain surface costs rendered as a color-coded resistance heat map with collapsible legend
+- **Agent-based simulation** — synthetic agents use Dijkstra gradients + softmax sampling, leaving wear trails that create emergent desire paths via positive feedback
+- **Real-world geocoding** — search any location worldwide using OpenStreetMap Nominatim
+- **Node interaction** — drag to reposition, right-click for type/weight controls, left-click to increase weight
+- **GeoJSON export** — download flow networks for ArcGIS, QGIS, or other planning tools
 
 ## Technology Stack
 
@@ -57,7 +71,8 @@ The simulation uses cooperative scheduling — yielding to the main thread every
 |-------|-----------|
 | Map rendering | [MapLibre GL](https://maplibre.org/) + [Deck.gl](https://deck.gl/) (H3 hexagon layers) |
 | Spatial indexing | [h3-js](https://uber.github.io/h3.js/) — hexagonal hierarchical geographic grid (resolution 15, ~0.88m spacing) |
-| Computation | Web Workers with fallback to main thread; custom min-heap Dijkstra implementation |
+| Geocoding | OpenStreetMap Nominatim via MapLibre GL Geocoder |
+| Computation | Web Workers for parallel Dijkstra; custom min-heap; cooperative main-thread yielding (~45ms intervals) |
 | Build tooling | Vite 8, ES modules, Terser minification |
 | Testing | Vitest 4 with v8 coverage (341 tests) |
 
@@ -66,21 +81,30 @@ The simulation uses cooperative scheduling — yielding to the main thread every
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `H3_STRIDE_RESOLUTION` | 15 | H3 resolution for simulation grid (~0.88m spacing) |
-| `MAX_SIM_TICKS` | 5000 | Maximum steps per agent journey (distance-capped) |
+| `MAX_SIM_TICKS` | 5000 | Maximum steps per agent journey (distance-capped via `gridDistance × 8 + 32`) |
 | `SIM_TICK_BUFFER` | 8 | Distance multiplier buffer above shortest path |
 | `YIELD_EVERY_AGENTS` | 5 | Agents before yielding to main thread |
 | `SIM_YIELD_MS` | 45 | Milliseconds before cooperative yield (below long-task threshold) |
-| `AGENTS_PER_DESTINATION` | 25 | Agents spawned per origin-destination pair |
-| `TEMPERATURE` | 0.5 | Controls randomness in agent decision-making |
+| `AGENTS_PER_DESTINATION` | 25 | Base agents spawned per origin-destination pair (scaled by node weight) |
+| `TEMPERATURE` | 0.5 | Controls randomness in agent decision-making (softmax sampling) |
 
 ## Friction Cost Model
 
-| Surface Type | Cost | Real-World Equivalent |
-|-------------|------|-----------------------|
-| Impassable (buildings, water, railways) | ∞ | Structures pedestrians cannot cross |
-| Dense vegetation / forest / scrub | 4.0 | Thick brush, dense tree cover |
-| Permeable greenspace / meadow / park | 2.5 | Grass, gardens, recreational areas |
-| Walkable baseline (paths, roads) | 1.0 | Paved surfaces, footways |
+| Surface Type | Cost | Legend Color | Real-World Equivalent |
+|-------------|------|--------------|-----------------------|
+| Hard structure (buildings, water, railways) | ∞ | Red | Surfaces pedestrians cannot cross |
+| Dense vegetation (forest, scrub, brush) | 4.0 | Dark green | Thick tree cover, dense undergrowth |
+| Permeable greenspace (grass, meadow, park) | 2.5 | Light green | Open grassy areas, gardens |
+| Walkable baseline (paths, roads, sidewalks) | 1.0 | Blue tint | Paved surfaces, footways |
+
+## Affordance Model
+
+Agents are guided by a terrain **affordance** system that evolves during simulation:
+
+- Paved surfaces start with highest affordance (agents prefer them naturally)
+- Grass and vegetation start lower but accumulate wear over time
+- Heavy grass resists path formation more than light grass (1.5× vs 0.8× resistance factor)
+- Decay rate is terrain-aware — light grass recovers faster, heavy grass retains paths longer
 
 ## Use Cases
 
@@ -96,7 +120,7 @@ This simulator implements the model described in:
 
 > Bossowski, et al. "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning." *Computer Environment and Urban Systems (CEUS)*, 2025.
 
-Full paper available at [`docs/paper.md`](docs/paper.md).
+Full paper available at [`docs/paper.md`](docs/paper.pdf).
 
 ## Getting Started
 
@@ -108,6 +132,7 @@ npm test           # Run 341 tests
 npm run coverage   # Coverage report
 npm run lint       # ESLint check
 npm run format     # Prettier formatting
+npm run deploy     # Deploy dist folder to GH-pages
 ```
 
 ## Architecture
@@ -121,11 +146,11 @@ index.html
 │   ├── compute.js       — Dijkstra gradients, agent stepping loop, affordance wear
 │   ├── map.js           — AOI polygon builder, Deck.gl layer rendering, GeoJSON export
 │   ├── spatialTasks.js  — Surface classification, multi-layer friction, fast scan workers
-│   └── ui.js            — Panel controls, placement mode toggles, progress bar
+│   └── ui.js            — Panel controls, context menu, drag & drop, progress bar
 ├── src/workers/         — Web Workers for parallel gradient computation
 └── tests/               — Vitest test suite (341 tests)
 ```
 
 ## License
 
-MIT © Abel Vargas
+MIT © Abel Vázquez Montoro
