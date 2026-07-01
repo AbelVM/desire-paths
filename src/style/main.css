@@ -784,6 +784,11 @@ html {
   box-shadow: 0 0 12px rgb(from var(--primary-rgb) r g b / 0.15);
 }
 
+.count-chip-label,
+.count-chip.is-ready .count-chip-label {
+  color: var(--text-soft);
+}
+
 .count-chip {
   justify-self: end;
   padding: 7px 10px;
@@ -803,6 +808,10 @@ html {
 
 .count-chip-dests {
   color: var(--dest-text);
+}
+
+.count-chip-label {
+  color: var(--text-soft);
 }
 
 .count-chip-sep {

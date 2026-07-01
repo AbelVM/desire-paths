@@ -754,7 +754,17 @@ describe('ui.js', () => {
     const computeButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const exportButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const clearButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
-    const nodeCountChip = { hidden: true, classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() }, querySelector: () => null };
+    const originsEl = { textContent: '' };
+    const destsEl = { textContent: '' };
+    const nodeCountChip = {
+      hidden: true,
+      classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() },
+      querySelector: (sel) => {
+        if (sel === '.count-chip-origins') return originsEl;
+        if (sel === '.count-chip-dests') return destsEl;
+        return null;
+      },
+    };
     const modeLabel = { innerText: '', className: '', setAttribute: vi.fn(), removeAttribute: vi.fn() };
     const loader = { style: { display: 'none' }, innerText: '' };
     const flowReadout = { innerText: '' };
@@ -914,6 +924,46 @@ describe('ui.js', () => {
 
     const computeButton = doc.getElementById('btn-compute');
     expect(computeButton.disabled).toBe(true);
+  });
+
+  it('should not show ready mode status when mapping is not built', async () => {
+    const map = createMockMap({ mappingReady: false, flowsReady: false });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const modeLabel = doc.getElementById('mode-status');
+    const nodeCountChip = doc.getElementById('node-count-chip');
+
+    expect(modeLabel.innerText).not.toContain('Ready');
+    expect(modeLabel.setAttribute).toHaveBeenCalledWith('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
+    expect(nodeCountChip.classList.remove).toHaveBeenCalledWith('is-ready');
+    expect(nodeCountChip.querySelector('.count-chip-origins').textContent).toBe('1');
+    expect(nodeCountChip.querySelector('.count-chip-dests').textContent).toBe('1');
+  });
+
+  it('should show not ready mode status when only origin is placed', async () => {
+    const map = createMockMap({
+      mappingReady: false,
+      flowsReady: false,
+      simulationNodes: {
+        [mockHexes[0]]: { type: 'origin', weight: 1 },
+      },
+    });
+    const doc = setupMockDocument();
+    vi.stubGlobal('document', doc);
+    const { setupUI } = await import('../src/helpers/ui.js');
+    setupUI(map);
+
+    const modeLabel = doc.getElementById('mode-status');
+    const nodeCountChip = doc.getElementById('node-count-chip');
+
+    expect(modeLabel.innerText).toContain('Add destination');
+    expect(modeLabel.innerText).not.toContain('Ready');
+    expect(nodeCountChip.classList.remove).toHaveBeenCalledWith('is-ready');
+    expect(nodeCountChip.querySelector('.count-chip-origins').textContent).toBe('1');
+    expect(nodeCountChip.querySelector('.count-chip-dests').textContent).toBe('0');
   });
 
   it('should enable compute when mapping and endpoints are ready', async () => {

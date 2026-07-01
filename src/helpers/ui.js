@@ -191,7 +191,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     const hasOrigins = originCount > 0;
     const hasDestinations = destCount > 0;
-    const readyToCompute = hasOrigins && hasDestinations;
+    const readyToCompute = map.mappingReady === true && hasBuildInputs(map.simulationNodes);
 
     let modeText = '';
     if (map.placementMode === 'origin') {
@@ -201,21 +201,19 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       modeText = `Destination · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
       modeLabel.className = 'mode-indicator mode-destination';
     } else {
-      const dualNodes = nodes.filter(n => n.weight > 0 && n.type === 'dual').length;
+      const dualNodes = nodes.filter((n) => n.weight > 0 && n.type === 'dual').length;
       modeText = `Dual · ${dualNodes} placed`;
       modeLabel.className = 'mode-indicator mode-dual';
     }
 
     if (readyToCompute) {
       modeText += ' · Ready';
-      // Highlight the count chip instead of the mode label — origin mode is already green,
-      // which makes a green border on mode-status misleading.
       if (nodeCountChip) nodeCountChip.classList.add('is-ready');
+      if (modeLabel?.classList) modeLabel.classList.add('ready');
     } else {
       if (modeLabel?.classList) modeLabel.classList.remove('ready');
       if (nodeCountChip) nodeCountChip.classList.remove('is-ready');
-      
-      // Show helpful hint based on what's missing
+
       if (!hasOrigins && !hasDestinations) {
         modeText += ' · Place a node';
       } else if (!hasOrigins) {
@@ -243,8 +241,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (nodeCountChip) {
       const originsEl = nodeCountChip.querySelector('.count-chip-origins');
       const destsEl = nodeCountChip.querySelector('.count-chip-dests');
-      if (originsEl) originsEl.textContent = originCount;
-      if (destsEl) destsEl.textContent = destCount;
+      if (originsEl) originsEl.textContent = String(originCount);
+      if (destsEl) destsEl.textContent = String(destCount);
     }
 
     // Update onboarding step visibility
