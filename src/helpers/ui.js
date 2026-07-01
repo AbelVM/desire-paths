@@ -11,10 +11,12 @@ function isActiveNode(node) {
 }
 
 function hasBuildInputs(nodes = {}) {
-  const activeNodes = Object.values(nodes ?? {});
+  const activeNodes = Object.values(nodes ?? {}).filter((n) => isActiveNode(n));
+  // Need at least two distinct nodes (a single dual node can't serve as both origin and destination simultaneously)
+  if (activeNodes.length < 2) return false;
   return (
-    activeNodes.some((node) => isActiveNode(node) && (node.type === 'origin' || node.type === 'dual')) &&
-    activeNodes.some((node) => isActiveNode(node) && (node.type === 'destination' || node.type === 'dual'))
+    activeNodes.some((node) => node.type === 'origin' || node.type === 'dual') &&
+    activeNodes.some((node) => node.type === 'destination' || node.type === 'dual')
   );
 }
 

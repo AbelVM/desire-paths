@@ -1,10 +1,10 @@
 /* Geocoder styles - aligned with Desire Paths UI design */
 .maplibregl-ctrl-geocoder {
-  font-family: 'IBM Plex Sans', sans-serif;
-  background: linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(10, 14, 20, 0.95));
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: rgb(from var(--surface-soft) r g b / 0.96);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: 999px;
+  box-shadow: 0 8px 32px rgb(from var(--black-rgb) r g b / 0.4);
   backdrop-filter: blur(16px);
   width: 100%;
   min-width: 240px;
@@ -15,12 +15,12 @@
 
 .maplibregl-ctrl-geocoder:hover {
   border-color: var(--line-strong);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 40px rgb(from var(--black-rgb) r g b / 0.5);
 }
 
 /* Input field - preserve MapLibre's search icon positioning */
 .maplibregl-ctrl-geocoder--input {
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 14px;
   color: var(--text);
   background-color: transparent;
@@ -33,15 +33,15 @@
 
 .maplibregl-ctrl-geocoder--input:focus {
   color: var(--text);
-  background-color: rgba(246, 200, 95, 0.05);
+  background-color: var(--primary-soft);
 }
 
 /* Suggestions dropdown */
 .maplibregl-ctrl-geocoder .suggestions {
-  background: linear-gradient(180deg, rgba(18, 24, 32, 0.98), rgba(10, 14, 20, 0.96));
+  background: rgb(from var(--surface-soft) r g b / 0.98);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  box-shadow: 0 8px 32px rgb(from var(--black-rgb) r g b / 0.5);
   margin-top: 8px;
   padding: 8px 0;
   z-index: 1001;
@@ -54,14 +54,14 @@
   color: var(--text);
   font-size: 13px;
   transition: all 140ms ease;
-  border-radius: 8px;
+  border-radius: 999px;
   margin: 2px 8px;
 }
 
 .maplibregl-ctrl-geocoder .suggestions > li > a:hover,
 .maplibregl-ctrl-geocoder .suggestions > .active > a {
-  background: rgba(246, 200, 95, 0.1);
-  color: var(--accent-strong);
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 /* Geocoder icon - preserve MapLibre's original positioning and styling */
@@ -88,7 +88,7 @@
 
 .maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--button:hover .maplibregl-ctrl-geocoder--icon-close,
 .maplibregl-ctrl-geocoder .maplibregl-ctrl-geocoder--icon-close:hover {
-  fill: var(--accent-strong);
+  fill: var(--primary);
 }
 
 /* Search icon - preserve MapLibre's left positioning */
@@ -103,14 +103,14 @@
 }
 
 .maplibregl-ctrl-geocoder:hover .maplibregl-ctrl-geocoder--icon-search {
-  fill: var(--accent);
+  fill: var(--primary);
 }
 
 /* Collapsed state */
 .maplibregl-ctrl-geocoder.maplibregl-ctrl-geocoder--collapsed {
   width: 50px;
   min-width: 50px;
-  background: linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(10, 14, 20, 0.95));
+  background: rgb(from var(--surface-soft) r g b / 0.96);
   border-color: var(--line);
 }
 
