@@ -788,61 +788,59 @@ export async function computeDesirePaths() {
  * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
  */
 function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
-  // Local aliases to reduce Map/property churn. Prefer plain-object snapshots
-  // (created in computeDesirePaths) to avoid Map.get in inner loops.
   const frictionLookup = this._frictionObj || this.cellFrictionMap;
   const affordanceLookup = this._affordanceObj || this.affordanceMap;
   const frictionIsMap = typeof frictionLookup.get === 'function';
   const affordanceIsMap = typeof affordanceLookup.get === 'function';
   const gradientIsMap = gradient && typeof gradient.get === 'function';
-  const weightsObj = WEIGHTS;
+  const weights = WEIGHTS;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = VISUAL_ANGLE / 2;
 
   const cellState = this._cellState || null;
   const stateEnabled = !!cellState;
 
-  // 1. Tactical BDI Logic (use cached disk + visibility checks)
   const disk = _getCachedDisk(this, curr, VISUAL_DEPTH);
-  // hoist current lat/lng to avoid repeated cache lookups and trig
   const sLatLng = _getCachedLatLng(curr);
-  // Precompute whether we can use gradient comparisons. Accept either a Map
-  // or a plain-object gradient (we pass plain objects from computeDesirePaths).
-  const gCurr = gradient ? (gradientIsMap ? gradient.get(curr) : gradient[curr]) : undefined;
+  const gradientLookup = gradient
+    ? gradientIsMap
+      ? (n) => gradient.get(n)
+      : (n) => gradient[n]
+    : null;
+  const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
-  // Use parallel numeric arrays from the start to avoid intermediate object allocation
+  const getFriction = stateEnabled
+    ? (n) => { const s = cellState[n]; return s ? s.friction : undefined; }
+    : frictionIsMap
+      ? (n) => frictionLookup.get(n)
+      : (n) => frictionLookup[n];
+  const getAffordance = stateEnabled
+    ? (n) => (cellState[n]?.affordance ?? 0.1)
+    : affordanceIsMap
+      ? (n) => (affordanceLookup.get(n) ?? 0.1)
+      : (n) => (affordanceLookup[n] ?? 0.1);
+
   const cellsArr = [];
   const anglesArr = [];
   const affsArr = [];
   const frictionArr = [];
-  const gNsArr = []; // only populated when useGradient
+  const gNsArr = useGradient ? [] : null;
 
   for (let i = 0; i < disk.length; i++) {
     const n = disk[i];
     if (n === curr) continue;
-    // Inline friction lookup via _cellState for hot-path speed
-    let f;
-    if (stateEnabled) {
-      const s = cellState[n];
-      f = s ? s.friction : undefined;
-    } else {
-      f = frictionIsMap ? frictionLookup.get(n) : frictionLookup[n];
-    }
+
+    const f = getFriction(n);
     if (f === undefined || f >= impassableVal) continue;
     if (!_getCachedVisibility(this, curr, n, frictionLookup, frictionIsMap)) continue;
-    // compute bearing/angle once and reuse
+
     const eLatLng = _getCachedLatLng(n);
     const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-    // Inline affordance lookup
-    const aff = stateEnabled
-      ? (cellState[n]?.affordance ?? 0.1)
-      : affordanceIsMap
-        ? (affordanceLookup.get(n) ?? 0.1)
-        : (affordanceLookup[n] ?? 0.1);
+    const aff = getAffordance(n);
 
     if (useGradient) {
-      const gN = gradientIsMap ? gradient.get(n) : gradient[n];
+      const gN = gradientLookup(n);
       if (typeof gN !== 'number') continue;
       cellsArr.push(n);
       anglesArr.push(ang);
@@ -857,12 +855,11 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     }
   }
 
-  // Filter by visual angle in-place: move hard candidates to front
   let hardCount = 0;
   for (let i = 0; i < cellsArr.length; i++) {
     if (anglesArr[i] <= visualAngleHalf) {
       if (hardCount !== i) {
-        const swap = (arr) => { const t = arr[i]; arr[i] = arr[hardCount]; arr[hardCount] = t; };
+        const swap = (arr) => { const temp = arr[i]; arr[i] = arr[hardCount]; arr[hardCount] = temp; };
         swap(cellsArr);
         swap(anglesArr);
         swap(affsArr);
@@ -872,26 +869,17 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       hardCount++;
     }
   }
-  const origLen = cellsArr.length;
+  const cLen = hardCount > 0 ? hardCount : cellsArr.length;
+  const scores = useGradient ? new Array(cLen) : null;
 
-  // Fall back to all candidates if none within visual angle
-  const cLen = hardCount > 0 ? hardCount : origLen;
-
-  const scores = new Array(cLen);
-
-  // If gradient at current cell is not available, skip candidate scoring and fall back later
   if (useGradient) {
     for (let i = 0; i < cLen; i++) {
       const gN = gNsArr[i];
       const aff = affsArr[i];
       const stepCost = frictionArr[i] || 0;
-
-      // Compute delta and score as per paper
       const delta = stepCost + gN - gCurr;
-      let S_ij = weightsObj.w_a * aff - weightsObj.w_d * delta;
-
-      S_ij -= (weightsObj.w_theta || 0) * (anglesArr[i] / 180);
-
+      let S_ij = weights.w_a * aff - weights.w_d * delta;
+      S_ij -= (weights.w_theta || 0) * (anglesArr[i] / 180);
       scores[i] = S_ij;
     }
   }
@@ -900,18 +888,17 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     try {
       const dbg = [];
       for (let i = 0; i < cLen; i++) {
-        const s = scores[i];
+        const s = scores?.[i];
         if (typeof s === 'number') dbg.push({ cell: cellsArr[i], S_ij: s });
       }
       dbg.sort((a, b) => b.S_ij - a.S_ij);
       console.log('getBestNextStep: candidates', { curr, topCandidates: dbg.slice(0, 12) });
     } catch (_e) {
-        // debug logging is non-critical
-      }
+      // debug logging is non-critical
+    }
   }
 
   if (cellsArr.length === 0) {
-    // fallback to gradient tunneling (as before)
     for (let depth = 1; depth <= 3; depth++) {
       const neighbors = _getCachedDisk(this, curr, depth);
       let bestGrad = Infinity;
@@ -920,11 +907,10 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       for (let i = 0; i < neighbors.length; i++) {
         const n = neighbors[i];
         if (n === curr) continue;
-        const f = frictionIsMap ? frictionLookup.get(n) : frictionLookup[n];
-        if (f === undefined) continue;
-        if (f >= FRICTION_COSTS.IMPASSABLE) continue;
+        const f = getFriction(n);
+        if (f === undefined || f >= impassableVal) continue;
 
-        const g = gradientIsMap ? (gradient.get(n) ?? Infinity) : (gradient[n] ?? Infinity);
+        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradient[n] ?? Infinity);
         if (g < bestGrad) {
           bestGrad = g;
           bestCandidate = n;
@@ -935,72 +921,61 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
           try {
             console.log('getBestNextStep:fallback', { curr, depth, bestCandidate, bestGrad });
           } catch (_e) {
-        // debug logging is non-critical
-      }
+            // debug logging is non-critical
+          }
         }
         return bestCandidate;
       }
     }
-
-    return null; // Truly trapped
+    return null;
   }
 
-  // If TEMPERATURE > 0 and we have valid scores, use seeded softmax sampling
-  // to diversify agent choices. Skip when useGradient is false (scores are undefined).
-  const hasValidScores = useGradient && scores.length > 0 && typeof scores[0] === 'number';
+  const hasValidScores = useGradient && scores?.length > 0 && typeof scores[0] === 'number';
   if (hasValidScores && typeof TEMPERATURE === 'number' && TEMPERATURE > 0) {
-    // Deterministic seeded RNG and two-pass softmax without extra arrays
     const seed = _strHash(agentId + ':' + curr);
     const rng = _lcg(seed);
-    // find max S (single scan)
     let maxS = -Infinity;
     for (let i = 0; i < scores.length; i++) {
       const v = scores[i];
       if (v > maxS) maxS = v;
     }
 
-    // compute weights and sum into a numeric array to avoid object property writes
-    const weights = new Array(scores.length);
+    const weightsArr = new Array(scores.length);
     let sum = 0;
     for (let i = 0; i < scores.length; i++) {
       const w = Math.exp((scores[i] - maxS) / TEMPERATURE);
-      weights[i] = w;
+      weightsArr[i] = w;
       sum += w;
     }
 
     const r = rng() * sum;
     let acc = 0;
     for (let i = 0; i < scores.length; i++) {
-      acc += weights[i];
+      acc += weightsArr[i];
       if (r <= acc) {
         const chosen = cellsArr[i];
         if (this.debugCompute) {
           try {
             console.log('getBestNextStep: sampled', { curr, chosen, chosenScore: scores[i] });
           } catch (_e) {
-        // debug logging is non-critical
-      }
+            // debug logging is non-critical
+          }
         }
         return chosen;
       }
     }
-    // fallback
     return cellsArr[cellsArr.length - 1];
   }
 
- // Deterministic fallback: choose best using index-based tie-breaker
-  // When useGradient is false, fall back to affordance-based selection
-  // (highest affordance = most worn path = most attractive)
   let bestScore = -Infinity;
   let bestIndex = -1;
   for (let i = 0; i < cLen; i++) {
-    const S_ij = scores[i];
+    const S_ij = scores?.[i];
     const isScoreValid = typeof S_ij === 'number';
     if (isScoreValid && S_ij > bestScore) {
       bestScore = S_ij;
       bestIndex = i;
     } else if (!isScoreValid && affsArr[i] > bestScore) {
-      // No gradient: pick highest-affordance cell
       bestScore = affsArr[i];
       bestIndex = i;
     } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
@@ -1021,8 +996,8 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     try {
       console.log('getBestNextStep: chosen', { curr, chosen, bestScore });
     } catch (_e) {
-        // debug logging is non-critical
-      }
+      // debug logging is non-critical
+    }
   }
 
   return chosen;

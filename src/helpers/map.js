@@ -169,11 +169,24 @@ export function renderInterfacePins() {
   }
 }
 
+function updateOrCreateLayer(existingLayer, layerProps) {
+  if (existingLayer) {
+    if (typeof existingLayer.setProps === 'function') {
+      existingLayer.setProps(layerProps);
+      return existingLayer;
+    }
+    if (typeof existingLayer.clone === 'function') {
+      return existingLayer.clone(layerProps);
+    }
+    Object.assign(existingLayer, layerProps);
+    return existingLayer;
+  }
+  return new H3HexagonLayer(layerProps);
+}
+
 export function updateLayers() {
-  // Prefer AOI-ordered hexes when available, fall back to map keys
   const viewHexes = this.getHexes() ?? Array.from(this.cellFrictionMap?.keys() ?? []);
 
-  // Snapshot Maps to plain objects for faster hot-loop property access
   const frictionObj = Object.create(null);
   for (const [k, v] of this.cellFrictionMap ?? []) frictionObj[k] = v;
   const pathObj = Object.create(null);
@@ -185,18 +198,14 @@ export function updateLayers() {
     }
   }
 
-  // Pre-compute logMax once instead of per-hex in getFillColor callback
   const logMax = Math.log1p(this.globalPeakFlow ?? 1);
   const invLogMax = logMax > 0 ? 1 / logMax : 0;
 
-  // Legend stops (from CSS): #ebd2ec, #c699c9, #9c5fa0, #810f7c, #4d0049
-  // Pre-declare to avoid per-call allocation
   const _stopsR = [235, 198, 156, 129, 77];
   const _stopsG = [210, 153, 95, 15, 0];
   const _stopsB = [236, 201, 160, 124, 73];
   const stopsN = 5;
 
-  // Build flatData and flowData in a single pass to avoid filter() allocation
   const flatData = [];
   const flowData = [];
   const len = viewHexes.length;
@@ -208,7 +217,7 @@ export function updateLayers() {
     if (s > 0) flowData.push(entry);
   }
 
-  this.baseLayer = new H3HexagonLayer({
+  const baseLayerProps = {
     id: 'friction-mesh',
     data: flatData,
     extruded: false,
@@ -225,9 +234,9 @@ export function updateLayers() {
       return [0, 150, 255, 25];
     },
     updateTriggers: { getFillColor: [flatData] },
-  });
+  };
 
-  this.flowLayer = new H3HexagonLayer({
+  const flowLayerProps = {
     id: 'flow-mesh',
     data: flowData,
     extruded: false,
@@ -254,10 +263,12 @@ export function updateLayers() {
       return [r, g, b, a];
     },
     updateTriggers: { getFillColor: [flowData, this.globalPeakFlow] },
-  });
+  };
 
-  const layers =
-    this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
+  this.baseLayer = updateOrCreateLayer(this.baseLayer, baseLayerProps);
+  this.flowLayer = updateOrCreateLayer(this.flowLayer, flowLayerProps);
+
+  const layers = this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
   this.deckOverlayInstance?.setProps({ layers });
 }
 
