@@ -7,6 +7,24 @@ function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
 }
 
+const uiCleanupListeners = [];
+
+function cleanupUIListeners() {
+  for (const { target, event, handler } of uiCleanupListeners) {
+    try {
+      target.removeEventListener(event, handler);
+    } catch {
+      // ignore stale entries
+    }
+  }
+  uiCleanupListeners.length = 0;
+}
+
+function addUIListener(target, event, handler) {
+  target.addEventListener(event, handler);
+  uiCleanupListeners.push({ target, event, handler });
+}
+
 function isActiveNode(node) {
   return node && Number(node.weight) > 0;
 }
@@ -113,10 +131,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   let alertTimer;
 
   // --- Toast Notification System ---
-  const toastContainer = document.createElement('div');
+  const toastContainer = document.getElementById('toast-container') || document.createElement('div');
   toastContainer.id = 'toast-container';
   toastContainer.className = 'toast-container';
-  document.body.appendChild(toastContainer);
+  if (!toastContainer.parentNode) {
+    document.body.appendChild(toastContainer);
+  }
 
   const showToastNotification = (message, type = 'info', duration = 3000) => {
     // Remove all existing toasts — only ever show one at a time
@@ -326,6 +346,17 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   // Show context menu at position with node actions
+  const cleanupContextMenuDocumentListeners = () => {
+    if (contextMenuClickHandler) {
+      document.removeEventListener('click', contextMenuClickHandler);
+      contextMenuClickHandler = null;
+    }
+    if (contextMenuContextMenuHandler) {
+      document.removeEventListener('contextmenu', contextMenuContextMenuHandler);
+      contextMenuContextMenuHandler = null;
+    }
+  };
+
   const showContextMenu = (e, node, cell) => {
     e.preventDefault();
     if (!node || !isActiveNode(node) || !cell) return;
@@ -338,12 +369,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (!contextMenu) return;
 
     // Remove stale listeners before adding fresh ones
-    if (contextMenuClickHandler) {
-      document.removeEventListener('click', contextMenuClickHandler);
-    }
-    if (contextMenuContextMenuHandler) {
-      document.removeEventListener('contextmenu', contextMenuContextMenuHandler);
-    }
+    cleanupContextMenuDocumentListeners();
 
     // Position menu within viewport bounds, using originalEvent for client coordinates
     const offsetX = 12;
@@ -431,6 +457,18 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         };
       };
 
+      const prevInc = increaseWeightBtn?.dataset.prevHandler;
+      if (prevInc && window[prevInc]) {
+        increaseWeightBtn.removeEventListener('click', window[prevInc]);
+        try { delete window[prevInc]; } catch (_) {}
+      }
+
+      const prevDec = decreaseWeightBtn?.dataset.prevHandler;
+      if (prevDec && window[prevDec]) {
+        decreaseWeightBtn.removeEventListener('click', window[prevDec]);
+        try { delete window[prevDec]; } catch (_) {}
+      }
+
       const incHandlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_inc`;
       window[incHandlerName] = makeWeightHandler(+1);
       if (increaseWeightBtn) {
@@ -443,16 +481,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (decreaseWeightBtn) {
         decreaseWeightBtn.addEventListener('click', window[decHandlerName]);
         decreaseWeightBtn.dataset.prevHandler = decHandlerName;
-      }
-
-      // Clean up stale handlers on next open
-      const prevInc = increaseWeightBtn?.dataset.prevHandler;
-      if (prevInc && prevInc !== incHandlerName) {
-        try { delete window[prevInc]; } catch (_) {}
-      }
-      const prevDec = decreaseWeightBtn?.dataset.prevHandler;
-      if (prevDec && prevDec !== decHandlerName) {
-        try { delete window[prevDec]; } catch (_) {}
       }
     }
 
