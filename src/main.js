@@ -185,10 +185,22 @@ const init = () => {
   desireMap.dragOccurred = false;
 
   // Add geocoder control with Nominatim service
+  // Geocoder query cache + debounce for Nominatim rate limiting
+  const geocoderCache = new Map();
+  const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+  let geocoderDebounceTimer = null;
+
   const geocoderApi = {
     forwardGeocode: async (config) => {
       const features = [];
       try {
+        // Return cached result if available and not expired
+        const cached = geocoderCache.get(config.query);
+        if (cached && Date.now() - cached.timestamp < CACHE_MAX_AGE_MS) {
+          return { features: cached.features };
+        }
+
         const request = `https://nominatim.openstreetmap.org/search?q=${config.query}&format=geojson&polygon_geojson=1&addressdetails=1`;
         const response = await fetch(request);
         const geojson = await response.json();
@@ -211,6 +223,15 @@ const init = () => {
           };
           features.push(point);
         }
+
+        // Cache the result
+        geocoderCache.set(config.query, { features, timestamp: Date.now() });
+
+        // Prune cache if it grows beyond 200 entries (LRU by eviction order)
+        if (geocoderCache.size > 200) {
+          const oldestKey = geocoderCache.keys().next().value;
+          geocoderCache.delete(oldestKey);
+        }
       } catch (e) {
         console.error(`Failed to forwardGeocode with error: ${e}`);
       }
@@ -218,7 +239,17 @@ const init = () => {
     }
   };
 
-  desireMap.addControl(new MaplibreGeocoder(geocoderApi, { maplibregl }));
+  desireMap.addControl(new MaplibreGeocoder({
+    forwardGeocode: async (config) => {
+      // Debounce: wait 300ms after the last keystroke before firing
+      return new Promise((resolve) => {
+        if (geocoderDebounceTimer) clearTimeout(geocoderDebounceTimer);
+        geocoderDebounceTimer = setTimeout(() => {
+          resolve(geocoderApi.forwardGeocode(config));
+        }, 300);
+      });
+    }
+  }, { maplibregl }));
   setMapCursor(desireMap, 'crosshair');
 
   desireMap.on('load', (e) => {

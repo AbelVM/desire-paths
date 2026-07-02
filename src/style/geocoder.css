@@ -3,7 +3,7 @@
   font-family: 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: rgb(from var(--surface-soft) r g b / 0.96);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 28px;
   box-shadow: 0 8px 32px rgb(from var(--black-rgb) r g b / 0.4);
   backdrop-filter: blur(16px);
   width: 100%;
@@ -40,7 +40,7 @@
 .maplibregl-ctrl-geocoder .suggestions {
   background: rgb(from var(--surface-soft) r g b / 0.98);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 28px;
   box-shadow: 0 8px 32px rgb(from var(--black-rgb) r g b / 0.5);
   margin-top: 8px;
   padding: 8px 0;
@@ -54,7 +54,7 @@
   color: var(--text);
   font-size: 13px;
   transition: all 140ms ease;
-  border-radius: 999px;
+  border-radius: 28px;
   margin: 2px 8px;
 }
 
