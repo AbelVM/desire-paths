@@ -293,6 +293,7 @@ const init = () => {
       nodes[cell] = {
         type: desireMap.placementMode,
         weight: Math.min(10, Math.max(1, Math.round(desireMap.placementWeight ?? 1))),
+        cell,
       };
 
       desireMap.renderInterfacePins();

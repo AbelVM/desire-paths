@@ -299,6 +299,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // --- Context Menu & Node Dragging System ---
   let activeContextMenuItem = null;
+  let activeContextMenuItemCell = null;
   let contextMenuClickHandler = null;
   let contextMenuContextMenuHandler = null;
   let draggingNodeCell = null;
@@ -325,11 +326,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   // Show context menu at position with node actions
-  const showContextMenu = (e, node) => {
+  const showContextMenu = (e, node, cell) => {
     e.preventDefault();
-    if (!node || !isActiveNode(node)) return;
+    if (!node || !isActiveNode(node) || !cell) return;
 
     activeContextMenuItem = node;
+    activeContextMenuItemCell = cell;
 
     createContextMenu();
     const contextMenu = document.getElementById('context-menu');
@@ -381,16 +383,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
                        currentType === 'destination' ? 'dual' : 'origin';
       const label = nextType.charAt(0).toUpperCase() + nextType.slice(1);
 
+      const nodeCellKey = cell;
       const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       window[handlerName] = (ev) => {
         ev.stopPropagation();
         hideContextMenu();
 
-        // Find the cell key for this node and apply the pre-computed type change
-        const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === node);
-        if (!cellKey || !map.simulationNodes[cellKey]) return;
+        if (!nodeCellKey || !map.simulationNodes[nodeCellKey]) return;
 
-        map.simulationNodes[cellKey].type = nextType;
+        map.simulationNodes[nodeCellKey].type = nextType;
 
         map.mappingReady = false;
         map.flowsReady = false;
@@ -405,15 +406,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     if (increaseWeightBtn || decreaseWeightBtn) {
       // Capture node reference at setup time
-      const nodeRef = node;
+      const nodeCellKey = cell;
 
       const makeWeightHandler = (delta) => {
         return (ev) => {
           ev.stopPropagation();
           hideContextMenu();
 
-          const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === nodeRef);
-          if (!cellKey || !map.simulationNodes[cellKey]) return;
+          const nodeRef = map.simulationNodes?.[nodeCellKey];
+          if (!nodeCellKey || !nodeRef) return;
 
           const newWeight = clampWeight(nodeRef.weight + delta);
           if (newWeight !== nodeRef.weight) {
@@ -460,17 +461,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (prevRemove) removeNodeBtn.removeEventListener('click', window[prevRemove]);
       delete removeNodeBtn.dataset.prevHandler;
 
+      const nodeCellKey = cell;
       const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const nodeRef = node;
       window[handlerName] = (ev) => {
         ev.stopPropagation();
         hideContextMenu();
         try {
-          // Find and immediately delete the node
-          const cellKey = Object.keys(map.simulationNodes).find(k => map.simulationNodes[k] === nodeRef);
-          if (!cellKey || !map.simulationNodes[cellKey]) return;
+          if (!nodeCellKey || !map.simulationNodes[nodeCellKey]) return;
 
-          delete map.simulationNodes[cellKey];
+          delete map.simulationNodes[nodeCellKey];
           showToastNotification('Node removed', 'warning');
 
           map.mappingReady = false;
@@ -736,9 +735,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // Drag pins on mousedown/mousemove/mouseup — use maplibre native events so they
   // fire even when the deck.gl overlay (which renders pin circles) intercepts canvas clicks.
-  let isDragging = false;
-  let dragStartCell = null;
-  let dragMoved = false;
+  const dragState = {
+    active: false,
+    startCell: null,
+    moved: false,
+  };
 
   const handleDragStart = (e) => {
     if (!isFiniteLngLat(e.lngLat)) return;
@@ -747,56 +748,57 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if ((e.originalEvent?.button ?? 0) !== 0) return;
 
     // Block drag while computing
-    if (map.isComputing) return;
+    if (map.isComputing || dragState.active) return;
 
     const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
     const node = map.simulationNodes?.[cell];
     if (node && isActiveNode(node)) {
       e.preventDefault?.();
-      isDragging = true;
+      dragState.active = true;
       map.isDragging = true;
-      dragStartCell = cell;
-      dragMoved = false;
+      dragState.startCell = cell;
+      dragState.moved = false;
       setMapCursor?.(map, 'grabbing');
     }
   };
 
   const handleDragMove = (e) => {
-    if (!isDragging || !dragStartCell) return;
+    if (!dragState.active || !dragState.startCell) return;
     
     if (!isFiniteLngLat(e.lngLat)) return;
     
-    dragMoved = true;
+    dragState.moved = true;
 
     // Snap to nearest H3 cell
     const newCell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
-    if (newCell !== dragStartCell && map.simulationNodes[newCell]) {
+    if (newCell !== dragState.startCell && map.simulationNodes[newCell]) {
       // Target cell already has a node — stop dragging here
-      isDragging = false;
+      dragState.active = false;
       map.isDragging = false;
       setMapCursor?.(map, 'grab');
       return;
     }
 
-    const node = map.simulationNodes[dragStartCell];
+    const node = map.simulationNodes[dragState.startCell];
     if (node) {
-      delete map.simulationNodes[dragStartCell];
-      map.simulationNodes[newCell] = { ...node };
-      dragStartCell = newCell;
+      delete map.simulationNodes[dragState.startCell];
+      map.simulationNodes[newCell] = { ...node, cell: newCell };
+      dragState.startCell = newCell;
       map.renderInterfacePins?.();
     }
   };
 
   const handleDragEnd = () => {
-    if (!isDragging) return;
+    if (!dragState.active) return;
     
-    isDragging = false;
+    dragState.active = false;
+    dragState.startCell = null;
     map.isDragging = false;
     setMapCursor?.(map, 'grab');
     map.mappingReady = false;
     map.flowsReady = false;
     // Expose drag flag so main.js click handler can skip node manipulation
-    map.dragOccurred = dragMoved;
+    map.dragOccurred = dragState.moved;
   };
 
   if (map.on) {
@@ -861,8 +863,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
 
     if (node && isActiveNode(node)) {
-      e.preventDefault();
-      showContextMenu(e, node);
+      const cell = node.cell || (isFiniteLngLat(e.lngLat)
+        ? latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION)
+        : undefined);
+      if (cell) {
+        e.preventDefault();
+        showContextMenu(e, node, cell);
+      } else {
+        hideContextMenu();
+      }
     } else {
       hideContextMenu();
     }
@@ -872,7 +881,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   map.on?.('click', (e) => {
     const ctxMenu = document.getElementById('context-menu');
     if (ctxMenu && !ctxMenu.hidden) return;
-    if (isDragging) return; // Skip if currently dragging a node
+    if (dragState.active) return; // Skip if currently dragging a node
 
     let coords = e.lngLat;
     // Clicks on rendered features may not carry lngLat — skip them

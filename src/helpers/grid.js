@@ -126,7 +126,9 @@ export async function triggerFastScan() {
   clearComputeCaches.call(this);
 
   // Reset friction maps in a single pass over viewHexes
-  this.cellFrictionMap.clear();
+  if (this.cellFrictionMap && typeof this.cellFrictionMap.clear === 'function') {
+    this.cellFrictionMap.clear();
+  }
   const multiEntries = build.multiFrictionEntries ?? Object.create(null);
 
   // Reuse existing multiFrictionMap when AOI hasn't changed to avoid re-allocating objects

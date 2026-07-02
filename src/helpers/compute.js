@@ -581,46 +581,71 @@ export async function computeDesirePaths() {
   // the full Dijkstra result for every run. Cache is keyed by target cell id
   // and stores the plain-object distances returned by computeDijkstraGradient.
   if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
-  const missingDestinations = [];
-  for (const d of destinations) {
-    if (!this._gradientCacheObj[d]) missingDestinations.push(d);
-  }
-  if (missingDestinations.length > 0) {
-    // Register worker progress handler so worker-emitted progress updates
-    // are surfaced to the simulation UI. Cleared on completion or error.
-    try {
-      setSpatialWorkerProgressHandler((m) => {
-        try {
-          if (m && m.progress) {
-            updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Computing gradients...');
-            this.syncSimulationUI?.();
-          }
-        } catch (_e) {
-          // ignore UI sync errors
-        }
-      });
+  if (!this._pendingGradientPromises) this._pendingGradientPromises = Object.create(null);
 
-      const gradients = await runGradientBatches(
-        missingDestinations,
-        this._frictionObj || this.cellFrictionMap
-      );
-      for (const d of missingDestinations) {
-        this._gradientCacheObj[d] = gradients[d] || Object.create(null);
-      }
-    } catch (err) {
-      // Centralized error handling: surface to UI and ensure handler cleared
-      try {
-        clearSpatialWorkerProgressHandler();
-      } catch (_e) {}
-      if (typeof this.showAlertCard === 'function') {
-        try {
-          this.showAlertCard(err?.message || String(err), { title: 'Simulation error', tone: 'error' });
-        } catch (_e) {}
-      } else if (typeof console !== 'undefined') {
-        console.error('Gradient computation failed:', err);
-      }
-      throw err;
+  const missingDestinations = [];
+  const pendingDestinations = [];
+  for (const d of destinations) {
+    if (this._gradientCacheObj[d]) continue;
+    if (this._pendingGradientPromises[d]) {
+      pendingDestinations.push(d);
+    } else {
+      missingDestinations.push(d);
     }
+  }
+
+  const gradientPromises = pendingDestinations.map((d) => this._pendingGradientPromises[d]);
+  if (missingDestinations.length > 0) {
+    const missingPromise = (async () => {
+      try {
+        setSpatialWorkerProgressHandler((m) => {
+          try {
+            if (m && m.progress) {
+              updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Computing gradients...');
+              this.syncSimulationUI?.();
+            }
+          } catch (_e) {
+            // ignore UI sync errors
+          }
+        });
+
+        const gradients = await runGradientBatches(
+          missingDestinations,
+          this._frictionObj || this.cellFrictionMap
+        );
+        for (const d of missingDestinations) {
+          this._gradientCacheObj[d] = gradients[d] || Object.create(null);
+        }
+      } finally {
+        for (const d of missingDestinations) {
+          delete this._pendingGradientPromises[d];
+        }
+      }
+    })();
+
+    for (const d of missingDestinations) {
+      this._pendingGradientPromises[d] = missingPromise;
+    }
+    gradientPromises.push(missingPromise);
+  }
+
+  try {
+    if (gradientPromises.length > 0) {
+      await Promise.all(gradientPromises);
+    }
+  } catch (err) {
+    // Centralized error handling: surface to UI and ensure handler cleared
+    try {
+      clearSpatialWorkerProgressHandler();
+    } catch (_e) {}
+    if (typeof this.showAlertCard === 'function') {
+      try {
+        this.showAlertCard(err?.message || String(err), { title: 'Simulation error', tone: 'error' });
+      } catch (_e) {}
+    } else if (typeof console !== 'undefined') {
+      console.error('Gradient computation failed:', err);
+    }
+    throw err;
   }
 
   const goalGradients = new Map();
@@ -1228,6 +1253,7 @@ export function getCachedGradient(targetCell) {
 export function clearGradientCache() {
   this._gradientCacheObj = Object.create(null);
   this._gradientCacheGen = undefined;
+  this._pendingGradientPromises = Object.create(null);
 }
 
 // --- Incremental assignment & contribution helpers ---
