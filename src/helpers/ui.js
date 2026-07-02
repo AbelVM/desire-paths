@@ -324,6 +324,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   let contextMenuContextMenuHandler = null;
   let draggingNodeCell = null;
 
+  // WeakMap to store button click handlers — avoids global window pollution and leaks.
+  // Keys are DOM buttons, values are their handler functions. GC-collected when buttons are removed.
+  const buttonHandlers = new WeakMap();
+
   // Create context menu element if not exists
   const createContextMenu = () => {
     if (document.getElementById('context-menu')) return document.getElementById('context-menu');
@@ -398,10 +402,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     if (changeTypeBtn) {
       // Remove any previous listener to avoid stacking
-      const prevChange = changeTypeBtn.dataset.prevHandler;
-      if (prevChange) changeTypeBtn.removeEventListener('click', window[prevChange]);
-      delete changeTypeBtn.dataset.prevHandler;
-      changeTypeBtn.onclick = null;
+      const prevHandler = buttonHandlers.get(changeTypeBtn);
+      if (prevHandler) changeTypeBtn.removeEventListener('click', prevHandler);
 
       // Capture type at setup time to prevent cascading mutations from stacked listeners
       const currentType = node.type;
@@ -410,8 +412,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       const label = nextType.charAt(0).toUpperCase() + nextType.slice(1);
 
       const nodeCellKey = cell;
-      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      window[handlerName] = (ev) => {
+      const handler = (ev) => {
         ev.stopPropagation();
         hideContextMenu();
 
@@ -426,8 +427,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         showToastNotification(`Node changed to ${label}`, 'success');
       };
       changeTypeBtn.innerHTML = `Change to ${label}`;
-      changeTypeBtn.addEventListener('click', window[handlerName]);
-      changeTypeBtn.dataset.prevHandler = handlerName;
+      changeTypeBtn.addEventListener('click', handler);
+      buttonHandlers.set(changeTypeBtn, handler);
     }
 
     if (increaseWeightBtn || decreaseWeightBtn) {
@@ -457,41 +458,31 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         };
       };
 
-      const prevInc = increaseWeightBtn?.dataset.prevHandler;
-      if (prevInc && window[prevInc]) {
-        increaseWeightBtn.removeEventListener('click', window[prevInc]);
-        try { delete window[prevInc]; } catch (_) {}
-      }
+      const prevInc = buttonHandlers.get(increaseWeightBtn);
+      if (prevInc) increaseWeightBtn.removeEventListener('click', prevInc);
 
-      const prevDec = decreaseWeightBtn?.dataset.prevHandler;
-      if (prevDec && window[prevDec]) {
-        decreaseWeightBtn.removeEventListener('click', window[prevDec]);
-        try { delete window[prevDec]; } catch (_) {}
-      }
+      const prevDec = buttonHandlers.get(decreaseWeightBtn);
+      if (prevDec) decreaseWeightBtn.removeEventListener('click', prevDec);
 
-      const incHandlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_inc`;
-      window[incHandlerName] = makeWeightHandler(+1);
+      const incHandler = makeWeightHandler(+1);
       if (increaseWeightBtn) {
-        increaseWeightBtn.addEventListener('click', window[incHandlerName]);
-        increaseWeightBtn.dataset.prevHandler = incHandlerName;
+        increaseWeightBtn.addEventListener('click', incHandler);
+        buttonHandlers.set(increaseWeightBtn, incHandler);
       }
 
-      const decHandlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dec`;
-      window[decHandlerName] = makeWeightHandler(-1);
+      const decHandler = makeWeightHandler(-1);
       if (decreaseWeightBtn) {
-        decreaseWeightBtn.addEventListener('click', window[decHandlerName]);
-        decreaseWeightBtn.dataset.prevHandler = decHandlerName;
+        decreaseWeightBtn.addEventListener('click', decHandler);
+        buttonHandlers.set(decreaseWeightBtn, decHandler);
       }
     }
 
     if (removeNodeBtn) {
-      const prevRemove = removeNodeBtn.dataset.prevHandler;
-      if (prevRemove) removeNodeBtn.removeEventListener('click', window[prevRemove]);
-      delete removeNodeBtn.dataset.prevHandler;
+      const prevRemove = buttonHandlers.get(removeNodeBtn);
+      if (prevRemove) removeNodeBtn.removeEventListener('click', prevRemove);
 
       const nodeCellKey = cell;
-      const handlerName = `__ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      window[handlerName] = (ev) => {
+      const handler = (ev) => {
         ev.stopPropagation();
         hideContextMenu();
         try {
@@ -509,8 +500,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
           showToastNotification('Failed to remove node', 'error');
         }
       };
-      removeNodeBtn.addEventListener('click', window[handlerName]);
-      removeNodeBtn.dataset.prevHandler = handlerName;
+      removeNodeBtn.addEventListener('click', handler);
+      buttonHandlers.set(removeNodeBtn, handler);
     }
 
     // Show menu immediately (no animation race)
@@ -540,15 +531,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         contextMenu.hidden = true;
         contextMenu.style.opacity = '';
       }
-      // Clean up window-stored button handlers to avoid memory leaks
-      const btnIds = ['context-change-type', 'context-increase-weight', 'context-decrease-weight', 'context-remove-node'];
-      for (const id of btnIds) {
-        const btn = document.getElementById(id);
-        if (btn?.dataset.prevHandler && window[btn.dataset.prevHandler]) {
-          delete window[btn.dataset.prevHandler];
-        }
-        delete btn?.dataset.prevHandler;
+      // Clean up button handlers — WeakMap values are freed when buttons are removed from DOM.
+      // Clear all stored handlers to break closures over node/cell references immediately.
+      for (const [btn, handler] of buttonHandlers) {
+        btn.removeEventListener('click', handler);
       }
+      buttonHandlers.clear();
     }, 140);
   };
 
