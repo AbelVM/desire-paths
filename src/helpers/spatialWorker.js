@@ -325,3 +325,25 @@ export async function runAoiHexesTask(aoiPolygon) {
   if (!aoiPolygon || !aoiPolygon.length) return [];
   return runWorker('aoi-hexes', aoiPolygon);
 }
+
+/**
+ * Terminate all workers in the pool. Call on page unload or when the map is destroyed
+ * to prevent memory leaks from accumulated worker threads.
+ */
+export function terminateAllWorkers() {
+  for (const slot of workerPool) {
+    try {
+      slot.worker.terminate();
+    } catch {
+      // ignore termination errors
+    }
+  }
+  workerPool.length = 0;
+  idleWorkers.length = 0;
+  waitingAcquires.length = 0;
+}
+
+// Auto-terminate workers on page unload to prevent memory leaks
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', terminateAllWorkers, { once: true });
+}

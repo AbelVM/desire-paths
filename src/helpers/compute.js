@@ -228,6 +228,17 @@ export function clearComputeCaches() {
   this._visibilityCacheGen = undefined;
   clearGradientCache.call(this);
   this._gradientCacheGen = undefined;
+  clearLatLngCache();
+}
+
+/** Clear the module-level lat/lng cache to prevent unbounded memory growth. */
+export function clearLatLngCache() {
+  for (const key in _cellLatLngCacheObj) {
+    delete _cellLatLngCacheObj[key];
+  }
+  _cellLatLngCacheOrder.length = 0;
+  _cellLatLngCacheHits = 0;
+  _cellLatLngCacheMisses = 0;
 }
 
 function ensureVisibilityCacheFresh(ctx) {
@@ -1513,6 +1524,11 @@ export function removeDestination(targetCell) {
     this.simulationNodes[targetCell].type = 'origin';
   else delete this.simulationNodes[targetCell];
 
+  // Prune stale gradient cache entry for removed destination
+  if (this._gradientCacheObj && this._gradientCacheObj[targetCell]) {
+    delete this._gradientCacheObj[targetCell];
+  }
+
   const newAssigned = _computeAssignedCounts.call(this);
   const oldAssigned = this._assignedCounts || Object.create(null);
 
@@ -1524,7 +1540,10 @@ export function removeDestination(targetCell) {
   );
 
   const changed = new Set();
-  changed.add(targetCell);
+  // Only add to changed if it's still a destination (not removed)
+  if (this.simulationNodes[targetCell] && ['destination', 'dual'].includes(this.simulationNodes[targetCell].type)) {
+    changed.add(targetCell);
+  }
   for (const o of origins) {
     for (const d of destinations) {
       const oOld = (oldAssigned[o] && oldAssigned[o][d]) || 0;

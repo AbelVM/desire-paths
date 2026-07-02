@@ -1,6 +1,7 @@
-import { clearComputeCaches } from './compute.js';
+import { clearComputeCaches, clearLatLngCache } from './compute.js';
 import { latLngToCell } from 'h3-js';
 import { H3_STRIDE_RESOLUTION } from './constants.js';
+import { terminateAllWorkers } from './spatialWorker.js';
 
 function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
@@ -679,6 +680,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._visibilityCacheGen = undefined;
     map.simulationProgress = undefined;
     clearComputeCaches.call(map);
+    clearLatLngCache();
+    terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
     syncFlowReadout();

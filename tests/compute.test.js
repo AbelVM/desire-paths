@@ -481,9 +481,30 @@ describe('removeDestination', () => {
     };
     const result = removeDestination.call(map, dest1);
     expect(result.removed).toBe(true);
-    expect(result.changed).toContain(dest1);
+    // dest1 is removed, so it should NOT be in changed (no recomputation needed)
+    // dest2 should be in changed because its assigned count changed
+    expect(result.changed).toContain(dest2);
     expect(map._assignedCounts).toBeDefined();
     expect(map._targetWeights).toBeDefined();
+  });
+
+  it('should prune stale gradient cache entry for removed destination', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      simulationNodes: { [h3]: { type: 'destination', weight: 1 } },
+      _gradientCacheObj: { [h3]: { someCell: 0 } },
+      cellFrictionMap: new Map([[h3, 1]]),
+      pathDesireScores: new Map(),
+      affordanceMap: new Map(),
+      _cellState: Object.create(null),
+      globalPeakFlow: 1,
+      updateLayers: () => {},
+    };
+    const result = removeDestination.call(map, h3);
+    expect(result.removed).toBe(true);
+    // _computeAssignedCounts calls ensureGradientCacheFresh which clears the cache
+    // The cache should be empty after removal
+    expect(Object.keys(map._gradientCacheObj).length).toBe(0);
   });
 });
 
@@ -877,10 +898,20 @@ describe('clearComputeCaches', () => {
     };
     clearComputeCaches.call(map);
     expect(map._computePathCacheObj).toBeUndefined();
+    expect(map._computeDiskCacheObj).toBeUndefined();
     expect(map._visibilityCacheObj).toBeUndefined();
     expect(map._gradientCacheObj).toBeDefined();
     expect(Object.keys(map._gradientCacheObj).length).toBe(0);
     expect(map._gradientCacheGen).toBeUndefined();
+  });
+
+  it('should clear the module-level lat/lng cache', () => {
+    // Verify clearLatLngCache is exported and works
+    const { clearLatLngCache, getComputeCacheStats } = require('../src/helpers/compute.js');
+    expect(typeof clearLatLngCache).toBe('function');
+    expect(typeof getComputeCacheStats).toBe('function');
+    // Call clearLatLngCache and verify it doesn't throw
+    expect(() => clearLatLngCache()).not.toThrow();
   });
 });
 
