@@ -106,42 +106,118 @@ async function fitAoiBounds(mapInstance) {
   mapInstance.renderInterfacePins?.();
 }
 
-export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
-  const panel = document.querySelector('.panel');
-  const modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
-  const frictionButton = document.getElementById('btn-toggle-friction');
-  const frictionLegendBody = document.getElementById('friction-legend-body');
-  const weightInput = document.getElementById('node-weight');
-  const weightReadout = document.getElementById('node-weight-readout');
-  const computeButton = document.getElementById('btn-compute');
-  const exportButton = document.getElementById('btn-export-geojson');
-  const clearButton = document.getElementById('btn-clear');
-  const modeLabel = document.getElementById('mode-status');
-  const nodeCountChip = document.getElementById('node-count-chip');
-  const loader = document.getElementById('scan-loader');
-  const flowReadout = document.getElementById('max-flow-readout');
-  const progress = document.getElementById('simulation-progress');
-  const progressBar = document.getElementById('simulation-progress-bar');
-  const progressLabel = document.getElementById('simulation-progress-label');
-  const alertCard = document.getElementById('app-alert');
-  const alertTitle = document.getElementById('app-alert-title');
-  const alertMessage = document.getElementById('app-alert-message');
-  const alertDismiss = document.getElementById('app-alert-dismiss');
-  const onboardingOverlay = document.getElementById('onboarding-overlay');
-  let alertTimer;
+// ──────────────────────────────────────────────
+// Centralized UI State Store
+// ──────────────────────────────────────────────
 
-  // --- Toast Notification System ---
+function createUIState(map) {
+  const state = {
+    // DOM element references (populated once, reused everywhere)
+    panel: null,
+    modeButtons: [],
+    frictionButton: null,
+    frictionLegendBody: null,
+    weightInput: null,
+    weightReadout: null,
+    computeButton: null,
+    exportButton: null,
+    clearButton: null,
+    modeLabel: null,
+    nodeCountChip: null,
+    loader: null,
+    flowReadout: null,
+    simulationProgress: null,
+    progressBar: null,
+    progressLabel: null,
+    alertCard: null,
+    alertTitle: null,
+    alertMessage: null,
+    alertDismiss: null,
+    onboardingOverlay: null,
+    onboardingDismissBtn: null,
+    mapContainer: null,
+    toastContainer: null,
+
+    // Context menu (created dynamically at runtime)
+    contextMenu: null,
+    contextChangeTypeBtn: null,
+    contextIncreaseWeightBtn: null,
+    contextDecreaseWeightBtn: null,
+    contextRemoveNodeBtn: null,
+
+    // UI state variables
+    onboardingStep: 1,
+    totalOnboardingSteps: 3,
+    onboardingDismissed: false,
+    activeContextMenuItem: null,
+    activeContextMenuItemCell: null,
+    contextMenuClickHandler: null,
+    contextMenuContextMenuHandler: null,
+    draggingNodeCell: null,
+
+    // Internal collections (not DOM elements)
+    buttonHandlers: new WeakMap(),
+  };
+
+  // Populate DOM references in a single pass
+  // Internal property names may differ from HTML element IDs, so we use explicit mappings.
+  const idMap = {
+    panel: 'panel',
+    frictionButton: 'btn-toggle-friction',
+    frictionLegendBody: 'friction-legend-body',
+    weightInput: 'node-weight',
+    weightReadout: 'node-weight-readout',
+    computeButton: 'btn-compute',
+    exportButton: 'btn-export-geojson',
+    clearButton: 'btn-clear',
+    modeLabel: 'mode-status',
+    nodeCountChip: 'node-count-chip',
+    loader: 'scan-loader',
+    flowReadout: 'max-flow-readout',
+    simulationProgress: 'simulation-progress',
+    progressBar: 'simulation-progress-bar',
+    progressLabel: 'simulation-progress-label',
+    alertCard: 'app-alert',
+    alertTitle: 'app-alert-title',
+    alertMessage: 'app-alert-message',
+    alertDismiss: 'app-alert-dismiss',
+    onboardingOverlay: 'onboarding-overlay',
+    onboardingDismissBtn: 'onboarding-dismiss',
+    mapContainer: 'map',
+  };
+
+  for (const [prop, id] of Object.entries(idMap)) {
+    state[prop] = document.getElementById(id);
+  }
+
+  const panelEl = document.querySelector('.panel');
+  if (panelEl) state.panel = panelEl;
+
+  state.modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
+
+  // Toast container — create if missing
   const toastContainer = document.getElementById('toast-container') || document.createElement('div');
   toastContainer.id = 'toast-container';
   toastContainer.className = 'toast-container';
   if (!toastContainer.parentNode) {
     document.body.appendChild(toastContainer);
   }
+  state.toastContainer = toastContainer;
 
+  return state;
+}
+
+export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
+  const uiState = createUIState(map);
+  let alertTimer;
+
+  // ──────────────────────────────────────────────
+  // Toast Notification System
+  // ──────────────────────────────────────────────
   const showToastNotification = (message, type = 'info', duration = 3000) => {
     // Remove all existing toasts — only ever show one at a time
-    while (toastContainer.firstChild) {
-      toastContainer.removeChild(toastContainer.firstChild);
+    while (uiState.toastContainer.firstChild) {
+      uiState.toastContainer.removeChild(uiState.toastContainer.firstChild);
     }
 
     const toast = document.createElement('div');
@@ -158,7 +234,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       <button class="toast-close" type="button" aria-label="Dismiss notification">×</button>
     `;
     
-    toastContainer.appendChild(toast);
+    uiState.toastContainer.appendChild(toast);
     
     requestAnimationFrame(() => {
       toast.classList.add('show');
@@ -180,102 +256,26 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const hideToastNotification = (toast) => {
     toast.classList.remove('show');
     setTimeout(() => {
-      if (toast.parentNode === toastContainer) {
-        toastContainer.removeChild(toast);
+      if (toast.parentNode === uiState.toastContainer) {
+        uiState.toastContainer.removeChild(toast);
       }
     }, 300);
   };
 
-  // Onboarding state
-  let onboardingStep = 1;
-  const totalOnboardingSteps = 3;
-  let onboardingDismissed = false;
-
-  const clampWeight = (value) => Math.min(10, Math.max(1, Number.parseInt(value, 10) || 1));
-
-  const syncModeUI = () => {
-    for (const button of modeButtons) {
-      const active = button.dataset.placementMode === map.placementMode;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-pressed', String(active));
-    }
-
-    // Count nodes by type
-    const nodes = Object.values(map.simulationNodes ?? {});
-    let originCount = 0;
-    let destCount = 0;
-    for (const n of nodes) {
-      if (n.weight <= 0) continue;
-      if (n.type === 'origin' || n.type === 'dual') originCount++;
-      if (n.type === 'destination' || n.type === 'dual') destCount++;
-    }
-
-    const hasOrigins = originCount > 0;
-    const hasDestinations = destCount > 0;
-    const readyToCompute = map.readyToCompute === true;
-
-    let modeText = '';
-    if (map.placementMode === 'origin') {
-      modeText = `Origin · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
-      modeLabel.className = 'mode-indicator mode-origin';
-    } else if (map.placementMode === 'destination') {
-      modeText = `Destination · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
-      modeLabel.className = 'mode-indicator mode-destination';
-    } else {
-      const dualNodes = nodes.filter((n) => n.weight > 0 && n.type === 'dual').length;
-      modeText = `Dual · ${dualNodes} placed`;
-      modeLabel.className = 'mode-indicator mode-dual';
-    }
-
-    if (readyToCompute) {
-      modeText += ' · Ready';
-      if (nodeCountChip) nodeCountChip.classList.add('is-ready');
-      if (modeLabel?.classList) modeLabel.classList.add('ready');
-    } else {
-      if (modeLabel?.classList) modeLabel.classList.remove('ready');
-      if (nodeCountChip) nodeCountChip.classList.remove('is-ready');
-
-      if (!hasOrigins && !hasDestinations) {
-        modeText += ' · Place a node';
-      } else if (!hasOrigins) {
-        modeText += ' · Add origin';
-      } else if (!hasDestinations) {
-        modeText += ' · Add destination';
-      }
-    }
-
-    if (modeLabel) {
-      modeLabel.innerText = modeText;
-      
-      // Add keyboard shortcut hint when nodes are placed
-      const hasNodes = originCount + destCount > 0;
-      if (hasNodes && !readyToCompute) {
-        modeLabel.setAttribute('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
-      } else if (readyToCompute) {
-        modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Drag nodes to reposition');
-      } else {
-        modeLabel.removeAttribute('title');
-      }
-    }
-
-    // Update count chip (always visible)
-    if (nodeCountChip) {
-      const originsEl = nodeCountChip.querySelector('.count-chip-origins');
-      const destsEl = nodeCountChip.querySelector('.count-chip-dests');
-      if (originsEl) originsEl.textContent = String(originCount);
-      if (destsEl) destsEl.textContent = String(destCount);
-    }
-
-    // Update onboarding step visibility
-    updateOnboardingStep();
+  // ──────────────────────────────────────────────
+  // Onboarding Helpers
+  // ──────────────────────────────────────────────
+  const dismissOnboarding = () => {
+    uiState.onboardingDismissed = true;
+    if (uiState.onboardingOverlay) uiState.onboardingOverlay.hidden = true;
   };
 
   const updateOnboardingStep = () => {
-    if (!onboardingOverlay) return;
+    if (!uiState.onboardingOverlay) return;
 
     // Don't auto-show if user has dismissed it
-    if (onboardingDismissed) {
-      onboardingOverlay.hidden = true;
+    if (uiState.onboardingDismissed) {
+      uiState.onboardingOverlay.hidden = true;
       return;
     }
 
@@ -285,52 +285,37 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const hasDestinations = activeNodes.some((n) => n.type === 'destination' || n.type === 'dual');
 
     if (hasOrigins && !hasDestinations) {
-      onboardingStep = 2;
+      uiState.onboardingStep = 2;
     } else if (hasOrigins && hasDestinations) {
-      onboardingStep = 3;
+      uiState.onboardingStep = 3;
     } else {
-      onboardingStep = 1;
+      uiState.onboardingStep = 1;
     }
 
     // Show overlay only during onboarding (up to step 3, before simulation runs)
     const shouldShow = activeNodes.length > 0 && !map.flowsReady;
     if (shouldShow) {
-      onboardingOverlay.hidden = false;
+      uiState.onboardingOverlay.hidden = false;
     } else if (!hasOrigins && !hasDestinations) {
       // Show overlay when there are no nodes at all
-      onboardingOverlay.hidden = false;
+      uiState.onboardingOverlay.hidden = false;
     } else {
-      onboardingOverlay.hidden = true;
+      uiState.onboardingOverlay.hidden = true;
     }
 
     // Highlight active step
-    const steps = onboardingOverlay.querySelectorAll('.onboarding-step');
+    const steps = uiState.onboardingOverlay.querySelectorAll('.onboarding-step');
     for (const step of steps) {
       const stepNum = parseInt(step.dataset.step, 10);
-      step.classList.toggle('active', stepNum === onboardingStep);
+      step.classList.toggle('active', stepNum === uiState.onboardingStep);
     }
   };
 
-  // Dismiss handler — sets flag so overlay won't reopen on mode change
-  const dismissOnboarding = () => {
-    onboardingDismissed = true;
-    if (onboardingOverlay) onboardingOverlay.hidden = true;
-  };
-
-  // --- Context Menu & Node Dragging System ---
-  let activeContextMenuItem = null;
-  let activeContextMenuItemCell = null;
-  let contextMenuClickHandler = null;
-  let contextMenuContextMenuHandler = null;
-  let draggingNodeCell = null;
-
-  // WeakMap to store button click handlers — avoids global window pollution and leaks.
-  // Keys are DOM buttons, values are their handler functions. GC-collected when buttons are removed.
-  const buttonHandlers = new WeakMap();
-
-  // Create context menu element if not exists
+  // ──────────────────────────────────────────────
+  // Context Menu System
+  // ──────────────────────────────────────────────
   const createContextMenu = () => {
-    if (document.getElementById('context-menu')) return document.getElementById('context-menu');
+    if (uiState.contextMenu) return uiState.contextMenu;
     
     const menu = document.createElement('div');
     menu.id = 'context-menu';
@@ -346,18 +331,25 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       <button id="context-remove-node" class="context-btn context-danger" type="button">Remove Node</button>
     `;
     document.body.appendChild(menu);
+    uiState.contextMenu = menu;
+
+    // Cache button references for showContextMenu
+    uiState.contextChangeTypeBtn = menu.querySelector('#context-change-type');
+    uiState.contextIncreaseWeightBtn = menu.querySelector('#context-increase-weight');
+    uiState.contextDecreaseWeightBtn = menu.querySelector('#context-decrease-weight');
+    uiState.contextRemoveNodeBtn = menu.querySelector('#context-remove-node');
+
     return menu;
   };
 
-  // Show context menu at position with node actions
   const cleanupContextMenuDocumentListeners = () => {
-    if (contextMenuClickHandler) {
-      document.removeEventListener('click', contextMenuClickHandler);
-      contextMenuClickHandler = null;
+    if (uiState.contextMenuClickHandler) {
+      document.removeEventListener('click', uiState.contextMenuClickHandler);
+      uiState.contextMenuClickHandler = null;
     }
-    if (contextMenuContextMenuHandler) {
-      document.removeEventListener('contextmenu', contextMenuContextMenuHandler);
-      contextMenuContextMenuHandler = null;
+    if (uiState.contextMenuContextMenuHandler) {
+      document.removeEventListener('contextmenu', uiState.contextMenuContextMenuHandler);
+      uiState.contextMenuContextMenuHandler = null;
     }
   };
 
@@ -365,11 +357,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     e.preventDefault();
     if (!node || !isActiveNode(node) || !cell) return;
 
-    activeContextMenuItem = node;
-    activeContextMenuItemCell = cell;
+    uiState.activeContextMenuItem = node;
+    uiState.activeContextMenuItemCell = cell;
 
     createContextMenu();
-    const contextMenu = document.getElementById('context-menu');
+    const contextMenu = uiState.contextMenu;
     if (!contextMenu) return;
 
     // Remove stale listeners before adding fresh ones
@@ -395,14 +387,14 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     contextMenu.style.top = `${top}px`;
 
     // Set up menu items using addEventListener for reliable handler attachment
-    const changeTypeBtn = document.getElementById('context-change-type');
-    const increaseWeightBtn = document.getElementById('context-increase-weight');
-    const decreaseWeightBtn = document.getElementById('context-decrease-weight');
-    const removeNodeBtn = document.getElementById('context-remove-node');
+    const changeTypeBtn = uiState.contextChangeTypeBtn;
+    const increaseWeightBtn = uiState.contextIncreaseWeightBtn;
+    const decreaseWeightBtn = uiState.contextDecreaseWeightBtn;
+    const removeNodeBtn = uiState.contextRemoveNodeBtn;
 
     if (changeTypeBtn) {
       // Remove any previous listener to avoid stacking
-      const prevHandler = buttonHandlers.get(changeTypeBtn);
+      const prevHandler = uiState.buttonHandlers.get(changeTypeBtn);
       if (prevHandler) changeTypeBtn.removeEventListener('click', prevHandler);
 
       // Capture type at setup time to prevent cascading mutations from stacked listeners
@@ -428,7 +420,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       };
       changeTypeBtn.innerHTML = `Change to ${label}`;
       changeTypeBtn.addEventListener('click', handler);
-      buttonHandlers.set(changeTypeBtn, handler);
+      uiState.buttonHandlers.set(changeTypeBtn, handler);
     }
 
     if (increaseWeightBtn || decreaseWeightBtn) {
@@ -458,27 +450,27 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         };
       };
 
-      const prevInc = buttonHandlers.get(increaseWeightBtn);
+      const prevInc = uiState.buttonHandlers.get(increaseWeightBtn);
       if (prevInc) increaseWeightBtn.removeEventListener('click', prevInc);
 
-      const prevDec = buttonHandlers.get(decreaseWeightBtn);
+      const prevDec = uiState.buttonHandlers.get(decreaseWeightBtn);
       if (prevDec) decreaseWeightBtn.removeEventListener('click', prevDec);
 
       const incHandler = makeWeightHandler(+1);
       if (increaseWeightBtn) {
         increaseWeightBtn.addEventListener('click', incHandler);
-        buttonHandlers.set(increaseWeightBtn, incHandler);
+        uiState.buttonHandlers.set(increaseWeightBtn, incHandler);
       }
 
       const decHandler = makeWeightHandler(-1);
       if (decreaseWeightBtn) {
         decreaseWeightBtn.addEventListener('click', decHandler);
-        buttonHandlers.set(decreaseWeightBtn, decHandler);
+        uiState.buttonHandlers.set(decreaseWeightBtn, decHandler);
       }
     }
 
     if (removeNodeBtn) {
-      const prevRemove = buttonHandlers.get(removeNodeBtn);
+      const prevRemove = uiState.buttonHandlers.get(removeNodeBtn);
       if (prevRemove) removeNodeBtn.removeEventListener('click', prevRemove);
 
       const nodeCellKey = cell;
@@ -501,7 +493,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         }
       };
       removeNodeBtn.addEventListener('click', handler);
-      buttonHandlers.set(removeNodeBtn, handler);
+      uiState.buttonHandlers.set(removeNodeBtn, handler);
     }
 
     // Show menu immediately (no animation race)
@@ -514,15 +506,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     };
     const handleContextMenu = () => hideContextMenu();
 
-    contextMenuClickHandler = handleClickOutside;
-    contextMenuContextMenuHandler = handleContextMenu;
+    uiState.contextMenuClickHandler = handleClickOutside;
+    uiState.contextMenuContextMenuHandler = handleContextMenu;
     document.addEventListener('click', handleClickOutside);
     document.addEventListener('contextmenu', handleContextMenu);
   };
 
   // Hide context menu with fade-out animation (idempotent — no-op if already hidden)
   const hideContextMenu = () => {
-    const contextMenu = document.getElementById('context-menu');
+    const contextMenu = uiState.contextMenu;
     if (!contextMenu || contextMenu.hidden) return;
 
     contextMenu.style.opacity = '0';
@@ -533,28 +525,116 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       }
       // Clean up button handlers — WeakMap values are freed when buttons are removed from DOM.
       // Clear all stored handlers to break closures over node/cell references immediately.
-      for (const [btn, handler] of buttonHandlers) {
-        btn.removeEventListener('click', handler);
+      const handlers = uiState.buttonHandlers;
+      if (handlers && typeof handlers.clear === 'function') {
+        for (const [btn, handler] of handlers) {
+          btn.removeEventListener('click', handler);
+        }
+        handlers.clear();
       }
-      buttonHandlers.clear();
     }, 140);
   };
 
-  // --- Keyboard Shortcuts ---
+  // ──────────────────────────────────────────────
+  // Weight Helpers
+  // ──────────────────────────────────────────────
+  const clampWeight = (value) => Math.min(10, Math.max(1, Number.parseInt(value, 10) || 1));
+
+  // ──────────────────────────────────────────────
+  // UI Sync Functions — all read from uiState
+  // ──────────────────────────────────────────────
+
+  const syncModeUI = () => {
+    for (const button of uiState.modeButtons) {
+      const active = button.dataset.placementMode === map.placementMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+
+    // Count nodes by type
+    const nodes = Object.values(map.simulationNodes ?? {});
+    let originCount = 0;
+    let destCount = 0;
+    for (const n of nodes) {
+      if (n.weight <= 0) continue;
+      if (n.type === 'origin' || n.type === 'dual') originCount++;
+      if (n.type === 'destination' || n.type === 'dual') destCount++;
+    }
+
+    const hasOrigins = originCount > 0;
+    const hasDestinations = destCount > 0;
+    const readyToCompute = map.readyToCompute === true;
+
+    let modeText = '';
+    if (map.placementMode === 'origin') {
+      modeText = `Origin · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
+      uiState.modeLabel.className = 'mode-indicator mode-origin';
+    } else if (map.placementMode === 'destination') {
+      modeText = `Destination · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
+      uiState.modeLabel.className = 'mode-indicator mode-destination';
+    } else {
+      const dualNodes = nodes.filter((n) => n.weight > 0 && n.type === 'dual').length;
+      modeText = `Dual · ${dualNodes} placed`;
+      uiState.modeLabel.className = 'mode-indicator mode-dual';
+    }
+
+    if (readyToCompute) {
+      modeText += ' · Ready';
+      if (uiState.nodeCountChip) uiState.nodeCountChip.classList.add('is-ready');
+      if (uiState.modeLabel?.classList) uiState.modeLabel.classList.add('ready');
+    } else {
+      if (uiState.modeLabel?.classList) uiState.modeLabel.classList.remove('ready');
+      if (uiState.nodeCountChip) uiState.nodeCountChip.classList.remove('is-ready');
+
+      if (!hasOrigins && !hasDestinations) {
+        modeText += ' · Place a node';
+      } else if (!hasOrigins) {
+        modeText += ' · Add origin';
+      } else if (!hasDestinations) {
+        modeText += ' · Add destination';
+      }
+    }
+
+    if (uiState.modeLabel) {
+      uiState.modeLabel.innerText = modeText;
+      
+      // Add keyboard shortcut hint when nodes are placed
+      const hasNodes = originCount + destCount > 0;
+      if (hasNodes && !readyToCompute) {
+        uiState.modeLabel.setAttribute('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
+      } else if (readyToCompute) {
+        uiState.modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Drag nodes to reposition');
+      } else {
+        uiState.modeLabel.removeAttribute('title');
+      }
+    }
+
+    // Update count chip (always visible)
+    if (uiState.nodeCountChip) {
+      const originsEl = uiState.nodeCountChip.querySelector('.count-chip-origins');
+      const destsEl = uiState.nodeCountChip.querySelector('.count-chip-dests');
+      if (originsEl) originsEl.textContent = String(originCount);
+      if (destsEl) destsEl.textContent = String(destCount);
+    }
+
+    // Update onboarding step visibility
+    updateOnboardingStep();
+  };
+
   const syncWeightUI = () => {
     const weight = clampWeight(map.placementWeight);
     map.placementWeight = weight;
-    if (weightInput) weightInput.value = String(weight);
-    if (weightReadout) weightReadout.value = String(weight);
+    if (uiState.weightInput) uiState.weightInput.value = String(weight);
+    if (uiState.weightReadout) uiState.weightReadout.value = String(weight);
   };
 
   const syncFrictionUI = () => {
     const enabled = map.showFrictionMesh !== false;
-    const iconEl = frictionButton?.querySelector?.('.toggle-icon');
+    const iconEl = uiState.frictionButton?.querySelector?.('.toggle-icon');
 
     // Add active state for better visual feedback
-    if (frictionButton) {
-      frictionButton.classList.toggle('is-active', enabled);
+    if (uiState.frictionButton) {
+      uiState.frictionButton.classList.toggle('is-active', enabled);
     }
     
     if (iconEl) {
@@ -562,9 +642,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       iconEl.style.transform = 'rotate(360deg)';
       setTimeout(() => iconEl.style.transform = '', 140);
     }
-    frictionButton?.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
-    frictionButton?.setAttribute('aria-pressed', String(enabled));
-    if (frictionLegendBody) frictionLegendBody.hidden = !enabled;
+    uiState.frictionButton?.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
+    uiState.frictionButton?.setAttribute('aria-pressed', String(enabled));
+    if (uiState.frictionLegendBody) uiState.frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
       const startTime = performance.now();
       const animateUpdate = () => {
@@ -579,33 +659,33 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const syncFlowReadout = () => {
     const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
-    flowReadout.innerText = `Peak Flow: ${peak} agents · ${map.flowsReady ? 'Simulation complete' : 'No simulation yet'}`;
+    uiState.flowReadout.innerText = `Peak Flow: ${peak} agents · ${map.flowsReady ? 'Simulation complete' : 'No simulation yet'}`;
   };
 
   const syncProgressUI = () => {
     const state = map.simulationProgress || { processed: 0, total: 0, percent: 0, phase: 'Idle' };
     const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
-    if (progressBar) progressBar.style.transform = `scaleX(${percent / 100})`;
-    if (progress) {
-      progress.hidden = state.total <= 0 && state.phase === 'Idle';
+    if (uiState.progressBar) uiState.progressBar.style.transform = `scaleX(${percent / 100})`;
+    if (uiState.simulationProgress) {
+      uiState.simulationProgress.hidden = state.total <= 0 && state.phase === 'Idle';
     }
-    if (progressLabel) {
+    if (uiState.progressLabel) {
       if (state.total > 0) {
-        progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} agents · ${Math.round(percent)}%</span>`;
+        uiState.progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} agents · ${Math.round(percent)}%</span>`;
       } else if (map.flowsReady === true) {
-        progressLabel.innerHTML = `<span class="progress-phase">Simulation complete</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Export or reset to start new</span>`;
+        uiState.progressLabel.innerHTML = `<span class="progress-phase">Simulation complete</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Export or reset to start new</span>`;
       } else {
         const hasOrigins = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'origin' || n.type === 'dual') && n.weight > 0);
         const hasDests = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'destination' || n.type === 'dual') && n.weight > 0);
         
         if (!hasOrigins && !hasDests) {
-          progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Place origin and destination nodes on the map</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Place origin and destination nodes on the map</span>`;
         } else if (hasOrigins && hasDests) {
-          progressLabel.innerHTML = `<span class="progress-phase">Ready to simulate</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Press Simulate Flows</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to simulate</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Press Simulate Flows</span>`;
         } else if (hasOrigins) {
-          progressLabel.innerHTML = `<span class="progress-phase">Need destination</span><span class="progress-detail">Place a destination node to enable simulation</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need destination</span><span class="progress-detail">Place a destination node to enable simulation</span>`;
         } else {
-          progressLabel.innerHTML = `<span class="progress-phase">Need origin</span><span class="progress-detail">Place an origin node to begin</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need origin</span><span class="progress-detail">Place an origin node to begin</span>`;
         }
       }
     }
@@ -620,12 +700,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
     // Build Mapping button removed — simulation auto-builds on demand
-    if (clearButton) clearButton.disabled = busy || !hasGrid;
-    computeButton.disabled = busy || (!canCompute && !canBuild);
-    if (exportButton) exportButton.disabled = busy || !canExport;
-    computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
-    if (loader && !busy) {
-      loader.style.display = 'none';
+    if (uiState.clearButton) uiState.clearButton.disabled = busy || !hasGrid;
+    uiState.computeButton.disabled = busy || (!canCompute && !canBuild);
+    if (uiState.exportButton) uiState.exportButton.disabled = busy || !canExport;
+    uiState.computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    if (uiState.loader && !busy) {
+      uiState.loader.style.display = 'none';
     }
     syncProgressUI();
     // Reset wait cursor when computation finishes so hover states resume normally
@@ -639,29 +719,29 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   const hideAlertCard = () => {
-    if (!alertCard) return;
+    if (!uiState.alertCard) return;
     window.clearTimeout(alertTimer);
-    alertCard.hidden = true;
-    alertCard.dataset.tone = '';
+    uiState.alertCard.hidden = true;
+    uiState.alertCard.dataset.tone = '';
   };
 
   const setBusyState = (busy, message = 'Sampling walkable surfaces...') => {
     map.isComputing = busy;
-    for (const button of modeButtons) button.disabled = busy;
-    frictionButton.disabled = busy;
-    if (weightInput) weightInput.disabled = busy;
-    if (exportButton) exportButton.disabled = busy;
-    computeButton.disabled = busy;
-    clearButton.disabled = busy;
-    loader.innerText = message;
-    loader.style.display = busy ? 'block' : 'none';
-    computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    for (const button of uiState.modeButtons) button.disabled = busy;
+    uiState.frictionButton.disabled = busy;
+    if (uiState.weightInput) uiState.weightInput.disabled = busy;
+    if (uiState.exportButton) uiState.exportButton.disabled = busy;
+    uiState.computeButton.disabled = busy;
+    uiState.clearButton.disabled = busy;
+    uiState.loader.innerText = message;
+    uiState.loader.style.display = busy ? 'block' : 'none';
+    uiState.computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
     // Update cursor during computation
     setMapCursorWait?.(map, busy);
-    if (progressLabel) {
-      progressLabel.innerHTML = `<span class="progress-phase">${message}</span>`;
+    if (uiState.progressLabel) {
+      uiState.progressLabel.innerHTML = `<span class="progress-phase">${message}</span>`;
     }
-    panel.setAttribute('aria-busy', String(busy));
+    uiState.panel.setAttribute('aria-busy', String(busy));
   };
 
   const resetSimulationState = () => {
@@ -702,11 +782,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     syncFlowReadout();
     syncSimulationUI();
     // Reset onboarding to step 1
-    onboardingStep = 1;
-    onboardingDismissed = false;
+    uiState.onboardingStep = 1;
+    uiState.onboardingDismissed = false;
   };
 
-  for (const button of modeButtons) {
+  // ──────────────────────────────────────────────
+  // Event Bindings — all reference uiState
+  // ──────────────────────────────────────────────
+
+  for (const button of uiState.modeButtons) {
     button.addEventListener('click', () => {
       map.placementMode = button.dataset.placementMode || 'origin';
       syncModeUI();
@@ -715,8 +799,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // --- Keyboard Shortcuts ---
   document.addEventListener('keydown', (e) => {
-    if (document.activeElement === weightInput || document.activeElement === weightReadout) {
-      let currentValue = parseInt(weightInput.value, 10);
+    if (document.activeElement === uiState.weightInput || document.activeElement === uiState.weightReadout) {
+      let currentValue = parseInt(uiState.weightInput.value, 10);
       if (isNaN(currentValue)) currentValue = 1;
 
       if (e.key === 'ArrowUp') {
@@ -732,19 +816,19 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     // Escape to hide context menu
     if (e.key === 'Escape') {
-      draggingNodeCell = null;
+      uiState.draggingNodeCell = null;
       hideContextMenu?.();
     }
   });
 
-  if (weightInput) {
-    weightInput.addEventListener('input', () => {
-      map.placementWeight = clampWeight(weightInput.value);
+  if (uiState.weightInput) {
+    uiState.weightInput.addEventListener('input', () => {
+      map.placementWeight = clampWeight(uiState.weightInput.value);
       syncWeightUI();
     });
   }
 
-  frictionButton.addEventListener('click', () => {
+  uiState.frictionButton.addEventListener('click', () => {
     map.showFrictionMesh = map.showFrictionMesh === false;
     syncFrictionUI();
   });
@@ -825,7 +909,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // Right-click on map shows context menu for nodes at cursor position
   map.on?.('contextmenu', (e) => {
-    if (!document.getElementById('map')) return;
+    if (!uiState.mapContainer) return;
 
     // Block context menu while computing
     if (map.isComputing) return;
@@ -840,7 +924,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     // Strategy 2: If lngLat failed or no active node found, query rendered pin features at click position
     if (!node || !isActiveNode(node)) {
-      const containerRect = document.getElementById('map')?.getBoundingClientRect();
+      const containerRect = uiState.mapContainer.getBoundingClientRect();
       let point;
       if (e.point) {
         // e.point is canvas-relative — use directly
@@ -895,7 +979,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // Left-click on the map canvas — ignore when context menu is open or clicking on a pin feature
   map.on?.('click', (e) => {
-    const ctxMenu = document.getElementById('context-menu');
+    const ctxMenu = uiState.contextMenu;
     if (ctxMenu && !ctxMenu.hidden) return;
     if (dragState.active) return; // Skip if currently dragging a node
 
@@ -913,7 +997,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (existingNode && isActiveNode(existingNode)) return;
   });
 
-  computeButton.addEventListener('click', async () => {
+  uiState.computeButton.addEventListener('click', async () => {
     if (!hasBuildInputs(map.simulationNodes)) {
       showToastNotification('Place at least one origin/dual node and one destination/dual node before simulating flows.', 'warning');
       return;
@@ -965,8 +1049,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
   });
 
-  if (exportButton) {
-    exportButton.addEventListener('click', () => {
+  if (uiState.exportButton) {
+    uiState.exportButton.addEventListener('click', () => {
       if (map.flowsReady !== true) {
         showToastNotification('Simulate flows before exporting GeoJSON.', 'warning');
         return;
@@ -981,24 +1065,23 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     });
   }
 
-  clearButton.addEventListener('click', () => {
+  uiState.clearButton.addEventListener('click', () => {
     resetSimulationState();
   });
 
-  if (alertDismiss) {
-    alertDismiss.addEventListener('click', hideAlertCard);
+  if (uiState.alertDismiss) {
+    uiState.alertDismiss.addEventListener('click', hideAlertCard);
   }
 
   // Onboarding dismiss button + backdrop click-to-dismiss
-  const onboardingDismiss = document.getElementById('onboarding-dismiss');
-  if (onboardingDismiss) {
-    onboardingDismiss.addEventListener('click', () => {
+  if (uiState.onboardingDismissBtn) {
+    uiState.onboardingDismissBtn.addEventListener('click', () => {
       dismissOnboarding();
     });
   }
   // Click outside card dismisses overlay
-  if (onboardingOverlay) {
-    onboardingOverlay.addEventListener('click', (e) => {
+  if (uiState.onboardingOverlay) {
+    uiState.onboardingOverlay.addEventListener('click', (e) => {
       if (!e.target.closest('.onboarding-card')) {
         dismissOnboarding();
       }
@@ -1009,6 +1092,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   map._syncSimulationUI = syncSimulationUI;
   map.showAlertCard = showAlertCard;
   map.syncSimulationUI = syncSimulationUI;
+
+  // Expose uiState on map for external access if needed
+  map.uiState = uiState;
 
   map.placementWeight = clampWeight(map.placementWeight || 1);
   syncModeUI();

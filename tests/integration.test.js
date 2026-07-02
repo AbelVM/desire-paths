@@ -772,6 +772,11 @@ describe('ui.js', () => {
     const alertTitle = { innerText: '' };
     const alertMessage = { innerText: '' };
     const alertDismiss = { addEventListener: vi.fn() };
+    const simulationProgress = { hidden: true, style: {} };
+    const progressBar = { style: { transform: '' } };
+    const progressLabel = { innerHTML: '' };
+    const mapContainer = { getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+    const onboardingDismissBtn = { addEventListener: vi.fn() };
 
     const doc = {
       querySelector: (sel) => {
@@ -792,6 +797,9 @@ describe('ui.js', () => {
         if (sel === '#app-alert-title') return alertTitle;
         if (sel === '#app-alert-message') return alertMessage;
         if (sel === '#app-alert-dismiss') return alertDismiss;
+        if (sel === '#simulation-progress') return simulationProgress;
+        if (sel === '#simulation-progress-bar') return progressBar;
+        if (sel === '#simulation-progress-label') return progressLabel;
         return null;
       },
       querySelectorAll: () => modeButtons,
@@ -813,11 +821,33 @@ describe('ui.js', () => {
         if (id === 'app-alert-message') return alertMessage;
         if (id === 'app-alert-dismiss') return alertDismiss;
         if (id === 'onboarding-overlay') return { hidden: true, querySelectorAll: () => [], addEventListener: vi.fn() };
+        if (id === 'simulation-progress') return simulationProgress;
+        if (id === 'simulation-progress-bar') return progressBar;
+        if (id === 'simulation-progress-label') return progressLabel;
+        if (id === 'map') return mapContainer;
+        if (id === 'onboarding-dismiss') return onboardingDismissBtn;
         return null;
       },
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
-      createElement: () => ({ id: '', className: '', style: {}, innerHTML: '', appendChild: vi.fn(), removeChild: vi.fn(), classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() }, querySelector: () => null }),
+      createElement: () => {
+        const ctxChangeType = { id: 'context-change-type', innerHTML: '', classList: { toggle: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+        const ctxIncWeight = { id: 'context-increase-weight', innerText: '', classList: { toggle: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+        const ctxDecWeight = { id: 'context-decrease-weight', innerText: '', classList: { toggle: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+        const ctxRemoveNode = { id: 'context-remove-node', innerText: '', classList: { toggle: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+        return {
+          id: '', className: '', style: {}, innerHTML: '',
+          appendChild: vi.fn(), removeChild: vi.fn(), firstChild: null,
+          classList: { toggle: vi.fn(), add: vi.fn(), remove: vi.fn() },
+          querySelector: (sel) => {
+            if (sel === '#context-change-type') return ctxChangeType;
+            if (sel === '#context-increase-weight') return ctxIncWeight;
+            if (sel === '#context-decrease-weight') return ctxDecWeight;
+            if (sel === '#context-remove-node') return ctxRemoveNode;
+            return null;
+          },
+        };
+      },
       body: { appendChild: vi.fn() },
     };
 
