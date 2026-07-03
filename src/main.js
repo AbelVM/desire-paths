@@ -400,7 +400,10 @@ const init = () => {
     const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
 
     if (!isAccessible(desireMap, e)) {
-      desireMap.showAlertCard('This spot is blocked. Pick a walkable location instead.', {
+      const msg = sourcesLoading(desireMap)
+        ? 'Map tiles are still loading. Wait a moment and try again.'
+        : 'This spot is blocked. Pick a walkable location instead.';
+      desireMap.showAlertCard(msg, {
         title: 'Placement blocked',
         tone: 'warning',
       });
@@ -435,6 +438,15 @@ const isReadyToCompute = (mapInstance) => {
   return hasOrigin && hasDestination;
 };
 
+// Check if any tile source on the map is currently fetching data.
+const sourcesLoading = (mapInstance) => {
+  const sourceIds = mapInstance.getStyleSourceEntries?.() ?? [];
+  for (const entry of sourceIds) {
+    if (mapInstance.isSourceLoading(entry.id)) return true;
+  }
+  return false;
+};
+
 // Check if the added node is accessible by foot, and if not, alert the user and remove it
 const isAccessible = (mapInstance, clickEvent) => {
   const bbox = [
@@ -456,7 +468,12 @@ const isAccessible = (mapInstance, clickEvent) => {
     }
   }
   const costs = Object.values(layerCosts);
-  if (costs.length === 0) return true; // No features found; allow placement
+  if (costs.length === 0) {
+    // No features found — defer placement if tiles are still loading.
+    // When tiles haven't loaded for a region, queryRenderedFeatures returns empty;
+    // treating that as "walkable" allows placement on water/buildings that aren't rendered yet.
+    return !sourcesLoading(mapInstance);
+  }
   const groundCost = typeof layerCosts['0'] === 'number' ? layerCosts['0'] : Math.min(...costs);
   return groundCost < FRICTION_COSTS.IMPASSABLE;
 };
