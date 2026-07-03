@@ -2,16 +2,18 @@ import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 
-// Flow hover handler — updates tooltip with hex data
-export function handleFlowHover(info) {
+// Flow hover handler — updates tooltip with hex data.
+// Uses info.dataIndex to look up from source array instead of relying on info.object,
+// which may be stale when updateTriggers cause re-renders that change object identity.
+export function handleFlowHover(info, flowData) {
   const tooltip = document.getElementById('hex-tooltip');
   if (!tooltip) return;
 
-  // info.object contains the data object (hex cell entry)
-  if (info.object && info.object.hex) {
+  const entry = flowData?.[info.dataIndex ?? info.index];
+  if (entry && entry.hex) {
     tooltip.hidden = false;
-    const score = Math.round(info.object.s);
-    const friction = info.object.f;
+    const score = Math.round(entry.s);
+    const friction = entry.f;
     tooltip.innerHTML = `<strong>Flow:</strong> ${score} paths · <strong>Friction:</strong> ${friction}`;
     tooltip.style.left = `${info.x}px`;
     tooltip.style.top = `${info.y}px`;
@@ -271,7 +273,7 @@ export function updateLayers(state, mapInstance) {
     data: flowData,
     extruded: false,
     pickable: true,
-    onHover: (info) => handleFlowHover(info),
+    onHover: (info) => handleFlowHover(info, flowData),
     beforeId: state.targetLabelLayerId,
     stroked: false,
     getLineWidth: 0,
