@@ -4,9 +4,10 @@ import {
   AFFORDANCE,
   H3_STRIDE_RESOLUTION,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
+  VISUAL_DEPTH,
 } from './constants.js';
 import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
-import { clearComputeCaches, buildCellStateEntry } from './compute.js';
+import { clearComputeCaches, buildCellStateEntry, precomputeVisibilitySets } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -205,6 +206,10 @@ export async function triggerFastScan() {
     this._affordanceObj[cell] = aff;
     this._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
   }
+
+  // Precompute visibility sets for all AOI cells to eliminate O(N^2) path lookups during simulation
+  const visibilityData = precomputeVisibilitySets(this._frictionObj, viewHexes, VISUAL_DEPTH);
+  this._precomputedVisibility = { gen: this._mappingGeneration, data: visibilityData };
 
   this.updateLayers();
 }

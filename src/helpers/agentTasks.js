@@ -116,7 +116,15 @@ function _getCachedDisk(center, r) {
   return arr;
 }
 
-function _getCachedVisibility(a, b, frictionLookup) {
+function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
+  // Use precomputed visibility map when available
+  if (visibilityMap) {
+    const visible = visibilityMap[a];
+    if (visible) {
+      return !!visible[b];
+    }
+  }
+  
   const path = _getCachedPathCells(a, b);
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
@@ -159,7 +167,7 @@ function getBearing(start, end) {
   return _bearingFromLatLngs(s, e);
 }
 
-function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLookup, affordanceLookup, cellState) {
+function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLookup, affordanceLookup, cellState, visibilityMap) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const weights = WEIGHTS;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
@@ -171,7 +179,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
   const useGradient = typeof gCurr === 'number';
 
   const getFriction = cellState ? (n) => (cellState[n] ? cellState[n].friction : undefined) : (n) => frictionLookup[n];
-  const getAffordance = cellState ? (n) => (cellState[n]?.affordance ?? 0.1) : (n) => affordanceLookup?.[n] ?? 0.1;
+  const getAffordance = cellState ? (n) => (cellState[n]?.affordance ?? 0.1) : (n) => (affordanceLookup?.[n] ?? 0.1);
 
   const cellsArr = [];
   const anglesArr = [];
@@ -185,7 +193,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
 
     const f = getFriction(n);
     if (f === undefined || f >= impassableVal) continue;
-    if (!_getCachedVisibility(curr, n, frictionLookup)) continue;
+    if (!_getCachedVisibility(curr, n, frictionLookup, visibilityMap)) continue;
 
     const eLatLng = _getCachedLatLng(n);
     const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
@@ -324,7 +332,7 @@ function recordTraversal(map, cell) {
   map.set(cell, (map.get(cell) || 0) + 1);
 }
 
-function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, cellState) {
+function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, cellState, visibilityMap) {
   let simCurrent = originCell;
   const simTarget = destCell;
   let simDirection = getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState) ?? getBearing(simCurrent, simTarget);
@@ -340,7 +348,7 @@ function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentI
       break;
     }
 
-    const nextStep = getBestNextStep(simCurrent, destGradientObj, simDirection, simAgentId, frictionLookup, affordanceLookup, cellState);
+    const nextStep = getBestNextStep(simCurrent, destGradientObj, simDirection, simAgentId, frictionLookup, affordanceLookup, cellState, visibilityMap);
     if (!nextStep || nextStep === simCurrent) break;
 
     const line = _getCachedPathCells(simCurrent, nextStep);
@@ -367,9 +375,10 @@ function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentI
   return simPath;
 }
 
-export function computeAgentBatch({ plan = [], frictionEntries = null, gradients = {}, affordanceEntries = null, hexCount = 0, options = {} } = {}) {
+export function computeAgentBatch({ plan = [], frictionEntries = null, gradients = {}, affordanceEntries = null, hexCount = 0, visibilityEntries = null, options = {} } = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
+  const visibilityMap = visibilityEntries || null;
 
   // Total agents for progress reporting
   let totalAgents = 0;
@@ -413,7 +422,7 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
 
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
-        const simPath = runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, null);
+        const simPath = runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, null, visibilityMap);
 
         for (let k = 0; k < simPath.length; k++) {
           const cell = simPath[k];

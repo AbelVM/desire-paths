@@ -168,7 +168,58 @@ function _getCachedDisk(ctx, center, r) {
   return arr;
 }
 
+// Precompute visibility sets for all cells within the AOI.
+// For each cell, stores a plain-object map of visible neighbor -> true.
+// This eliminates O(N^2) gridPathCells lookups during simulation.
+// Keyed by mapping generation so it invalidates on remap.
+function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
+  const result = Object.create(null);
+  const impassable = FRICTION_COSTS.IMPASSABLE;
+  
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    const disk = gridDisk(cell, maxDepth);
+    const visible = Object.create(null);
+    
+    for (let j = 0; j < disk.length; j++) {
+      const candidate = disk[j];
+      if (candidate === cell) continue;
+      
+      const f = frictionLookup[candidate];
+      if (typeof f === 'undefined' || f >= impassable) continue;
+      
+      const path = gridPathCells(cell, candidate);
+      let isVisible = true;
+      for (let k = 0; k < path.length; k++) {
+        const c = path[k];
+        const pf = frictionLookup[c];
+        if (typeof pf === 'undefined' || pf >= impassable) {
+          isVisible = false;
+          break;
+        }
+      }
+      
+      if (isVisible) visible[candidate] = true;
+    }
+    
+    if (Object.keys(visible).length > 0) result[cell] = visible;
+  }
+  
+  return result;
+}
+
 function _getCachedVisibility(ctx, a, b, frictionLookup) {
+  // Use precomputed visibility sets when available and fresh
+  const precomputed = ctx._precomputedVisibility;
+  const currentGen = ctx._mappingGeneration ?? 0;
+  if (precomputed && precomputed.gen === currentGen) {
+    const visible = precomputed.data[a];
+    if (visible) {
+      return !!visible[b];
+    }
+    // Cell not in precomputed set (e.g., outside AOI) — fall through to legacy cache
+  }
+  
   ensureVisibilityCacheFresh(ctx);
   // Use plain-object nested cache keyed by a then b for fast boolean lookup
   if (!ctx._visibilityCacheObj) {
@@ -220,6 +271,7 @@ export function clearComputeCaches() {
   this._computeDiskCacheOrder = undefined;
   this._visibilityCacheObj = undefined;
   this._visibilityCacheOrder = undefined;
+  this._precomputedVisibility = undefined;
   this._computePathCacheHits = 0;
   this._computePathCacheMisses = 0;
   this._computeDiskCacheHits = 0;
@@ -711,7 +763,7 @@ export async function computeDesirePaths() {
       goalGradients,
       this._affordanceObj || this.affordanceMap,
       hexes,
-      {}
+      { visibilityEntries: this._precomputedVisibility?.data || null }
     );
 
     // Merge returned path desire into Map
@@ -1110,6 +1162,7 @@ export {
   estimateMaxTicks as _estimateMaxTicks,
   yieldToMain as _yieldToMain,
   buildCellStateEntry,
+  precomputeVisibilitySets,
 };
 
 // Diagnostic helper to inspect cache instrumentation
