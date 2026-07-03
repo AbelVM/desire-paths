@@ -1,5 +1,4 @@
 import { gridDisk, gridRing, polygonToCells } from 'h3-js';
-import { MinHeap } from './minheap.js';
 import {
   FRICTION_COSTS,
   H3_STRIDE_RESOLUTION,
@@ -8,6 +7,7 @@ import {
   IMPASSABLE_BLUR_FRICTION_ADD,
   getSurface,
 } from './constants.js';
+import { computeDijkstra } from './dijkstra.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
@@ -105,37 +105,7 @@ export function normalizeFrictionEntries(source) {
 }
 
 function computeDijkstraGradientForLookup(targetCell, frictionLookup) {
-  const distances = Object.create(null);
-  const visited = new Set();
-  const heap = new MinHeap();
-
-  distances[targetCell] = 0;
-  heap.insert(targetCell, 0);
-
-  while (heap.size() > 0) {
-    const current = heap.extractMin();
-    if (visited.has(current)) continue;
-    visited.add(current);
-
-    const currentDistance = distances[current];
-    const neighbors = gridDisk(current, 1);
-
-    for (let i = 0; i < neighbors.length; i++) {
-      const neighbor = neighbors[i];
-      if (neighbor === current) continue;
-
-      const friction = frictionLookup[neighbor];
-      if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
-
-      const nextDistance = currentDistance + friction;
-      if (!Object.hasOwn(distances, neighbor) || nextDistance < distances[neighbor]) {
-        distances[neighbor] = nextDistance;
-        heap.insert(neighbor, nextDistance);
-      }
-    }
-  }
-
-  return distances;
+  return computeDijkstra(targetCell, frictionLookup, (cell) => gridDisk(cell, 1));
 }
 
 export function computeDijkstraGradientSnapshot(targetCell, frictionSource) {

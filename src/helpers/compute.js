@@ -1,4 +1,3 @@
-import { MinHeap } from './minheap.js';
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
@@ -23,6 +22,7 @@ import {
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
+import { computeDijkstra } from './dijkstra.js';
 
 // --- Deterministic seeded RNG (LCG) ---
 function _lcg(seed) {
@@ -977,13 +977,6 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
  * Optimized Dijkstra Gradient (Production-Ready)
  */
 function computeDijkstraGradient(targetCell) {
-  // Dijkstra using friction as traversal cost. Use a plain-object for
-  // distances to avoid Map.get overhead in hot loops. Keys are cell ids.
-  const distances = Object.create(null);
-  const visited = new Set();
-
-  // Resolve lookup objects once — both are always plain objects
-  // Build _frictionObj from cellFrictionMap once if absent (single normalisation, not per-cell)
   const frictionLookup = this._frictionObj || (() => {
     const obj = Object.create(null);
     for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
@@ -992,39 +985,16 @@ function computeDijkstraGradient(targetCell) {
   const cellState = this._cellState || null;
   const stateEnabled = !!cellState;
 
-  const heap = new MinHeap();
-  distances[targetCell] = 0;
-  heap.insert(targetCell, 0);
-
-  while (heap.size() > 0) {
-    const current = heap.extractMin();
-    if (visited.has(current)) continue;
-    visited.add(current);
-
-    const d = distances[current];
-    const neighbors = _getCachedDisk(this, current, 1);
-
-    for (let i = 0; i < neighbors.length; i++) {
-      const n = neighbors[i];
-      if (n === current) continue;
-      let f;
-      if (stateEnabled) {
+  const getFriction = stateEnabled
+    ? (n) => {
         const s = cellState[n];
-        f = s ? s.friction : undefined;
-      } else {
-        f = frictionLookup[n];
+        return s ? s.friction : undefined;
       }
-      if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
+    : (n) => frictionLookup[n];
 
-      const alt = d + f;
-      if (!(n in distances) || alt < distances[n]) {
-        distances[n] = alt;
-        heap.insert(n, alt);
-      }
-    }
-  }
+  const getNeighbors = (cell) => _getCachedDisk(this, cell, 1);
 
-  return distances;
+  return computeDijkstra(targetCell, getFriction, getNeighbors);
 }
 
 /**
