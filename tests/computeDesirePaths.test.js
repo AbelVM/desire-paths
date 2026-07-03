@@ -105,7 +105,7 @@ describe('computeDesirePaths regression', () => {
     await computeDesirePaths.call(ctx);
 
     // The core regression: pathDesireScores must NOT be empty
-    expect(ctx.pathDesireScores.size).toBeGreaterThan(0);
+    expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
   });
 
   it('must include the origin cell in pathDesireScores', async () => {
@@ -116,7 +116,7 @@ describe('computeDesirePaths regression', () => {
     await computeDesirePaths.call(ctx);
 
     // The origin cell must have a non-zero desire score
-    expect(ctx.pathDesireScores.get(originCell)).toBeGreaterThan(0);
+    expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
   });
 
   it('must update globalPeakFlow to a value greater than 1 after simulation', async () => {
@@ -137,8 +137,8 @@ describe('computeDesirePaths regression', () => {
       const ctx = buildContext(pathCells);
       await computeDesirePaths.call(ctx);
 
-      expect(ctx.pathDesireScores.size).toBeGreaterThan(0);
-      expect(ctx.pathDesireScores.get(originCell)).toBeGreaterThan(0);
+      expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
+      expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
       expect(ctx.globalPeakFlow).toBeGreaterThan(1);
     }
   });
@@ -151,7 +151,7 @@ describe('computeDesirePaths regression', () => {
 
     // At least 2 cells must have non-zero desire scores (origin + at least one neighbour)
     let cellsWithDesire = 0;
-    for (const score of ctx.pathDesireScores.values()) {
+    for (const score of Object.values(ctx.pathDesireScores)) {
       if (score > 0) cellsWithDesire++;
     }
     expect(cellsWithDesire).toBeGreaterThanOrEqual(2);
@@ -166,7 +166,7 @@ describe('computeDesirePaths regression', () => {
     await computeDesirePaths.call(ctx);
 
     // Higher weight → more agents → higher desire on the origin
-    expect(ctx.pathDesireScores.get(originCell)).toBeGreaterThan(0);
+    expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
     expect(ctx.globalPeakFlow).toBeGreaterThan(1);
   });
 
@@ -195,7 +195,8 @@ describe('computeDesirePaths regression', () => {
     await computeDesirePaths.call(ctx);
 
     // Should return early without modifying pathDesireScores
-    expect(ctx.pathDesireScores.size).toBe(0);
+    // pathDesireScores is reset to a new plain object; it should be empty
+    expect(Object.keys(ctx.pathDesireScores).length).toBe(0);
   });
 
   it('must return early when cellFrictionMap is null', async () => {
@@ -213,7 +214,7 @@ describe('computeDesirePaths regression', () => {
 
     await computeDesirePaths.call(ctx);
 
-    expect(ctx.pathDesireScores.size).toBe(0);
+    expect(Object.keys(ctx.pathDesireScores).length).toBe(0);
   });
 
   it('must handle origin that is also a destination (self-targeting)', async () => {
@@ -276,7 +277,7 @@ describe('computeDesirePaths regression', () => {
 
     await computeDesirePaths.call(ctx);
 
-    expect(ctx.pathDesireScores.size).toBeGreaterThan(0);
+    expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
   });
 
   it('must handle pathDesireScores as plain object', async () => {

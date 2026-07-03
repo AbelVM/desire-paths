@@ -191,11 +191,7 @@ export function updateLayers() {
   for (const [k, v] of this.cellFrictionMap ?? []) frictionObj[k] = v;
   const pathObj = Object.create(null);
   if (this.pathDesireScores) {
-    if (this.pathDesireScores.entries) {
-      for (const [k, v] of this.pathDesireScores) pathObj[k] = v;
-    } else {
-      for (const k in this.pathDesireScores) pathObj[k] = this.pathDesireScores[k];
-    }
+    for (const k in this.pathDesireScores) pathObj[k] = this.pathDesireScores[k];
   }
 
   const logMax = Math.log1p(this.globalPeakFlow ?? 1);
@@ -275,15 +271,13 @@ export function updateLayers() {
 function getScore(cell) {
   const scores = this.pathDesireScores;
   if (!scores) return 0;
-  return typeof scores.get === 'function' ? scores.get(cell) || 0 : scores[cell] || 0;
+  return scores[cell] || 0;
 }
 
 export function buildSimulationGeoJSON() {
   const pathScores = this.pathDesireScores;
   let scoreCells;
-  if (pathScores && typeof pathScores.keys === 'function') {
-    scoreCells = Array.from(pathScores.keys());
-  } else if (pathScores) {
+  if (pathScores) {
     scoreCells = Object.keys(pathScores);
   }
 

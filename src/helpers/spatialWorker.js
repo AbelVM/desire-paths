@@ -30,7 +30,7 @@ export function getMaxAgentWorkers() {
   return MAX_AGENT_WORKERS;
 }
 
-const WORKER_TASK_TIMEOUT = 300_000; // 5m timeout per worker task
+const WORKER_TASK_TIMEOUT = 600_000; // 10m timeout per worker task
 
 // Pools keyed by task kind (e.g. 'agent-batch' -> agent workers)
 const workerPoolByKind = new Map();
@@ -137,32 +137,11 @@ function flattenPayloadAndTransfers(payload) {
   if (fe.__flat && Array.isArray(fe.keys) && (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer))
     return { payload, transfer: [] };
 
-  // Support Map-like or iterable entries as well as plain objects
-  let keys = [];
-  let vals;
-  if (typeof fe.entries === 'function' && typeof fe.get === 'function') {
-    // Map-like
-    for (const [k] of fe) keys.push(k);
-    if (keys.length === 0) return { payload, transfer: [] };
-    vals = new Float32Array(keys.length);
-    for (let i = 0; i < keys.length; i++) vals[i] = Number(fe.get(keys[i])) || 0;
-  } else if (typeof fe.entries === 'function') {
-    // Generic iterable (e.g., array of pairs)
-    for (const entry of fe) {
-      if (!entry) continue;
-      const k = entry[0];
-      keys.push(k);
-    }
-    if (keys.length === 0) return { payload, transfer: [] };
-    vals = new Float32Array(keys.length);
-    for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]] ?? 0) || 0;
-  } else {
-    // Plain object
-    keys = Object.keys(fe);
-    if (keys.length === 0) return { payload, transfer: [] };
-    vals = new Float32Array(keys.length);
-    for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
-  }
+  // frictionEntries is always a plain object (normalised before dispatch)
+  const keys = Object.keys(fe);
+  if (keys.length === 0) return { payload, transfer: [] };
+  const vals = new Float32Array(keys.length);
+  for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
 
   const newPayload = Object.assign({}, payload, { frictionEntries: { __flat: true, keys, vals } });
   return { payload: newPayload, transfer: [vals.buffer] };

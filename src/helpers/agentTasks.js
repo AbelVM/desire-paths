@@ -120,7 +120,7 @@ function _getCachedVisibility(a, b, frictionLookup) {
   const path = _getCachedPathCells(a, b);
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
-    const f = typeof frictionLookup.get === 'function' ? frictionLookup.get(c) : frictionLookup[c];
+    const f = frictionLookup[c];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) return false;
   }
   return true;
@@ -128,8 +128,7 @@ function _getCachedVisibility(a, b, frictionLookup) {
 
 function getGradientDirection(curr, gradientObj, frictionLookup, cellState) {
   if (!gradientObj) return null;
-  const gradientIsMap = typeof gradientObj.get === 'function';
-  const gCurr = gradientIsMap ? gradientObj.get(curr) : gradientObj[curr];
+  const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
 
   const neighbors = _getCachedDisk(curr, 1);
@@ -141,9 +140,9 @@ function getGradientDirection(curr, gradientObj, frictionLookup, cellState) {
     if (n === curr) continue;
     let f;
     if (cellState && cellState[n]) f = cellState[n].friction;
-    else f = typeof frictionLookup.get === 'function' ? frictionLookup.get(n) : frictionLookup[n];
+    else f = frictionLookup[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
-    const gN = gradientIsMap ? gradientObj.get(n) : gradientObj[n];
+    const gN = gradientObj[n];
     if (typeof gN !== 'number') continue;
     if (gN < bestGrad) {
       bestGrad = gN;
@@ -161,20 +160,18 @@ function getBearing(start, end) {
 }
 
 function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLookup, affordanceLookup, cellState) {
-  const frictionIsMap = typeof frictionLookup.get === 'function';
-  const gradientIsMap = gradient && typeof gradient.get === 'function';
+  const gradientLookup = gradient ? (n) => gradient[n] : null;
   const weights = WEIGHTS;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = VISUAL_ANGLE / 2;
 
   const disk = _getCachedDisk(curr, VISUAL_DEPTH);
   const sLatLng = _getCachedLatLng(curr);
-  const gradientLookup = gradient ? (n => (gradientIsMap ? gradient.get(n) : gradient[n])) : null;
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
-  const getFriction = cellState ? (n => (cellState[n] ? cellState[n].friction : undefined)) : (frictionIsMap ? (n => frictionLookup.get(n)) : (n => frictionLookup[n]));
-  const getAffordance = cellState ? (n => (cellState[n]?.affordance ?? 0.1)) : (typeof affordanceLookup?.get === 'function' ? (n => affordanceLookup.get(n) ?? 0.1) : (n => affordanceLookup?.[n] ?? 0.1));
+  const getFriction = cellState ? (n) => (cellState[n] ? cellState[n].friction : undefined) : (n) => frictionLookup[n];
+  const getAffordance = cellState ? (n) => (cellState[n]?.affordance ?? 0.1) : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
   const anglesArr = [];
@@ -350,7 +347,7 @@ function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentI
     let hitTarget = false;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
-      const stepF = cellState && cellState[stepCell] ? cellState[stepCell].friction : (typeof frictionLookup.get === 'function' ? frictionLookup.get(stepCell) : frictionLookup[stepCell]);
+      const stepF = cellState && cellState[stepCell] ? cellState[stepCell].friction : frictionLookup[stepCell];
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);
@@ -404,19 +401,11 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
       if (!destGradient) continue;
 
       let destGradientObj;
-      if (typeof destGradient.get === 'function') {
-        destGradientObj = Object.create(null);
-        for (const [k, v] of destGradient) destGradientObj[k] = v;
-        if (!Object.hasOwn(destGradientObj, originCell)) {
-          try { console.debug && console.debug('computeAgentBatch: skipping dest because origin missing in gradient', { originCell, destCell }); } catch (_e) {}
-          continue;
-        }
-      } else {
-        destGradientObj = destGradient;
-        if (typeof destGradientObj[originCell] !== 'number') {
-          try { console.debug && console.debug('computeAgentBatch: skipping dest because origin missing in gradient (plain)', { originCell, destCell }); } catch (_e) {}
-          continue;
-        }
+      // gradients are always plain objects — the Map branch is dead code
+      destGradientObj = destGradient;
+      if (typeof destGradientObj[originCell] !== 'number') {
+        try { console.debug && console.debug('computeAgentBatch: skipping dest because origin missing in gradient', { originCell, destCell }); } catch (_e) {}
+        continue;
       }
 
       if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);

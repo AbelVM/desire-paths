@@ -313,12 +313,9 @@ describe('addDestination', () => {
     expect(map.simulationNodes[h3].weight).toBe(5);
   });
 
-  it('should handle pathDesireScores as Map with values', () => {
+  it('should handle pathDesireScores as plain object with values', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const pathDesireScores = new Map([
-      [h3, 10],
-      ['other', 5],
-    ]);
+    const pathDesireScores = { [h3]: 10, other: 5 };
     const map = {
       simulationNodes: { [h3]: { type: 'origin', weight: 1 } },
       _gradientCacheObj: Object.create(null),
@@ -806,18 +803,11 @@ describe('_getBestNextStep', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    const affordanceMap = new Map([
-      [h3, 0.5],
-      [neighborCell, 0.8],
-    ]);
     const map = {
-      cellFrictionMap: frictionMap,
-      affordanceMap: affordanceMap,
-      // No _cellState or _affordanceObj
+      // _frictionObj is now the canonical lookup — provide it as a plain object
+      _frictionObj: { [h3]: 1, [neighborCell]: 1 },
+      _affordanceObj: { [h3]: 0.5, [neighborCell]: 0.8 },
+      // No _cellState
     };
     const result = _getBestNextStep.call(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
@@ -827,20 +817,14 @@ describe('_getBestNextStep', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    const gradientMap = new Map([
-      [h3, 2],
-      [neighborCell, 1],
-    ]);
+    // gradient is always a plain object after the normalization refactor
+    const gradientObj = { [h3]: 2, [neighborCell]: 1 };
     const map = {
-      cellFrictionMap: frictionMap,
+      _frictionObj: { [h3]: 1, [neighborCell]: 1 },
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, gradientMap, 0);
+    const result = _getBestNextStep.call(map, h3, gradientObj, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -927,7 +911,7 @@ describe('buildSimulationGeoJSON', () => {
     const ctx = {
       getHexes: () => [h3],
       cellFrictionMap: new Map([[h3, 1]]),
-      pathDesireScores: new Map([[h3, 7]]),
+      pathDesireScores: { [h3]: 7 },
       _frictionObj: { [h3]: 1 },
       _affordanceObj: { [h3]: 0.4 },
     };
@@ -947,7 +931,7 @@ describe('buildSimulationGeoJSON', () => {
     const ctx = {
       getHexes: () => [h3],
       cellFrictionMap: new Map([[h3, 1]]),
-      pathDesireScores: new Map(),
+      pathDesireScores: Object.create(null),
       _frictionObj: { [h3]: 1 },
       _affordanceObj: { [h3]: 0.4 },
     };
