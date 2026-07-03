@@ -19,6 +19,7 @@ import {
 } from './constants.js';
 import {
   runGradientBatches,
+  runAgentBatches,
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
@@ -414,12 +415,18 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
     const destCell = destinations[d];
     if (destCell === originCell) continue;
     const grad = goalGradients.get(destCell);
-    if (!grad) continue;
+    if (!grad) {
+      try { console.debug && console.debug('getReachableDestinations: missing gradient', { originCell, destCell }); } catch (_e) {}
+      continue;
+    }
     const hasOrigin =
       typeof grad.has === 'function'
         ? grad.has(originCell)
         : typeof grad[originCell] === 'number';
-    if (!hasOrigin) continue;
+    if (!hasOrigin) {
+      try { console.debug && console.debug('getReachableDestinations: origin not in gradient', { originCell, destCell }); } catch (_e) {}
+      continue;
+    }
     const w = ctx.simulationNodes[destCell]?.weight || 1;
     destCandidates.push({ dest: destCell, weight: w });
     destWeightSum += w;
@@ -654,101 +661,82 @@ export async function computeDesirePaths() {
   }
 
   const pathDesireDeltas = new Map();
-  const perTargetContribs = Object.create(null);
+  let perTargetContribs = Object.create(null);
   const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
     this,
     agents,
     destinations,
     goalGradients
   );
+  try {
+    console.debug && console.debug('computeDesirePaths: plan built', {
+      agentsCount: agents.length,
+      destinationsCount: destinations.length,
+      planLength: plan.length,
+      totalAgents,
+      assignedOrigins: Object.keys(assignedCounts).length,
+      planPreview: plan.map((p) => ({ origin: p.originCell, totalVolume: p.totalVolume, assignedLen: p.assigned?.length ?? 0 })),
+    });
+  } catch (_e) {}
+  // Validate plan: ensure gradients exist for every origin->destination used in the plan.
+  for (let pi = 0; pi < plan.length; pi++) {
+    const originCell = plan[pi].originCell;
+    const destCandidates = plan[pi].destCandidates || [];
+    for (let di = 0; di < destCandidates.length; di++) {
+      const destCell = destCandidates[di].dest;
+      const grad = goalGradients.get(destCell);
+      const hasOrigin = grad && (typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number');
+      if (!hasOrigin) {
+        try {
+          console.warn && console.warn('computeDesirePaths: aborting - missing gradient for plan entry', { originCell, destCell });
+          if (this.showAlertCard) this.showAlertCard('Simulation aborted: missing gradient data for plan.', { title: 'Simulation aborted', tone: 'warning' });
+        } catch (_e) {}
+        // Do not apply an incomplete plan; abort early.
+        return;
+      }
+    }
+  }
   let agentsProcessed = 0;
   let nextYieldAt = resetYieldDeadline();
   updateSimulationProgress(this, 0, totalAgents);
 
-  for (let planIndex = 0; planIndex < plan.length; planIndex++) {
-    const { originCell, destCandidates, assigned } = plan[planIndex];
-
-    if (this.debugCompute) {
+  // Offload per-origin agent path sims to worker pool (workers are stateless)
+  try {
+    setSpatialWorkerProgressHandler((m) => {
       try {
-        console.groupCollapsed &&
-          console.groupCollapsed(
-            `computeDesirePaths: origin ${originCell} -> distribute ${totalAgents} sims`
-          );
-        console.log('computeDesirePaths:start', {
-          origin: originCell,
-          totalAgents,
-          candidates: destCandidates.map((c) => ({ d: c.dest, w: c.weight })),
-        });
-      } catch (_e) {
-        // debug logging is non-critical
-      }
+        if (m && m.progress) {
+          updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Simulating flows...');
+          this.syncSimulationUI?.();
+        }
+      } catch (_e) {}
+    });
+
+    const agentResults = await runAgentBatches(
+      plan,
+      this._frictionObj || this.cellFrictionMap,
+      goalGradients,
+      this._affordanceObj || this.affordanceMap,
+      hexes,
+      {}
+    );
+
+    // Merge returned path desire into Map
+    const mergedPath = agentResults.pathDesire || Object.create(null);
+    for (const cell in mergedPath) {
+      const v = Number(mergedPath[cell]) || 0;
+      if (v) pathDesireDeltas.set(cell, (pathDesireDeltas.get(cell) ?? 0) + v);
     }
 
-    for (let idx = 0; idx < destCandidates.length; idx++) {
-      const destCell = destCandidates[idx].dest;
-      const count = assigned[idx] || 0;
-      if (count <= 0) continue;
-      const destGradient = goalGradients.get(destCell);
-      if (!destGradient) continue;
-      let destGradientObj;
-      if (typeof destGradient.get === 'function') {
-        destGradientObj = Object.create(null);
-        for (const [k, v] of destGradient) destGradientObj[k] = v;
-        if (!destGradient.has(originCell)) continue;
-      } else {
-        destGradientObj = destGradient;
-        if (typeof destGradientObj[originCell] !== 'number') continue;
-      }
-
-      if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
-      const maxTicks = estimateMaxTicks(originCell, destCell, hexes);
-
-      for (let sim = 0; sim < count; sim++) {
-        const simAgentId = `${originCell}:${destCell}:${sim}`;
-        const simPath = runSingleAgentPath(this, {
-          originCell,
-          destCell,
-          destGradientObj,
-          maxTicks,
-          simAgentId,
-          pathDesireDeltas,
-          applyWear: true,
-        });
-
-        for (let p = 0; p < simPath.length; p++) {
-          const cell = simPath[p];
-          perTargetContribs[destCell][cell] = (perTargetContribs[destCell][cell] || 0) + 1;
-        }
-
-        agentsProcessed++;
-        if (agentsProcessed % YIELD_EVERY_AGENTS === 0 && nowMs() >= nextYieldAt) {
-          await yieldToMain();
-          nextYieldAt = resetYieldDeadline();
-          updateSimulationProgress(this, agentsProcessed, totalAgents);
-        }
-
-        if (this.debugCompute) {
-          try {
-            if (simPath.length <= 1) {
-              console.warn('computeDesirePaths: short sim path', {
-                origin: originCell,
-                dest: destCell,
-                sim,
-                simPathLength: simPath.length,
-              });
-            }
-            console.log('computeDesirePaths:simPath', {
-              origin: originCell,
-              dest: destCell,
-              sim,
-              simPath,
-            });
-          } catch (_e) {
-            // debug logging is non-critical
-          }
-        }
-      }
+    // Apply aggregated affordance wear on main thread
+    for (const [cell, v] of pathDesireDeltas) {
+      if (v && typeof v === 'number') updateAffordance.call(this, cell, v);
     }
+
+    perTargetContribs = agentResults.perTargetContribs || Object.create(null);
+  } finally {
+    try {
+      clearSpatialWorkerProgressHandler();
+    } catch (_e) {}
   }
 
   applyPathDesireDeltas(this, pathDesireDeltas);

@@ -60,7 +60,13 @@ function getCachedPolyCells(coords) {
   const cached = _polyCellsCache[key];
   if (cached) return cached;
 
-  const result = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
+  let result;
+  try {
+    result = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
+  } catch (err) {
+    try { console.warn && console.warn('computeFastScan: polygonToCells failed for coords', { key, err }); } catch (_e) {}
+    result = [];
+  }
   _polyCellsCache[key] = result;
   _polyCellsCacheOrder.push(key);
   if (_polyCellsCacheOrder.length > POLY_CELLS_CACHE_MAX) {
@@ -207,41 +213,59 @@ function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target)
     const geometry = geometries[g];
     if (!geometry || !geometry.coordinates) continue;
 
-    const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
-    for (let p = 0; p < coordsArray.length; p++) {
-      const cells = getCachedPolyCells(coordsArray[p]);
-      // Shared cell iterator — no per-feature allocation overhead
-      for (let c = 0; c < cells.length; c++) {
-        const cell = cells[c];
-        if (!viewLookup[cell]) continue;
+    // Guard per-geometry processing so a single malformed polygon doesn't
+    // abort the entire fast-scan chunk (this caused worker failures).
+    try {
+      const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+      for (let p = 0; p < coordsArray.length; p++) {
+        let cells = [];
+        try {
+          cells = getCachedPolyCells(coordsArray[p]);
+        } catch (err) {
+          try { console.warn && console.warn('computeFastScan: failed to get cells for geometry', { layerKey, layerVal, err }); } catch (_e) {}
+          continue;
+        }
+        // Shared cell iterator — no per-feature allocation overhead
+        for (let c = 0; c < cells.length; c++) {
+          const cell = cells[c];
+          if (!viewLookup[cell]) continue;
 
-        let layerMap = target[cell];
-        if (!layerMap) layerMap = target[cell] = Object.create(null);
-        if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
-          layerMap[layerKey] = layerVal;
+          let layerMap = target[cell];
+          if (!layerMap) layerMap = target[cell] = Object.create(null);
+          if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey]) layerMap[layerKey] = layerVal;
+        }
       }
+    } catch (err) {
+      try { console.warn && console.warn('computeFastScan: skipping malformed geometry', { layerKey, layerVal, err }); } catch (_e) {}
+      continue;
     }
   }
 }
 
 
 export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) {
-  const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({
-    features,
-    viewHexes,
-  });
-
-  const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
-  return {
-    multiFrictionEntries,
-    cellFrictionEntries,
-    blurWeights: blur.blurWeights,
-    blurUpdates: blur.updates,
-  };
+  try {
+    const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({ features, viewHexes });
+    const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
+    return {
+      multiFrictionEntries,
+      cellFrictionEntries,
+      blurWeights: blur.blurWeights,
+      blurUpdates: blur.updates,
+    };
+  } catch (err) {
+    try { console.error && console.error('computeFastScanSnapshot failed', { err, featuresCount: (features && features.length) || 0 }); } catch (_e) {}
+    return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null), blurWeights: Object.create(null), blurUpdates: [] };
+  }
 }
 
 export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } = {}) {
-  return collectFastScanEntries({ features, viewHexes });
+  try {
+    return collectFastScanEntries({ features, viewHexes });
+  } catch (err) {
+    try { console.error && console.error('computeFastScanChunkSnapshot failed', { err, featuresCount: (features && features.length) || 0 }); } catch (_e) {}
+    return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null) };
+  }
 }
 
 // Cache gridDisk results to avoid redundant H3 neighbor lookups in blur computation
