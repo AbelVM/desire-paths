@@ -1091,11 +1091,10 @@ export function initializeAffordanceMap() {
     this.affordanceMap.set(cell, affordance);
 
     if (this._cellState) {
-      if (!this._cellState[cell]) {
-        this._cellState[cell] = { friction, affordance, desire: 0, multi: null };
-      } else {
-        this._cellState[cell].affordance = affordance;
-      }
+      const cs = this._cellState[cell];
+      const existingDesire = cs ? cs.desire : 0;
+      const existingMulti = cs ? cs.multi : null;
+      this._cellState[cell] = buildCellStateEntry(friction, affordance, existingDesire, existingMulti, this._cellState, cell);
     }
   }
 }
@@ -1110,6 +1109,7 @@ export {
   isVisible as _isVisible,
   estimateMaxTicks as _estimateMaxTicks,
   yieldToMain as _yieldToMain,
+  buildCellStateEntry,
 };
 
 // Diagnostic helper to inspect cache instrumentation
@@ -1243,7 +1243,7 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
       const fr = this._frictionObj[k];
       const aff = this._affordanceObj?.[k] ?? 0.1;
       const desire = this.pathDesireScores?.[k] || 0;
-      this._cellState[k] = { friction: fr, affordance: aff, desire, multi: null };
+      this._cellState[k] = buildCellStateEntry(fr, aff, desire, null, null, k);
     }
   }
 
@@ -1344,9 +1344,11 @@ function _recomputeAffordanceForCells(cells) {
     const newVal = Math.min(SOFT_CAP, 0.1 + wear);
 
     if (stateEnabled) {
-      if (!cellState[cell])
-        cellState[cell] = { friction: friction, affordance: newVal, desire: 0, multi: null };
-      else cellState[cell].affordance = newVal;
+      const cs = cellState[cell];
+      const existingFriction = cs ? cs.friction : friction;
+      const existingDesire = cs ? cs.desire : 0;
+      const existingMulti = cs ? cs.multi : null;
+      cellState[cell] = buildCellStateEntry(existingFriction, newVal, existingDesire, existingMulti, cellState, cell);
     }
 
     if (this._affordanceObj) this._affordanceObj[cell] = newVal;
