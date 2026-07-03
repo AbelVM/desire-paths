@@ -144,20 +144,44 @@ function classifyRoadHierarchy(cls) {
  */
 function classifyLandcover(cls, subclass) {
   const impassableSub = [
-    'glacier', 'bare_rock', 'scree', 'swamp', 'bog', 'marsh',
-    'mangrove', 'reedbed', 'saltmarsh', 'tidalflat', 'tundra',
+    'glacier',
+    'bare_rock',
+    'scree',
+    'swamp',
+    'bog',
+    'marsh',
+    'mangrove',
+    'reedbed',
+    'saltmarsh',
+    'tidalflat',
+    'tundra',
   ];
   if (['ice', 'rock', 'wetland'].includes(cls) || impassableSub.includes(subclass)) {
     return 'IMPASSABLE';
   }
   const heavySub = [
-    'forest', 'wood', 'scrub', 'shrubbery', 'heath', 'sand',
-    'beach', 'dune', 'fell',
+    'forest',
+    'wood',
+    'scrub',
+    'shrubbery',
+    'heath',
+    'sand',
+    'beach',
+    'dune',
+    'fell',
   ];
   if (heavySub.includes(subclass)) return 'HEAVY_GRASS';
   const lightSub = [
-    'grass', 'grassland', 'meadow', 'park', 'garden', 'golf_course',
-    'village_green', 'recreation_ground', 'flowerbed', 'wet_meadow',
+    'grass',
+    'grassland',
+    'meadow',
+    'park',
+    'garden',
+    'golf_course',
+    'village_green',
+    'recreation_ground',
+    'flowerbed',
+    'wet_meadow',
   ];
   if (lightSub.includes(subclass)) return 'LIGHT_PARK';
   const managedSub = ['farm', 'farmland', 'allotments', 'orchard', 'vineyard', 'plant_nursery'];
@@ -172,13 +196,19 @@ function classifyLanduse(cls) {
   const restricted = ['military', 'industrial', 'quarry', 'dam', 'railway'];
   if (restricted.includes(cls)) return 'IMPASSABLE';
   const urban = [
-    'residential', 'commercial', 'retail', 'school', 'university',
-    'kindergarten', 'college', 'library', 'hospital', 'bus_station',
+    'residential',
+    'commercial',
+    'retail',
+    'school',
+    'university',
+    'kindergarten',
+    'college',
+    'library',
+    'hospital',
+    'bus_station',
   ];
   if (urban.includes(cls)) return 'PAVEMENT';
-  const recreational = [
-    'stadium', 'pitch', 'playground', 'track', 'theme_park', 'zoo', 'cemetery',
-  ];
+  const recreational = ['stadium', 'pitch', 'playground', 'track', 'theme_park', 'zoo', 'cemetery'];
   if (recreational.includes(cls)) return 'LIGHT_PARK';
   const urbanFabric = ['suburb', 'quarter', 'neighbourhood', 'garages'];
   if (urbanFabric.includes(cls)) return 'PAVEMENT';
@@ -190,8 +220,14 @@ function classifyLanduse(cls) {
  */
 function isRailway(cls, subclass) {
   const rails = [
-    'rail', 'narrow_gauge', 'preserved', 'funicular',
-    'subway', 'light_rail', 'monorail', 'tram',
+    'rail',
+    'narrow_gauge',
+    'preserved',
+    'funicular',
+    'subway',
+    'light_rail',
+    'monorail',
+    'tram',
   ];
   return cls === 'railway' || rails.includes(subclass);
 }
@@ -211,13 +247,41 @@ function _surfaceKey(layerId, cls, subclass, brunnel, foot, access, indoor) {
 function _buildSurfaceCache() {
   // Transportation layer — iterate all possible cls/subclass/brunnel combinations
   const transportClasses = [
-    'motorway','trunk','primary','secondary','tertiary','minor','service',
-    'path','pedestrian','footway','corridor','platform','cycleway','steps',
-    'bridleway','track','railway','rail','narrow_gauge','preserved','funicular',
-    'subway','light_rail','monorail','tram',
+    'motorway',
+    'trunk',
+    'primary',
+    'secondary',
+    'tertiary',
+    'minor',
+    'service',
+    'path',
+    'pedestrian',
+    'footway',
+    'corridor',
+    'platform',
+    'cycleway',
+    'steps',
+    'bridleway',
+    'track',
+    'railway',
+    'rail',
+    'narrow_gauge',
+    'preserved',
+    'funicular',
+    'subway',
+    'light_rail',
+    'monorail',
+    'tram',
   ];
   const transportSubclasses = [
-    'pedestrian','footway','corridor','platform','path','bridleway','cycleway','steps',
+    'pedestrian',
+    'footway',
+    'corridor',
+    'platform',
+    'path',
+    'bridleway',
+    'cycleway',
+    'steps',
   ];
 
   for (const cls of transportClasses) {
@@ -234,7 +298,15 @@ function _buildSurfaceCache() {
         // Indoor → IMPASSABLE
         for (const indoor of ['true', 1, true, null, undefined]) {
           if (indoor === 'true' || indoor === 1 || indoor === true) {
-            const k = _surfaceKey('transportation', cls, '', brunnel, String(foot), '', String(indoor));
+            const k = _surfaceKey(
+              'transportation',
+              cls,
+              '',
+              brunnel,
+              String(foot),
+              '',
+              String(indoor)
+            );
             _surfaceCache[k] = { cost: 'IMPASSABLE', layer: verticalLayer };
           } else {
             // Under construction → IMPASSABLE
@@ -261,20 +333,69 @@ function _buildSurfaceCache() {
   }
 
   // Landcover and landuse layers — simpler classification
-  const landcoverClasses = ['ice','rock','wetland','forest','wood','scrub','shrubbery',
-    'heath','sand','beach','dune','fell','grass','grassland','meadow','park','garden',
-    'village_green','recreation_ground','flowerbed','wet_meadow','farm','farmland',
-    'allotments','orchard','vineyard','plant_nursery'];
+  const landcoverClasses = [
+    'ice',
+    'rock',
+    'wetland',
+    'forest',
+    'wood',
+    'scrub',
+    'shrubbery',
+    'heath',
+    'sand',
+    'beach',
+    'dune',
+    'fell',
+    'grass',
+    'grassland',
+    'meadow',
+    'park',
+    'garden',
+    'village_green',
+    'recreation_ground',
+    'flowerbed',
+    'wet_meadow',
+    'farm',
+    'farmland',
+    'allotments',
+    'orchard',
+    'vineyard',
+    'plant_nursery',
+  ];
   for (const cls of landcoverClasses) {
     const key = _surfaceKey('landcover', cls, '', null, '', '', '');
     const result = classifyLandcover(cls, '');
     if (result) _surfaceCache[key] = { cost: result, layer: '0' };
   }
 
-  const landuseClasses = ['military','industrial','quarry','dam','railway',
-    'residential','commercial','retail','school','university','kindergarten',
-    'college','library','hospital','bus_station','stadium','pitch','playground',
-    'track','theme_park','zoo','cemetery','suburb','quarter','neighbourhood','garages'];
+  const landuseClasses = [
+    'military',
+    'industrial',
+    'quarry',
+    'dam',
+    'railway',
+    'residential',
+    'commercial',
+    'retail',
+    'school',
+    'university',
+    'kindergarten',
+    'college',
+    'library',
+    'hospital',
+    'bus_station',
+    'stadium',
+    'pitch',
+    'playground',
+    'track',
+    'theme_park',
+    'zoo',
+    'cemetery',
+    'suburb',
+    'quarter',
+    'neighbourhood',
+    'garages',
+  ];
   for (const cls of landuseClasses) {
     const key = _surfaceKey('landuse', cls, '', null, '', '', '');
     const result = classifyLanduse(cls);
@@ -306,7 +427,15 @@ export function getSurface(feature) {
   let foot = feature.properties.foot || '';
   let access = feature.properties.access || '';
   let indoor = feature.properties.indoor || '';
-  const cachedKey = _surfaceKey(layerId, safeCls, safeSubclass, brunnel, String(foot), String(access), String(indoor));
+  const cachedKey = _surfaceKey(
+    layerId,
+    safeCls,
+    safeSubclass,
+    brunnel,
+    String(foot),
+    String(access),
+    String(indoor)
+  );
   const cached = _surfaceCache[cachedKey];
   if (cached) {
     // For transportation layer, resolve vertical layer at runtime

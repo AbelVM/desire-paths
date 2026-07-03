@@ -8,7 +8,10 @@ import {
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
 
-const detectedHC = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : undefined;
+const detectedHC =
+  typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+    ? navigator.hardwareConcurrency
+    : undefined;
 
 const MAX_WORKERS = Math.min(4, Math.max(2, detectedHC || 4));
 
@@ -47,13 +50,23 @@ export function clearSpatialWorkerProgressHandler() {
 }
 
 function createWorkerSlot(kind = 'spatial') {
-  const script = kind === 'agent-batch' ? '../workers/agent.worker.js' : '../workers/spatial.worker.js';
+  const script =
+    kind === 'agent-batch' ? '../workers/agent.worker.js' : '../workers/spatial.worker.js';
   try {
     const worker = new Worker(new URL(script, import.meta.url), { type: 'module' });
-    try { console.debug && console.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`); } catch (_e) {}
+    try {
+      console.debug &&
+        console.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
+    } catch (_e) {}
     return { worker, kind };
   } catch (err) {
-    try { console.error && console.error(`spatialWorker: createWorkerSlot failed for kind=${kind} script=${script}`, err); } catch (_e) {}
+    try {
+      console.error &&
+        console.error(
+          `spatialWorker: createWorkerSlot failed for kind=${kind} script=${script}`,
+          err
+        );
+    } catch (_e) {}
     throw err;
   }
 }
@@ -63,22 +76,34 @@ function releaseWorkerSlot(slot) {
   const waiting = waitingAcquiresByKind.get(kind) || [];
   const next = waiting.shift();
   if (next) {
-    try { console.debug && console.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`); } catch (_e) {}
+    try {
+      console.debug &&
+        console.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
+    } catch (_e) {}
     next(slot);
   } else {
     const idle = idleWorkersByKind.get(kind) || [];
     idle.push(slot);
     idleWorkersByKind.set(kind, idle);
-    try { console.debug && console.debug(`spatialWorker: released slot to idle pool for kind=${kind} idleCount=${idle.length}`); } catch (_e) {}
+    try {
+      console.debug &&
+        console.debug(
+          `spatialWorker: released slot to idle pool for kind=${kind} idleCount=${idle.length}`
+        );
+    } catch (_e) {}
   }
   waitingAcquiresByKind.set(kind, waiting);
 }
 
 function acquireWorkerSlot(kind = 'spatial') {
-  try { console.debug && console.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`); } catch (_e) {}
+  try {
+    console.debug && console.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`);
+  } catch (_e) {}
   const idle = (idleWorkersByKind.get(kind) || []).pop();
   if (idle) {
-    try { console.debug && console.debug(`spatialWorker: reusing idle worker for kind=${kind}`); } catch (_e) {}
+    try {
+      console.debug && console.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
+    } catch (_e) {}
     return Promise.resolve(idle);
   }
 
@@ -88,11 +113,21 @@ function acquireWorkerSlot(kind = 'spatial') {
     const slot = createWorkerSlot(kind);
     pool.push(slot);
     workerPoolByKind.set(kind, pool);
-    try { console.debug && console.debug(`spatialWorker: created new worker slot kind=${kind} poolSize=${pool.length}/${maxForKind}`); } catch (_e) {}
+    try {
+      console.debug &&
+        console.debug(
+          `spatialWorker: created new worker slot kind=${kind} poolSize=${pool.length}/${maxForKind}`
+        );
+    } catch (_e) {}
     return Promise.resolve(slot);
   }
 
-  try { console.debug && console.debug(`spatialWorker: no slots available, enqueuing acquirer for kind=${kind} poolSize=${pool.length}/${maxForKind}`); } catch (_e) {}
+  try {
+    console.debug &&
+      console.debug(
+        `spatialWorker: no slots available, enqueuing acquirer for kind=${kind} poolSize=${pool.length}/${maxForKind}`
+      );
+  } catch (_e) {}
   return new Promise((resolve) => {
     const waiting = waitingAcquiresByKind.get(kind) || [];
     waiting.push(resolve);
@@ -113,7 +148,9 @@ function retireWorkerSlot(slot) {
   idleWorkersByKind.set(kind, idle);
 
   try {
-    try { console.debug && console.debug(`spatialWorker: retiring worker slot kind=${kind}`); } catch (_e) {}
+    try {
+      console.debug && console.debug(`spatialWorker: retiring worker slot kind=${kind}`);
+    } catch (_e) {}
     slot.worker.terminate();
   } catch {
     // ignore termination errors
@@ -134,7 +171,11 @@ function flattenPayloadAndTransfers(payload) {
   const fe = payload.frictionEntries;
   if (!fe || typeof fe !== 'object') return { payload, transfer: [] };
   // If already flattened, nothing to do
-  if (fe.__flat && Array.isArray(fe.keys) && (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer))
+  if (
+    fe.__flat &&
+    Array.isArray(fe.keys) &&
+    (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer)
+  )
     return { payload, transfer: [] };
 
   // frictionEntries is always a plain object (normalised before dispatch)
@@ -178,8 +219,8 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
-    if (kind === 'aoi-hexes') return computeAoiHexes(payload || null);
-    throw new Error(`Unknown spatial task: ${kind}`);
+  if (kind === 'aoi-hexes') return computeAoiHexes(payload || null);
+  throw new Error(`Unknown spatial task: ${kind}`);
 }
 
 function runWorker(kind, payload) {
@@ -190,7 +231,11 @@ function runWorker(kind, payload) {
     slotPromise = acquireWorkerSlot(kind);
   } catch (err) {
     try {
-      console.warn && console.warn(`spatialWorker: failed to acquire worker slot for kind=${kind}, running locally`, err);
+      console.warn &&
+        console.warn(
+          `spatialWorker: failed to acquire worker slot for kind=${kind}, running locally`,
+          err
+        );
     } catch (_e) {}
     return Promise.resolve(runLocally(kind, payload));
   }
@@ -220,7 +265,12 @@ function runWorker(kind, payload) {
           settled = true;
           cleanup();
           releaseWorkerSlot(slot);
-          try { console.debug && console.debug(`spatialWorker: worker slot returned result kind=${slot.kind} ok=${Boolean(data.ok)}`); } catch (_e) {}
+          try {
+            console.debug &&
+              console.debug(
+                `spatialWorker: worker slot returned result kind=${slot.kind} ok=${Boolean(data.ok)}`
+              );
+          } catch (_e) {}
           if (data.ok) resolve(data.result);
           else {
             const errMsg = data.error ?? 'Spatial worker task failed';
@@ -250,8 +300,14 @@ function runWorker(kind, payload) {
 
         try {
           const { payload: sendPayload, transfer } = flattenPayloadAndTransfers(payload);
-          try { console.debug && console.debug(`spatialWorker: posting task to worker kind=${kind} transferCount=${transfer?.length || 0}`); } catch (_e) {}
-          if (transfer && transfer.length) worker.postMessage({ kind, payload: sendPayload }, transfer);
+          try {
+            console.debug &&
+              console.debug(
+                `spatialWorker: posting task to worker kind=${kind} transferCount=${transfer?.length || 0}`
+              );
+          } catch (_e) {}
+          if (transfer && transfer.length)
+            worker.postMessage({ kind, payload: sendPayload }, transfer);
           else worker.postMessage({ kind, payload: sendPayload });
         } catch (error) {
           settled = true;
@@ -293,8 +349,21 @@ export async function runGradientBatches(targets, frictionSource) {
   return merged;
 }
 
-export async function runAgentBatches(plan, frictionSource, gradients, affordanceSource, hexCount, options = {}) {
-  if (!plan || plan.length === 0) return { pathDesire: Object.create(null), perTargetContribs: Object.create(null), processed: 0, total: 0 };
+export async function runAgentBatches(
+  plan,
+  frictionSource,
+  gradients,
+  affordanceSource,
+  hexCount,
+  options = {}
+) {
+  if (!plan || plan.length === 0)
+    return {
+      pathDesire: Object.create(null),
+      perTargetContribs: Object.create(null),
+      processed: 0,
+      total: 0,
+    };
 
   const frictionEntries =
     frictionSource && typeof frictionSource.entries !== 'function'
@@ -331,13 +400,23 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
       for (let di = 0; di < destCandidates.length; di++) {
         const destCell = destCandidates[di].dest;
         const grad = gradientsObj[destCell];
-        const hasOrigin = grad && (typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number');
+        const hasOrigin =
+          grad &&
+          (typeof grad.has === 'function'
+            ? grad.has(originCell)
+            : typeof grad[originCell] === 'number');
         if (!grad || !hasOrigin) missingTargets.add(destCell);
       }
     }
 
     if (missingTargets.size > 0) {
-      try { console.debug && console.debug('runAgentBatches: missing gradients for targets', Array.from(missingTargets)); } catch (_e) {}
+      try {
+        console.debug &&
+          console.debug(
+            'runAgentBatches: missing gradients for targets',
+            Array.from(missingTargets)
+          );
+      } catch (_e) {}
       // Compute missing gradients (uses same worker pool / normalization as callers)
       const newGrads = await runGradientBatches(Array.from(missingTargets), frictionSource);
       for (const k in newGrads) gradientsObj[k] = newGrads[k];
@@ -347,24 +426,49 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
         const g = gradientsObj[t];
         if (!g) stillMissing.push(t);
       }
-      if (stillMissing.length > 0) try { console.warn && console.warn('runAgentBatches: still missing gradients after fallback compute', stillMissing); } catch (_e) {}
+      if (stillMissing.length > 0)
+        try {
+          console.warn &&
+            console.warn(
+              'runAgentBatches: still missing gradients after fallback compute',
+              stillMissing
+            );
+        } catch (_e) {}
     }
   } catch (_e) {
-    try { console.warn && console.warn('runAgentBatches: error while computing missing gradients', _e); } catch (_e2) {}
+    try {
+      console.warn && console.warn('runAgentBatches: error while computing missing gradients', _e);
+    } catch (_e2) {}
   }
 
   const workerCount = Math.min(MAX_AGENT_WORKERS, plan.length);
-  try { console.debug && console.debug(`runAgentBatches: dispatching agent-batches workerCount=${workerCount} planLength=${plan.length}`); } catch (_e) {}
+  try {
+    console.debug &&
+      console.debug(
+        `runAgentBatches: dispatching agent-batches workerCount=${workerCount} planLength=${plan.length}`
+      );
+  } catch (_e) {}
   if (workerCount <= 1) {
     // run locally on main thread
-    const ret = computeAgentBatch({ plan, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, neighborDisks, options });
+    const ret = computeAgentBatch({
+      plan,
+      frictionEntries,
+      gradients: gradientsObj,
+      affordanceEntries,
+      hexCount,
+      visibilityEntries,
+      neighborDisks,
+      options,
+    });
     // computeAgentBatch returns { result, transfers } when used in a worker; normalize
     const result = ret && ret.result ? ret.result : ret;
     // convert flattened structures into plain objects
     const outPath = Object.create(null);
     if (result && result.pathDesire && result.pathDesire.__flat) {
       const keys = result.pathDesire.keys || [];
-      const vals = ArrayBuffer.isView(result.pathDesire.vals) ? result.pathDesire.vals : new Uint32Array(result.pathDesire.vals || []);
+      const vals = ArrayBuffer.isView(result.pathDesire.vals)
+        ? result.pathDesire.vals
+        : new Uint32Array(result.pathDesire.vals || []);
       for (let i = 0; i < keys.length; i++) outPath[keys[i]] = vals[i];
     }
     const outPer = Object.create(null);
@@ -373,20 +477,44 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
         const entry = result.perTargetContribs[dest];
         if (entry && entry.__flat) {
           const keys = entry.keys || [];
-          const vals = ArrayBuffer.isView(entry.vals) ? entry.vals : new Uint32Array(entry.vals || []);
+          const vals = ArrayBuffer.isView(entry.vals)
+            ? entry.vals
+            : new Uint32Array(entry.vals || []);
           const obj = Object.create(null);
           for (let i = 0; i < keys.length; i++) obj[keys[i]] = vals[i];
           outPer[dest] = obj;
         }
       }
     }
-    return { pathDesire: outPath, perTargetContribs: outPer, processed: result?.processed || 0, total: result?.total || 0 };
+    return {
+      pathDesire: outPath,
+      perTargetContribs: outPer,
+      processed: result?.processed || 0,
+      total: result?.total || 0,
+    };
   }
 
   const chunks = splitIntoChunks(plan, workerCount);
-  try { console.debug && console.debug('runAgentBatches: chunks', chunks.map((c) => c.length)); } catch (_e) {}
+  try {
+    console.debug &&
+      console.debug(
+        'runAgentBatches: chunks',
+        chunks.map((c) => c.length)
+      );
+  } catch (_e) {}
   const results = await Promise.all(
-    chunks.map((chunk) => runWorker('agent-batch', { plan: chunk, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, neighborDisks, options }))
+    chunks.map((chunk) =>
+      runWorker('agent-batch', {
+        plan: chunk,
+        frictionEntries,
+        gradients: gradientsObj,
+        affordanceEntries,
+        hexCount,
+        visibilityEntries,
+        neighborDisks,
+        options,
+      })
+    )
   );
 
   const mergedPath = Object.create(null);
@@ -399,10 +527,15 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
     total = batch.total || total;
     const pd = batch.pathDesire;
     if (pd) {
-      if (pd.__flat && Array.isArray(pd.keys) && (ArrayBuffer.isView(pd.vals) || pd.vals instanceof ArrayBuffer)) {
+      if (
+        pd.__flat &&
+        Array.isArray(pd.keys) &&
+        (ArrayBuffer.isView(pd.vals) || pd.vals instanceof ArrayBuffer)
+      ) {
         const keys = pd.keys;
         const vals = ArrayBuffer.isView(pd.vals) ? pd.vals : new Uint32Array(pd.vals);
-        for (let k = 0; k < keys.length; k++) mergedPath[keys[k]] = (mergedPath[keys[k]] || 0) + vals[k];
+        for (let k = 0; k < keys.length; k++)
+          mergedPath[keys[k]] = (mergedPath[keys[k]] || 0) + vals[k];
       } else if (typeof pd === 'object') {
         for (const key in pd) mergedPath[key] = (mergedPath[key] || 0) + (Number(pd[key]) || 0);
       }
@@ -414,12 +547,19 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
       if (typeof dest === 'string' && dest.startsWith('__')) continue;
       const entry = per[dest];
       if (!mergedPer[dest]) mergedPer[dest] = Object.create(null);
-      if (entry && entry.__flat && Array.isArray(entry.keys) && (ArrayBuffer.isView(entry.vals) || entry.vals instanceof ArrayBuffer)) {
+      if (
+        entry &&
+        entry.__flat &&
+        Array.isArray(entry.keys) &&
+        (ArrayBuffer.isView(entry.vals) || entry.vals instanceof ArrayBuffer)
+      ) {
         const keys = entry.keys;
         const vals = ArrayBuffer.isView(entry.vals) ? entry.vals : new Uint32Array(entry.vals);
-        for (let k = 0; k < keys.length; k++) mergedPer[dest][keys[k]] = (mergedPer[dest][keys[k]] || 0) + vals[k];
+        for (let k = 0; k < keys.length; k++)
+          mergedPer[dest][keys[k]] = (mergedPer[dest][keys[k]] || 0) + vals[k];
       } else if (typeof entry === 'object') {
-        for (const cell in entry) mergedPer[dest][cell] = (mergedPer[dest][cell] || 0) + (Number(entry[cell]) || 0);
+        for (const cell in entry)
+          mergedPer[dest][cell] = (mergedPer[dest][cell] || 0) + (Number(entry[cell]) || 0);
       }
     }
   }
@@ -447,14 +587,29 @@ export async function runFastScanTask(viewHexes, features) {
   // Launch all chunk tasks in parallel
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
     runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err) => {
-      try { console.warn && console.warn('spatialWorker: fast-scan-chunk failed, retrying', { chunkIndex, err }); } catch (_e) {}
+      try {
+        console.warn &&
+          console.warn('spatialWorker: fast-scan-chunk failed, retrying', { chunkIndex, err });
+      } catch (_e) {}
       return runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err2) => {
-        try { console.error && console.error('spatialWorker: fast-scan-chunk retry failed, falling back to local compute', { chunkIndex, err2 }); } catch (_e) {}
+        try {
+          console.error &&
+            console.error(
+              'spatialWorker: fast-scan-chunk retry failed, falling back to local compute',
+              { chunkIndex, err2 }
+            );
+        } catch (_e) {}
         try {
           // Fallback: compute the chunk locally on main thread to avoid incomplete results
           return runLocally('fast-scan-chunk', { viewHexes, features: chunk });
         } catch (localErr) {
-          try { console.error && console.error('spatialWorker: fast-scan-chunk local fallback failed', { chunkIndex, localErr }); } catch (_e) {}
+          try {
+            console.error &&
+              console.error('spatialWorker: fast-scan-chunk local fallback failed', {
+                chunkIndex,
+                localErr,
+              });
+          } catch (_e) {}
           return {};
         }
       });
@@ -472,7 +627,9 @@ export async function runFastScanTask(viewHexes, features) {
   const processResult = async (result) => {
     resolvedResults.push(result);
     if (!blurPromise && resolvedResults.length >= Math.min(2, chunks.length)) {
-      blurPromise = _computeBlurFromPartial(resolvedResults.map((r) => r.cellFrictionEntries ?? {}));
+      blurPromise = _computeBlurFromPartial(
+        resolvedResults.map((r) => r.cellFrictionEntries ?? {})
+      );
     }
   };
 

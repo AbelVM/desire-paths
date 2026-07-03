@@ -57,7 +57,14 @@ let _cellLatLngCacheHits = 0;
 let _cellLatLngCacheMisses = 0;
 
 // --- Cell state builder: creates/updates per-cell state objects ---
-function buildCellStateEntry(friction, affordanceSource, pathDesireSource, multiFrictionObj, existingState, cellKey) {
+function buildCellStateEntry(
+  friction,
+  affordanceSource,
+  pathDesireSource,
+  multiFrictionObj,
+  existingState,
+  cellKey
+) {
   let es = existingState && existingState[cellKey];
   if (es) {
     es.friction = friction;
@@ -66,7 +73,12 @@ function buildCellStateEntry(friction, affordanceSource, pathDesireSource, multi
     es.multi = multiFrictionObj !== undefined ? multiFrictionObj : null;
     return es;
   }
-  return { friction, affordance: affordanceSource !== undefined ? affordanceSource : 0.1, desire: pathDesireSource ?? 0, multi: multiFrictionObj !== undefined ? multiFrictionObj : null };
+  return {
+    friction,
+    affordance: affordanceSource !== undefined ? affordanceSource : 0.1,
+    desire: pathDesireSource ?? 0,
+    multi: multiFrictionObj !== undefined ? multiFrictionObj : null,
+  };
 }
 
 function _bearingFromLatLngs(s, e) {
@@ -149,7 +161,7 @@ function _getCachedDisk(ctx, center, r) {
       }
     }
   }
-  
+
   // Fall back to LRU cache for other radii
   if (!ctx._computeDiskCacheObj) {
     ctx._computeDiskCacheObj = Object.create(null);
@@ -201,19 +213,19 @@ function precomputeNeighborDisks(cells, visualDepth) {
 function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
   const result = Object.create(null);
   const impassable = FRICTION_COSTS.IMPASSABLE;
-  
+
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
     const disk = gridDisk(cell, maxDepth);
     const visible = Object.create(null);
-    
+
     for (let j = 0; j < disk.length; j++) {
       const candidate = disk[j];
       if (candidate === cell) continue;
-      
+
       const f = frictionLookup[candidate];
       if (typeof f === 'undefined' || f >= impassable) continue;
-      
+
       const path = gridPathCells(cell, candidate);
       let isVisible = true;
       for (let k = 0; k < path.length; k++) {
@@ -224,13 +236,13 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
           break;
         }
       }
-      
+
       if (isVisible) visible[candidate] = true;
     }
-    
+
     if (Object.keys(visible).length > 0) result[cell] = visible;
   }
-  
+
   return result;
 }
 
@@ -245,7 +257,7 @@ function _getCachedVisibility(ctx, a, b, frictionLookup) {
     }
     // Cell not in precomputed set (e.g., outside AOI) — fall through to legacy cache
   }
-  
+
   ensureVisibilityCacheFresh(ctx);
   // Use plain-object nested cache keyed by a then b for fast boolean lookup
   if (!ctx._visibilityCacheObj) {
@@ -290,25 +302,39 @@ function _getCachedVisibility(ctx, a, b, frictionLookup) {
 }
 
 /** Drop path/disk/visibility caches and gradient fields after friction topology changes. */
-export function clearComputeCaches() {
-  this._computePathCacheObj = undefined;
-  this._computePathCacheOrder = undefined;
-  this._computeDiskCacheObj = undefined;
-  this._computeDiskCacheOrder = undefined;
-  this._visibilityCacheObj = undefined;
-  this._visibilityCacheOrder = undefined;
-  this._precomputedVisibility = undefined;
-  this._precomputedNeighborDisks = undefined;
-  this._computePathCacheHits = 0;
-  this._computePathCacheMisses = 0;
-  this._computeDiskCacheHits = 0;
-  this._computeDiskCacheMisses = 0;
-  this._visibilityCacheHits = 0;
-  this._visibilityCacheMisses = 0;
-  this._visibilityCacheGen = undefined;
-  this._cellStateMappingGen = undefined;
-  clearGradientCache.call(this);
-  this._gradientCacheGen = undefined;
+export function clearComputeCaches(ctx) {
+  // Drop per-compute data structures
+  ctx._gradientCacheObj = null;
+  ctx._cellState = null;
+  ctx._frictionObj = null;
+  ctx._affordanceObj = null;
+  ctx._perTargetContribs = null;
+  ctx._assignedCounts = null;
+  ctx._targetWeights = null;
+  ctx._pathCache = Object.create(null);
+
+  // Reset compute cache instrumentation and LRU structures
+  ctx._computePathCacheObj = undefined;
+  ctx._computePathCacheOrder = undefined;
+  ctx._computePathCacheHits = 0;
+  ctx._computePathCacheMisses = 0;
+
+  ctx._computeDiskCacheObj = undefined;
+  ctx._computeDiskCacheOrder = undefined;
+  ctx._computeDiskCacheHits = 0;
+  ctx._computeDiskCacheMisses = 0;
+
+  ctx._visibilityCacheObj = undefined;
+  ctx._visibilityCacheOrder = undefined;
+  ctx._visibilityCacheHits = 0;
+  ctx._visibilityCacheMisses = 0;
+  ctx._visibilityCacheGen = undefined;
+
+  ctx._cellStateMappingGen = undefined;
+
+  // Clear gradient cache and module-level lat/lng cache
+  clearGradientCache(ctx);
+  ctx._gradientCacheGen = undefined;
   clearLatLngCache();
 }
 
@@ -334,7 +360,7 @@ function ensureVisibilityCacheFresh(ctx) {
 function ensureGradientCacheFresh(ctx) {
   const gen = ctx._mappingGeneration ?? 0;
   if (ctx._gradientCacheGen !== gen) {
-    clearGradientCache.call(ctx);
+    clearGradientCache(ctx);
     ctx._gradientCacheGen = gen;
   }
 }
@@ -366,19 +392,21 @@ export async function yieldToMain() {
 }
 
 /** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
-function getGradientDirection(curr, gradientObj) {
+function getGradientDirection(ctx, curr, gradientObj) {
   if (!gradientObj) return null;
   const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
 
-  const neighbors = _getCachedDisk(this, curr, 1);
+  const neighbors = _getCachedDisk(ctx, curr, 1);
   // _frictionObj is always the canonical lookup; build it once if absent
-  const frictionLookup = this._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
-    return (this._frictionObj = obj);
-  })();
-  const cellState = this._cellState;
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
+  const cellState = ctx._cellState;
   let bestNeighbor = null;
   let bestGrad = gCurr;
 
@@ -422,31 +450,35 @@ function applyPathDesireDeltas(ctx, pathDesireDeltas) {
  * Shared agent path kernel used by batch simulation and incremental APIs.
  * Returns traversed cells in order (including origin).
  */
-function runSingleAgentPath(ctx, {
-  originCell,
-  destCell,
-  destGradientObj,
-  maxTicks,
-  simAgentId,
-  pathDesireDeltas = null,
-  applyWear = false,
-}) {
+function runSingleAgentPath(
+  ctx,
+  {
+    originCell,
+    destCell,
+    destGradientObj,
+    maxTicks,
+    simAgentId,
+    pathDesireDeltas = null,
+    applyWear = false,
+  }
+) {
   let simCurrent = originCell;
   const simTarget = destCell;
   let simDirection =
-    getGradientDirection.call(ctx, simCurrent, destGradientObj) ??
-    getBearing(simCurrent, simTarget);
+    getGradientDirection(ctx, simCurrent, destGradientObj) ?? getBearing(simCurrent, simTarget);
   const simPath = [originCell];
 
   if (pathDesireDeltas) recordTraversal(pathDesireDeltas, originCell);
-  if (applyWear) updateAffordance.call(ctx, originCell, 1);
+  if (applyWear) updateAffordance(ctx, originCell, 1);
 
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
-  const frictionLookup = ctx._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (ctx.cellFrictionMap || [])) obj[k] = v;
-    return (ctx._frictionObj = obj);
-  })();
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
   const cellState = ctx._cellState;
 
   for (let tick = 0; tick < maxTicks; tick++) {
@@ -454,12 +486,12 @@ function runSingleAgentPath(ctx, {
       if (simTarget !== simCurrent) {
         simPath.push(simTarget);
         if (pathDesireDeltas) recordTraversal(pathDesireDeltas, simTarget);
-        if (applyWear) updateAffordance.call(ctx, simTarget, 1);
+        if (applyWear) updateAffordance(ctx, simTarget, 1);
       }
       break;
     }
 
-    const nextStep = getBestNextStep.call(ctx, simCurrent, destGradientObj, simDirection, simAgentId);
+    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId);
     if (!nextStep || nextStep === simCurrent) break;
 
     const line = _getCachedPathCells(ctx, simCurrent, nextStep);
@@ -471,7 +503,7 @@ function runSingleAgentPath(ctx, {
       if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireDeltas) recordTraversal(pathDesireDeltas, stepCell);
-      if (applyWear) updateAffordance.call(ctx, stepCell, 1);
+      if (applyWear) updateAffordance(ctx, stepCell, 1);
       if (stepCell === simTarget) {
         hitTarget = true;
         break;
@@ -496,15 +528,22 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
     if (destCell === originCell) continue;
     const grad = goalGradients.get(destCell);
     if (!grad) {
-      try { console.debug && console.debug('getReachableDestinations: missing gradient', { originCell, destCell }); } catch (_e) {}
+      try {
+        console.debug &&
+          console.debug('getReachableDestinations: missing gradient', { originCell, destCell });
+      } catch (_e) {}
       continue;
     }
     const hasOrigin =
-      typeof grad.has === 'function'
-        ? grad.has(originCell)
-        : typeof grad[originCell] === 'number';
+      typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number';
     if (!hasOrigin) {
-      try { console.debug && console.debug('getReachableDestinations: origin not in gradient', { originCell, destCell }); } catch (_e) {}
+      try {
+        console.debug &&
+          console.debug('getReachableDestinations: origin not in gradient', {
+            originCell,
+            destCell,
+          });
+      } catch (_e) {}
       continue;
     }
     const w = ctx.simulationNodes[destCell]?.weight || 1;
@@ -584,16 +623,16 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
 /**
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
-export async function computeDesirePaths() {
+export async function computeDesirePaths(state, mapInstance) {
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.
-  this.pathDesireScores = Object.create(null);
+  state.pathDesireScores = Object.create(null);
 
   // Guard: ensure the friction map has been built before simulating
-  if (!this.cellFrictionMap || this.cellFrictionMap.size === 0) {
-    this.flowsReady = false;
-    if (this.showAlertCard) {
-      this.showAlertCard(
+  if (!state.cellFrictionMap || state.cellFrictionMap.size === 0) {
+    state.flowsReady = false;
+    if (mapInstance.showAlertCard) {
+      mapInstance.showAlertCard(
         'Build the mapping first by clicking "Build Mapping". ' +
           'The simulation requires a friction map generated from the map tiles.',
         { title: 'Mapping not built', tone: 'warning' }
@@ -602,92 +641,98 @@ export async function computeDesirePaths() {
     return;
   }
 
-  const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'dual'].includes(this.simulationNodes[k].type)
+  const destinations = Object.keys(state.simulationNodes).filter((k) =>
+    ['destination', 'dual'].includes(state.simulationNodes[k].type)
   );
-  const agents = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(this.simulationNodes[k].type)
+  const agents = Object.keys(state.simulationNodes).filter((k) =>
+    ['origin', 'dual'].includes(state.simulationNodes[k].type)
   );
 
-  const hexes = this.cellFrictionMap.size;
-  ensureGradientCacheFresh(this);
-  ensureVisibilityCacheFresh(this);
+  const hexes = state.cellFrictionMap.size;
+  ensureGradientCacheFresh(state);
+  ensureVisibilityCacheFresh(state);
 
-  const mappingGen = this._mappingGeneration ?? 0;
-  if (!this._frictionObj || this._frictionSnapshotGen !== mappingGen) {
-    this._frictionObj = Object.create(null);
-    for (const [k, v] of this.cellFrictionMap) this._frictionObj[k] = v;
-    this._frictionSnapshotGen = mappingGen;
+  const mappingGen = state._mappingGeneration ?? 0;
+  if (!state._frictionObj || state._frictionSnapshotGen !== mappingGen) {
+    state._frictionObj = Object.create(null);
+    for (const [k, v] of state.cellFrictionMap) state._frictionObj[k] = v;
+    state._frictionSnapshotGen = mappingGen;
   }
-  if (!this._multiFrictionObj || this._multiFrictionSnapshotGen !== mappingGen) {
-    this._multiFrictionObj = Object.create(null);
-    if (this.multiFrictionMap && typeof this.multiFrictionMap.entries === 'function') {
-      for (const [k, v] of this.multiFrictionMap) this._multiFrictionObj[k] = v;
-    } else if (this.multiFrictionMap) {
-      for (const k in this.multiFrictionMap) this._multiFrictionObj[k] = this.multiFrictionMap[k];
+  if (!state._multiFrictionObj || state._multiFrictionSnapshotGen !== mappingGen) {
+    state._multiFrictionObj = Object.create(null);
+    if (state.multiFrictionMap && typeof state.multiFrictionMap.entries === 'function') {
+      for (const [k, v] of state.multiFrictionMap) state._multiFrictionObj[k] = v;
+    } else if (state.multiFrictionMap) {
+      for (const k in state.multiFrictionMap)
+        state._multiFrictionObj[k] = state.multiFrictionMap[k];
     }
-    this._multiFrictionSnapshotGen = mappingGen;
+    state._multiFrictionSnapshotGen = mappingGen;
   }
 
   // Consolidated per-cell state object for hot-path reads/writes.
   // Only rebuild when friction actually changed to avoid object churn.
   // Affordance is updated in-place during simulation, so no separate tracking needed.
-  const lastCellStateMappingGen = this._cellStateMappingGen ?? -1;
-  if (!this._cellState || lastCellStateMappingGen !== mappingGen) {
-    const existingState = this._cellState;
-    this._cellState = Object.create(null);
-    const frictionObj = this._frictionObj;
-    const affordanceObj = this._affordanceObj;
-    const desireScores = this.pathDesireScores;
-    const multiFrictionObj = this._multiFrictionObj;
+  const lastCellStateMappingGen = state._cellStateMappingGen ?? -1;
+  if (!state._cellState || lastCellStateMappingGen !== mappingGen) {
+    const existingState = state._cellState;
+    state._cellState = Object.create(null);
+    const frictionObj = state._frictionObj;
+    const affordanceObj = state._affordanceObj;
+    const desireScores = state.pathDesireScores;
+    const multiFrictionObj = state._multiFrictionObj;
 
     for (const k in frictionObj) {
       const fr = frictionObj[k];
       const aff = affordanceObj?.[k] ?? 0.1;
       const desire = desireScores?.[k] ?? 0;
       const multi = multiFrictionObj?.[k] ?? null;
-      this._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
+      state._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
     }
-    this._cellStateMappingGen = mappingGen;
+    state._cellStateMappingGen = mappingGen;
   }
 
   // Grass recovery between user-triggered simulation runs (not after wear in the same pass)
-  if (this._cellState) {
-    for (const cell in this._cellState) {
-      decayAffordance.call(this, cell);
+  if (state._cellState) {
+    for (const cell in state._cellState) {
+      decayAffordance(state, cell);
     }
   } else {
-    for (const cell of this.affordanceMap.keys()) {
-      decayAffordance.call(this, cell);
+    for (const cell of state.affordanceMap.keys()) {
+      decayAffordance(state, cell);
     }
   }
 
   // Reuse cached per-target gradients when possible to avoid recomputing
   // the full Dijkstra result for every run. Cache is keyed by target cell id
   // and stores the plain-object distances returned by computeDijkstraGradient.
-  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
-  if (!this._pendingGradientPromises) this._pendingGradientPromises = Object.create(null);
+  if (!state._gradientCacheObj) state._gradientCacheObj = Object.create(null);
+  if (!state._pendingGradientPromises) state._pendingGradientPromises = Object.create(null);
 
   const missingDestinations = [];
   const pendingDestinations = [];
   for (const d of destinations) {
-    if (this._gradientCacheObj[d]) continue;
-    if (this._pendingGradientPromises[d]) {
+    if (state._gradientCacheObj[d]) continue;
+    if (state._pendingGradientPromises[d]) {
       pendingDestinations.push(d);
     } else {
       missingDestinations.push(d);
     }
   }
 
-  const gradientPromises = pendingDestinations.map((d) => this._pendingGradientPromises[d]);
+  const gradientPromises = pendingDestinations.map((d) => state._pendingGradientPromises[d]);
   if (missingDestinations.length > 0) {
     const missingPromise = (async () => {
       try {
         setSpatialWorkerProgressHandler((m) => {
           try {
             if (m && m.progress) {
-              updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Computing gradients...');
-              this.syncSimulationUI?.();
+              updateSimulationProgress(
+                state,
+                m.processed ?? 0,
+                m.total ?? 0,
+                m.phase ?? 'Computing gradients...'
+              );
+              mapInstance.syncSimulationUI?.();
             }
           } catch (_e) {
             // ignore UI sync errors
@@ -696,20 +741,20 @@ export async function computeDesirePaths() {
 
         const gradients = await runGradientBatches(
           missingDestinations,
-          this._frictionObj || this.cellFrictionMap
+          state._frictionObj || state.cellFrictionMap
         );
         for (const d of missingDestinations) {
-          this._gradientCacheObj[d] = gradients[d] || Object.create(null);
+          state._gradientCacheObj[d] = gradients[d] || Object.create(null);
         }
       } finally {
         for (const d of missingDestinations) {
-          delete this._pendingGradientPromises[d];
+          delete state._pendingGradientPromises[d];
         }
       }
     })();
 
     for (const d of missingDestinations) {
-      this._pendingGradientPromises[d] = missingPromise;
+      state._pendingGradientPromises[d] = missingPromise;
     }
     gradientPromises.push(missingPromise);
   }
@@ -723,9 +768,12 @@ export async function computeDesirePaths() {
     try {
       clearSpatialWorkerProgressHandler();
     } catch (_e) {}
-    if (typeof this.showAlertCard === 'function') {
+    if (typeof mapInstance?.showAlertCard === 'function') {
       try {
-        this.showAlertCard(err?.message || String(err), { title: 'Simulation error', tone: 'error' });
+        mapInstance.showAlertCard(err?.message || String(err), {
+          title: 'Simulation error',
+          tone: 'error',
+        });
       } catch (_e) {}
     } else if (typeof console !== 'undefined') {
       console.error('Gradient computation failed:', err);
@@ -735,26 +783,31 @@ export async function computeDesirePaths() {
 
   const goalGradients = new Map();
   for (const d of destinations) {
-    goalGradients.set(d, this._gradientCacheObj[d]);
+    goalGradients.set(d, state._gradientCacheObj[d]);
   }
 
   const pathDesireDeltas = new Map();
   let perTargetContribs = Object.create(null);
   const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
-    this,
+    state,
     agents,
     destinations,
     goalGradients
   );
   try {
-    console.debug && console.debug('computeDesirePaths: plan built', {
-      agentsCount: agents.length,
-      destinationsCount: destinations.length,
-      planLength: plan.length,
-      totalAgents,
-      assignedOrigins: Object.keys(assignedCounts).length,
-      planPreview: plan.map((p) => ({ origin: p.originCell, totalVolume: p.totalVolume, assignedLen: p.assigned?.length ?? 0 })),
-    });
+    console.debug &&
+      console.debug('computeDesirePaths: plan built', {
+        agentsCount: agents.length,
+        destinationsCount: destinations.length,
+        planLength: plan.length,
+        totalAgents,
+        assignedOrigins: Object.keys(assignedCounts).length,
+        planPreview: plan.map((p) => ({
+          origin: p.originCell,
+          totalVolume: p.totalVolume,
+          assignedLen: p.assigned?.length ?? 0,
+        })),
+      });
   } catch (_e) {}
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
   for (let pi = 0; pi < plan.length; pi++) {
@@ -763,11 +816,23 @@ export async function computeDesirePaths() {
     for (let di = 0; di < destCandidates.length; di++) {
       const destCell = destCandidates[di].dest;
       const grad = goalGradients.get(destCell);
-      const hasOrigin = grad && (typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number');
+      const hasOrigin =
+        grad &&
+        (typeof grad.has === 'function'
+          ? grad.has(originCell)
+          : typeof grad[originCell] === 'number');
       if (!hasOrigin) {
         try {
-          console.warn && console.warn('computeDesirePaths: aborting - missing gradient for plan entry', { originCell, destCell });
-          if (this.showAlertCard) this.showAlertCard('Simulation aborted: missing gradient data for plan.', { title: 'Simulation aborted', tone: 'warning' });
+          console.warn &&
+            console.warn('computeDesirePaths: aborting - missing gradient for plan entry', {
+              originCell,
+              destCell,
+            });
+          if (mapInstance?.showAlertCard)
+            mapInstance.showAlertCard('Simulation aborted: missing gradient data for plan.', {
+              title: 'Simulation aborted',
+              tone: 'warning',
+            });
         } catch (_e) {}
         // Do not apply an incomplete plan; abort early.
         return;
@@ -776,26 +841,31 @@ export async function computeDesirePaths() {
   }
   let agentsProcessed = 0;
   let nextYieldAt = resetYieldDeadline();
-  updateSimulationProgress(this, 0, totalAgents);
+  updateSimulationProgress(state, 0, totalAgents);
 
   // Offload per-origin agent path sims to worker pool (workers are stateless)
   try {
     setSpatialWorkerProgressHandler((m) => {
       try {
         if (m && m.progress) {
-          updateSimulationProgress(this, m.processed ?? 0, m.total ?? 0, m.phase ?? 'Simulating flows...');
-          this.syncSimulationUI?.();
+          updateSimulationProgress(
+            state,
+            m.processed ?? 0,
+            m.total ?? 0,
+            m.phase ?? 'Simulating flows...'
+          );
+          mapInstance?.syncSimulationUI?.();
         }
       } catch (_e) {}
     });
 
     const agentResults = await runAgentBatches(
       plan,
-      this._frictionObj || this.cellFrictionMap,
+      state._frictionObj || state.cellFrictionMap,
       goalGradients,
-      this._affordanceObj || this.affordanceMap,
+      state._affordanceObj || state.affordanceMap,
       hexes,
-      { visibilityEntries: this._precomputedVisibility?.data || null }
+      { visibilityEntries: state._precomputedVisibility?.data || null }
     );
 
     // Merge returned path desire into Map
@@ -807,7 +877,7 @@ export async function computeDesirePaths() {
 
     // Apply aggregated affordance wear on main thread
     for (const [cell, v] of pathDesireDeltas) {
-      if (v && typeof v === 'number') updateAffordance.call(this, cell, v);
+      if (v && typeof v === 'number') updateAffordance(state, cell, v);
     }
 
     perTargetContribs = agentResults.perTargetContribs || Object.create(null);
@@ -817,63 +887,68 @@ export async function computeDesirePaths() {
     } catch (_e) {}
   }
 
-  applyPathDesireDeltas(this, pathDesireDeltas);
+  applyPathDesireDeltas(state, pathDesireDeltas);
 
   // Persist per-target contribution and assignment snapshots for incremental APIs
-  this._perTargetContribs = perTargetContribs;
-  this._assignedCounts = assignedCounts;
-  this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
+  state._perTargetContribs = perTargetContribs;
+  state._assignedCounts = assignedCounts;
+  state._targetWeights = Object.create(null);
+  for (const d of destinations) state._targetWeights[d] = state.simulationNodes[d]?.weight || 1;
 
   // Compute global peak flow for consistent color normalization in the renderer.
   let peak = 0;
-  const scores = this.pathDesireScores;
+  const scores = state.pathDesireScores;
   if (scores) {
     for (const k in scores) {
       const v = scores[k];
       if (typeof v === 'number' && v > peak) peak = v;
     }
   }
-  this.globalPeakFlow = peak > 0 ? peak : 1;
+  state.globalPeakFlow = peak > 0 ? peak : 1;
 
-  updateSimulationProgress(this, totalAgents, totalAgents, 'Complete');
+  updateSimulationProgress(state, totalAgents, totalAgents, 'Complete');
   try {
     clearSpatialWorkerProgressHandler();
   } catch (_e) {}
-  this.updateLayers();
-  this.flowsReady = true;
+  mapInstance?.updateLayers?.();
+  state.flowsReady = true;
 }
 
 /**
  * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
  */
-function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
+function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
-  const frictionLookup = this._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
-    return (this._frictionObj = obj);
-  })();
-  const affordanceLookup = this._affordanceObj;
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
+  const affordanceLookup = ctx._affordanceObj;
   const weights = WEIGHTS;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = VISUAL_ANGLE / 2;
 
-  const cellState = this._cellState || null;
+  const cellState = ctx._cellState || null;
   const stateEnabled = !!cellState;
 
-  const disk = _getCachedDisk(this, curr, VISUAL_DEPTH);
+  const disk = _getCachedDisk(ctx, curr, VISUAL_DEPTH);
   const sLatLng = _getCachedLatLng(curr);
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
   const getFriction = stateEnabled
-    ? (n) => { const s = cellState[n]; return s ? s.friction : undefined; }
+    ? (n) => {
+        const s = cellState[n];
+        return s ? s.friction : undefined;
+      }
     : (n) => frictionLookup[n];
   const getAffordance = stateEnabled
-    ? (n) => (cellState[n]?.affordance ?? 0.1)
-    : (n) => (affordanceLookup?.[n] ?? 0.1);
+    ? (n) => cellState[n]?.affordance ?? 0.1
+    : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
   const anglesArr = [];
@@ -887,7 +962,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
 
     const f = getFriction(n);
     if (f === undefined || f >= impassableVal) continue;
-    if (!_getCachedVisibility(this, curr, n, frictionLookup)) continue;
+    if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
 
     const eLatLng = _getCachedLatLng(n);
     const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
@@ -913,7 +988,11 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
   for (let i = 0; i < cellsArr.length; i++) {
     if (anglesArr[i] <= visualAngleHalf) {
       if (hardCount !== i) {
-        const swap = (arr) => { const temp = arr[i]; arr[i] = arr[hardCount]; arr[hardCount] = temp; };
+        const swap = (arr) => {
+          const temp = arr[i];
+          arr[i] = arr[hardCount];
+          arr[hardCount] = temp;
+        };
         swap(cellsArr);
         swap(anglesArr);
         swap(affsArr);
@@ -938,7 +1017,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
     }
   }
 
-  if (this.debugCompute) {
+  if (ctx.debugCompute) {
     try {
       const dbg = [];
       for (let i = 0; i < cLen; i++) {
@@ -954,7 +1033,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
 
   if (cellsArr.length === 0) {
     for (let depth = 1; depth <= 3; depth++) {
-      const neighbors = _getCachedDisk(this, curr, depth);
+      const neighbors = _getCachedDisk(ctx, curr, depth);
       let bestGrad = Infinity;
       let bestCandidate = null;
 
@@ -971,7 +1050,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
         }
       }
       if (bestCandidate) {
-        if (this.debugCompute) {
+        if (ctx.debugCompute) {
           try {
             console.log('getBestNextStep:fallback', { curr, depth, bestCandidate, bestGrad });
           } catch (_e) {
@@ -1008,7 +1087,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       acc += weightsArr[i];
       if (r <= acc) {
         const chosen = cellsArr[i];
-        if (this.debugCompute) {
+        if (ctx.debugCompute) {
           try {
             console.log('getBestNextStep: sampled', { curr, chosen, chosenScore: scores[i] });
           } catch (_e) {
@@ -1033,7 +1112,8 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
       bestScore = affsArr[i];
       bestIndex = i;
     } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost = (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
+      const currentBestCost =
+        (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
       const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
       if (candidateCost < currentBestCost) {
         bestIndex = i;
@@ -1046,7 +1126,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
   }
 
   const chosen = bestIndex >= 0 ? cellsArr[bestIndex] : null;
-  if (this.debugCompute) {
+  if (ctx.debugCompute) {
     try {
       console.log('getBestNextStep: chosen', { curr, chosen, bestScore });
     } catch (_e) {
@@ -1060,13 +1140,15 @@ function getBestNextStep(curr, gradient, currentDirection, agentId = '') {
 /**
  * Optimized Dijkstra Gradient (Production-Ready)
  */
-function computeDijkstraGradient(targetCell) {
-  const frictionLookup = this._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
-    return (this._frictionObj = obj);
-  })();
-  const cellState = this._cellState || null;
+function computeDijkstraGradient(ctx, targetCell) {
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
+  const cellState = ctx._cellState || null;
   const stateEnabled = !!cellState;
 
   const getFriction = stateEnabled
@@ -1076,7 +1158,7 @@ function computeDijkstraGradient(targetCell) {
       }
     : (n) => frictionLookup[n];
 
-  const getNeighbors = (cell) => _getCachedDisk(this, cell, 1);
+  const getNeighbors = (cell) => _getCachedDisk(ctx, cell, 1);
 
   return computeDijkstra(targetCell, getFriction, getNeighbors);
 }
@@ -1084,14 +1166,16 @@ function computeDijkstraGradient(targetCell) {
 /**
  * Geometric Helpers (Visibility & Bearing)
  */
-function isVisible(start, end) {
+function isVisible(ctx, start, end) {
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
-  const frictionLookup = this._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
-    return (this._frictionObj = obj);
-  })();
-  return _getCachedVisibility(this, start, end, frictionLookup);
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
+  return _getCachedVisibility(ctx, start, end, frictionLookup);
 }
 
 function getBearing(start, end) {
@@ -1112,19 +1196,22 @@ function angleDiff(a, b) {
  * HEAVY_GRASS takes more effort (less wear) to start a path
  * LIGHT_PARK is easily worn (more wear)
  */
-function updateAffordance(cell, volume = 1) {
-  const cs = this._cellState?.[cell];
-  const friction = cs?.friction ?? this._frictionObj?.[cell];
+function updateAffordance(ctx, cell, volume = 1) {
+  const cs = ctx._cellState?.[cell];
+  const friction = cs?.friction ?? ctx._frictionObj?.[cell];
 
   // Skip update for permanent infrastructure
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
-  const current = cs?.affordance ?? this._affordanceObj?.[cell] ?? 0.1;
-  const newVal = Math.min(SOFT_CAP, current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor));
+  const current = cs?.affordance ?? ctx._affordanceObj?.[cell] ?? 0.1;
+  const newVal = Math.min(
+    SOFT_CAP,
+    current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor)
+  );
 
   if (cs) cs.affordance = newVal;
-  if (this._affordanceObj) this._affordanceObj[cell] = newVal;
+  if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
 }
 
 /**
@@ -1132,18 +1219,18 @@ function updateAffordance(cell, volume = 1) {
  * HEAVY_GRASS recovers slower (more persistent path)
  * LIGHT_PARK recovers faster (path fades quickly)
  */
-function decayAffordance(cell) {
-  const cs = this._cellState?.[cell];
-  const friction = cs?.friction ?? this._frictionObj?.[cell];
+function decayAffordance(ctx, cell) {
+  const cs = ctx._cellState?.[cell];
+  const friction = cs?.friction ?? ctx._frictionObj?.[cell];
 
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
-  const current = cs?.affordance ?? this._affordanceObj?.[cell] ?? 0.1;
+  const current = cs?.affordance ?? ctx._affordanceObj?.[cell] ?? 0.1;
   const newVal = Math.max(0.1, current - DECAY_RATE * recoveryFactor);
 
   if (cs) cs.affordance = newVal;
-  if (this._affordanceObj) this._affordanceObj[cell] = newVal;
+  if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
 }
 
 /**
@@ -1158,7 +1245,8 @@ function classifyAffordance(friction) {
   const midPL = (p + l) / 2;
   const midLH = (l + h) / 2;
 
-  if (friction >= FRICTION_COSTS.IMPASSABLE) return { affordance: AFFORDANCE.IMPASSABLE, tier: 'impassable' };
+  if (friction >= FRICTION_COSTS.IMPASSABLE)
+    return { affordance: AFFORDANCE.IMPASSABLE, tier: 'impassable' };
   if (friction < midPL) return { affordance: AFFORDANCE.PAVEMENT, tier: 'pavement' };
   if (friction < midLH) return { affordance: AFFORDANCE.LIGHT_PARK, tier: 'light_park' };
   return { affordance: AFFORDANCE.HEAVY_GRASS, tier: 'heavy_grass' };
@@ -1167,18 +1255,25 @@ function classifyAffordance(friction) {
 /**
  * Initialize affordance based on your specific FRICTION_COSTS
  */
-export function initializeAffordanceMap() {
-  this.affordanceMap.clear();
+export function initializeAffordanceMap(ctx) {
+  ctx.affordanceMap.clear();
 
-  for (const [cell, friction] of this.cellFrictionMap) {
+  for (const [cell, friction] of ctx.cellFrictionMap) {
     const { affordance } = classifyAffordance(friction);
-    this.affordanceMap.set(cell, affordance);
+    ctx.affordanceMap.set(cell, affordance);
 
-    if (this._cellState) {
-      const cs = this._cellState[cell];
+    if (ctx._cellState) {
+      const cs = ctx._cellState[cell];
       const existingDesire = cs ? cs.desire : 0;
       const existingMulti = cs ? cs.multi : null;
-      this._cellState[cell] = buildCellStateEntry(friction, affordance, existingDesire, existingMulti, this._cellState, cell);
+      ctx._cellState[cell] = buildCellStateEntry(
+        friction,
+        affordance,
+        existingDesire,
+        existingMulti,
+        ctx._cellState,
+        cell
+      );
     }
   }
 }
@@ -1229,36 +1324,36 @@ export function getComputeCacheStats(ctx = {}) {
 }
 
 // Gradient cache helpers: compute, inspect, and clear per-target gradients.
-export function computeAndCacheGradient(targetCell) {
-  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
-  const g = computeDijkstraGradient.call(this, targetCell);
-  this._gradientCacheObj[targetCell] = g;
+export function computeAndCacheGradient(ctx, targetCell) {
+  if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
+  const g = computeDijkstraGradient(ctx, targetCell);
+  ctx._gradientCacheObj[targetCell] = g;
   return g;
 }
 
-export function getCachedGradient(targetCell) {
-  return this._gradientCacheObj ? this._gradientCacheObj[targetCell] : undefined;
+export function getCachedGradient(ctx, targetCell) {
+  return ctx._gradientCacheObj ? ctx._gradientCacheObj[targetCell] : undefined;
 }
 
-export function clearGradientCache() {
-  this._gradientCacheObj = Object.create(null);
-  this._gradientCacheGen = undefined;
-  this._pendingGradientPromises = Object.create(null);
+export function clearGradientCache(ctx) {
+  ctx._gradientCacheObj = Object.create(null);
+  ctx._gradientCacheGen = undefined;
+  ctx._pendingGradientPromises = Object.create(null);
 }
 
 // --- Incremental assignment & contribution helpers ---
-function _computeAssignedCounts() {
-  const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'dual'].includes(this.simulationNodes[k].type)
+function _computeAssignedCounts(ctx) {
+  const destinations = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['destination', 'dual'].includes(ctx.simulationNodes[k].type)
   );
-  const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(this.simulationNodes[k].type)
+  const origins = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['origin', 'dual'].includes(ctx.simulationNodes[k].type)
   );
 
-  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
+  if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
   // ensure gradients exist for reachability checks
   for (const d of destinations) {
-    if (!this._gradientCacheObj[d]) computeAndCacheGradient.call(this, d);
+    if (!ctx._gradientCacheObj[d]) computeAndCacheGradient(ctx, d);
   }
 
   const assigned = Object.create(null);
@@ -1266,17 +1361,17 @@ function _computeAssignedCounts() {
     assigned[o] = Object.create(null);
     const totalVolume = Math.max(
       1,
-      Math.round((this.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
+      Math.round((ctx.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
     );
 
     const destCandidates = [];
     let destWeightSum = 0;
     for (const d of destinations) {
       if (d === o) continue;
-      const grad = this._gradientCacheObj[d];
+      const grad = ctx._gradientCacheObj[d];
       if (!grad) continue;
       if (typeof grad[o] !== 'number') continue;
-      const w = this.simulationNodes[d]?.weight || 1;
+      const w = ctx.simulationNodes[d]?.weight || 1;
       destCandidates.push({ dest: d, weight: w });
       destWeightSum += w;
     }
@@ -1307,37 +1402,37 @@ function _computeAssignedCounts() {
   return assigned;
 }
 
-function _recomputeTargetContribs(targetCell, newAssignedCounts) {
-  ensureGradientCacheFresh(this);
-  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
-  if (!this._gradientCacheObj[targetCell]) computeAndCacheGradient.call(this, targetCell);
+function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
+  ensureGradientCacheFresh(ctx);
+  if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
+  if (!ctx._gradientCacheObj[targetCell]) computeAndCacheGradient(ctx, targetCell);
   // _gradientCacheObj always stores plain objects
-  const destGradientObj = this._gradientCacheObj[targetCell];
+  const destGradientObj = ctx._gradientCacheObj[targetCell];
 
   // Ensure snapshot state exists for safe inner-loop reads
-  if (!this._frictionObj) {
-    this._frictionObj = Object.create(null);
-    for (const [k, v] of this.cellFrictionMap) this._frictionObj[k] = v;
+  if (!ctx._frictionObj) {
+    ctx._frictionObj = Object.create(null);
+    for (const [k, v] of ctx.cellFrictionMap) ctx._frictionObj[k] = v;
   }
-  if (!this._affordanceObj) {
-    this._affordanceObj = Object.create(null);
-    for (const [k, v] of this.affordanceMap) this._affordanceObj[k] = v;
+  if (!ctx._affordanceObj) {
+    ctx._affordanceObj = Object.create(null);
+    for (const [k, v] of ctx.affordanceMap) ctx._affordanceObj[k] = v;
   }
-  if (!this._cellState) {
-    this._cellState = Object.create(null);
-    for (const k in this._frictionObj) {
-      const fr = this._frictionObj[k];
-      const aff = this._affordanceObj?.[k] ?? 0.1;
-      const desire = this.pathDesireScores?.[k] || 0;
-      this._cellState[k] = buildCellStateEntry(fr, aff, desire, null, null, k);
+  if (!ctx._cellState) {
+    ctx._cellState = Object.create(null);
+    for (const k in ctx._frictionObj) {
+      const fr = ctx._frictionObj[k];
+      const aff = ctx._affordanceObj?.[k] ?? 0.1;
+      const desire = ctx.pathDesireScores?.[k] || 0;
+      ctx._cellState[k] = buildCellStateEntry(fr, aff, desire, null, null, k);
     }
   }
 
-  const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(this.simulationNodes[k].type)
+  const origins = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['origin', 'dual'].includes(ctx.simulationNodes[k].type)
   );
   const perTarget = Object.create(null);
-  const hexCount = this.cellFrictionMap?.size || 1;
+  const hexCount = ctx.cellFrictionMap?.size || 1;
 
   for (const o of origins) {
     const count = (newAssignedCounts[o] && newAssignedCounts[o][targetCell]) || 0;
@@ -1346,7 +1441,7 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
 
     for (let sim = 0; sim < count; sim++) {
       const simAgentId = `${o}:${targetCell}:${sim}`;
-      const simPath = runSingleAgentPath(this, {
+      const simPath = runSingleAgentPath(ctx, {
         originCell: o,
         destCell: targetCell,
         destGradientObj,
@@ -1365,10 +1460,10 @@ function _recomputeTargetContribs(targetCell, newAssignedCounts) {
   return perTarget;
 }
 
-function _applyTargetContribDelta(targetCell, newContribs) {
+function _applyTargetContribDelta(ctx, targetCell, newContribs) {
   const oldContribs =
-    this._perTargetContribs && this._perTargetContribs[targetCell]
-      ? this._perTargetContribs[targetCell]
+    ctx._perTargetContribs && ctx._perTargetContribs[targetCell]
+      ? ctx._perTargetContribs[targetCell]
       : Object.create(null);
   const keys = new Set([...Object.keys(newContribs || {}), ...Object.keys(oldContribs || {})]);
   const affected = new Set();
@@ -1380,42 +1475,44 @@ function _applyTargetContribDelta(targetCell, newContribs) {
     if (delta === 0) continue;
     affected.add(cell);
 
-    if (this._cellState && this._cellState[cell]) {
-      this._cellState[cell].desire = (this._cellState[cell].desire || 0) + delta;
-      const newDes = this._cellState[cell].desire;
-      if (this.pathDesireScores) this.pathDesireScores[cell] = newDes;
+    if (ctx._cellState && ctx._cellState[cell]) {
+      ctx._cellState[cell].desire = (ctx._cellState[cell].desire || 0) + delta;
+      const newDes = ctx._cellState[cell].desire;
+      if (ctx.pathDesireScores) ctx.pathDesireScores[cell] = newDes;
     } else {
-      const cur = this.pathDesireScores?.[cell] || 0;
-      if (this.pathDesireScores) this.pathDesireScores[cell] = cur + delta;
+      const cur = ctx.pathDesireScores?.[cell] || 0;
+      if (ctx.pathDesireScores) ctx.pathDesireScores[cell] = cur + delta;
     }
   }
 
   // persist new contrib snapshot (or remove if empty)
   if (newContribs && Object.keys(newContribs).length > 0)
-    this._perTargetContribs[targetCell] = newContribs;
-  else if (this._perTargetContribs) delete this._perTargetContribs[targetCell];
+    ctx._perTargetContribs[targetCell] = newContribs;
+  else if (ctx._perTargetContribs) delete ctx._perTargetContribs[targetCell];
 
   return affected;
 }
 
-function _recomputeAffordanceForCells(cells) {
+function _recomputeAffordanceForCells(ctx, cells) {
   if (!cells || cells.size === 0) return;
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
-  const frictionLookup = this._frictionObj || (() => {
-    const obj = Object.create(null);
-    for (const [k, v] of (this.cellFrictionMap || [])) obj[k] = v;
-    return (this._frictionObj = obj);
-  })();
-  const cellState = this._cellState || null;
+  const frictionLookup =
+    ctx._frictionObj ||
+    (() => {
+      const obj = Object.create(null);
+      for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
+      return (ctx._frictionObj = obj);
+    })();
+  const cellState = ctx._cellState || null;
   const stateEnabled = !!cellState;
 
   for (const cell of cells) {
     // aggregate totalVolume across all targets
     let totalVolume = 0;
-    if (this._perTargetContribs) {
-      for (const t in this._perTargetContribs) {
-        if (this._perTargetContribs[t] && this._perTargetContribs[t][cell])
-          totalVolume += this._perTargetContribs[t][cell];
+    if (ctx._perTargetContribs) {
+      for (const t in ctx._perTargetContribs) {
+        if (ctx._perTargetContribs[t] && ctx._perTargetContribs[t][cell])
+          totalVolume += ctx._perTargetContribs[t][cell];
       }
     }
 
@@ -1434,46 +1531,53 @@ function _recomputeAffordanceForCells(cells) {
       const existingFriction = cs ? cs.friction : friction;
       const existingDesire = cs ? cs.desire : 0;
       const existingMulti = cs ? cs.multi : null;
-      cellState[cell] = buildCellStateEntry(existingFriction, newVal, existingDesire, existingMulti, cellState, cell);
+      cellState[cell] = buildCellStateEntry(
+        existingFriction,
+        newVal,
+        existingDesire,
+        existingMulti,
+        cellState,
+        cell
+      );
     }
 
-    if (this._affordanceObj) this._affordanceObj[cell] = newVal;
+    if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
   }
 }
 
-function _recomputeGlobalPeakFlow() {
+function _recomputeGlobalPeakFlow(ctx) {
   let peak = 0;
-  if (this.pathDesireScores) {
-    for (const k in this.pathDesireScores) {
-      const v = this.pathDesireScores[k];
+  if (ctx.pathDesireScores) {
+    for (const k in ctx.pathDesireScores) {
+      const v = ctx.pathDesireScores[k];
       if (typeof v === 'number' && v > peak) peak = v;
     }
   }
-  this.globalPeakFlow = peak > 0 ? peak : 1;
+  ctx.globalPeakFlow = peak > 0 ? peak : 1;
 }
 
-export function addDestination(targetCell, weight = 1) {
-  if (!this.simulationNodes) this.simulationNodes = Object.create(null);
-  if (!this.simulationNodes[targetCell])
-    this.simulationNodes[targetCell] = { type: 'destination', weight };
+export function addDestination(ctx, targetCell, weight = 1) {
+  if (!ctx.simulationNodes) ctx.simulationNodes = Object.create(null);
+  if (!ctx.simulationNodes[targetCell])
+    ctx.simulationNodes[targetCell] = { type: 'destination', weight };
   else {
-    if (this.simulationNodes[targetCell].type === 'origin')
-      this.simulationNodes[targetCell].type = 'dual';
-    else this.simulationNodes[targetCell].type = 'destination';
-    this.simulationNodes[targetCell].weight = weight;
+    if (ctx.simulationNodes[targetCell].type === 'origin')
+      ctx.simulationNodes[targetCell].type = 'dual';
+    else ctx.simulationNodes[targetCell].type = 'destination';
+    ctx.simulationNodes[targetCell].weight = weight;
   }
 
-  if (!this._gradientCacheObj) this._gradientCacheObj = Object.create(null);
-  if (!this._gradientCacheObj[targetCell]) computeAndCacheGradient.call(this, targetCell);
+  if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
+  if (!ctx._gradientCacheObj[targetCell]) computeAndCacheGradient(ctx, targetCell);
 
-  const newAssigned = _computeAssignedCounts.call(this);
-  const oldAssigned = this._assignedCounts || Object.create(null);
+  const newAssigned = _computeAssignedCounts(ctx);
+  const oldAssigned = ctx._assignedCounts || Object.create(null);
 
-  const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'dual'].includes(this.simulationNodes[k].type)
+  const destinations = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['destination', 'dual'].includes(ctx.simulationNodes[k].type)
   );
-  const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(this.simulationNodes[k].type)
+  const origins = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['origin', 'dual'].includes(ctx.simulationNodes[k].type)
   );
 
   const changed = new Set();
@@ -1488,52 +1592,55 @@ export function addDestination(targetCell, weight = 1) {
 
   const allAffected = new Set();
   for (const d of changed) {
-    const newContribs = _recomputeTargetContribs.call(this, d, newAssigned);
-    const affected = _applyTargetContribDelta.call(this, d, newContribs);
+    const newContribs = _recomputeTargetContribs(ctx, d, newAssigned);
+    const affected = _applyTargetContribDelta(ctx, d, newContribs);
     for (const c of affected) allAffected.add(c);
   }
 
-  _recomputeAffordanceForCells.call(this, allAffected);
-  this._assignedCounts = newAssigned;
-  this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
-  _recomputeGlobalPeakFlow.call(this);
-  if (this.updateLayers) this.updateLayers();
+  _recomputeAffordanceForCells(ctx, allAffected);
+  ctx._assignedCounts = newAssigned;
+  ctx._targetWeights = Object.create(null);
+  for (const d of destinations) ctx._targetWeights[d] = ctx.simulationNodes[d]?.weight || 1;
+  _recomputeGlobalPeakFlow(ctx);
+  if (ctx.updateLayers) ctx.updateLayers();
   return { changed: Array.from(changed), affectedCells: allAffected.size };
 }
 
-export function updateDestinationWeight(targetCell, newWeight) {
-  if (!this.simulationNodes || !this.simulationNodes[targetCell])
-    return addDestination.call(this, targetCell, newWeight);
-  this.simulationNodes[targetCell].weight = newWeight;
+export function updateDestinationWeight(ctx, targetCell, newWeight) {
+  if (!ctx.simulationNodes || !ctx.simulationNodes[targetCell])
+    return addDestination(ctx, targetCell, newWeight);
+  ctx.simulationNodes[targetCell].weight = newWeight;
   // delegate to addDestination path which computes diffs
-  return addDestination.call(this, targetCell, newWeight);
+  return addDestination(ctx, targetCell, newWeight);
 }
 
-export function removeDestination(targetCell) {
-  if (!this.simulationNodes || !this.simulationNodes[targetCell]) return { removed: false };
-  if (this.simulationNodes[targetCell].type === 'dual')
-    this.simulationNodes[targetCell].type = 'origin';
-  else delete this.simulationNodes[targetCell];
+export function removeDestination(ctx, targetCell) {
+  if (!ctx.simulationNodes || !ctx.simulationNodes[targetCell]) return { removed: false };
+  if (ctx.simulationNodes[targetCell].type === 'dual')
+    ctx.simulationNodes[targetCell].type = 'origin';
+  else delete ctx.simulationNodes[targetCell];
 
   // Prune stale gradient cache entry for removed destination
-  if (this._gradientCacheObj && this._gradientCacheObj[targetCell]) {
-    delete this._gradientCacheObj[targetCell];
+  if (ctx._gradientCacheObj && ctx._gradientCacheObj[targetCell]) {
+    delete ctx._gradientCacheObj[targetCell];
   }
 
-  const newAssigned = _computeAssignedCounts.call(this);
-  const oldAssigned = this._assignedCounts || Object.create(null);
+  const newAssigned = _computeAssignedCounts(ctx);
+  const oldAssigned = ctx._assignedCounts || Object.create(null);
 
-  const destinations = Object.keys(this.simulationNodes).filter((k) =>
-    ['destination', 'dual'].includes(this.simulationNodes[k].type)
+  const destinations = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['destination', 'dual'].includes(ctx.simulationNodes[k].type)
   );
-  const origins = Object.keys(this.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(this.simulationNodes[k].type)
+  const origins = Object.keys(ctx.simulationNodes).filter((k) =>
+    ['origin', 'dual'].includes(ctx.simulationNodes[k].type)
   );
 
   const changed = new Set();
   // Only add to changed if it's still a destination (not removed)
-  if (this.simulationNodes[targetCell] && ['destination', 'dual'].includes(this.simulationNodes[targetCell].type)) {
+  if (
+    ctx.simulationNodes[targetCell] &&
+    ['destination', 'dual'].includes(ctx.simulationNodes[targetCell].type)
+  ) {
     changed.add(targetCell);
   }
   for (const o of origins) {
@@ -1546,16 +1653,16 @@ export function removeDestination(targetCell) {
 
   const allAffected = new Set();
   for (const d of changed) {
-    const newContribs = _recomputeTargetContribs.call(this, d, newAssigned);
-    const affected = _applyTargetContribDelta.call(this, d, newContribs);
+    const newContribs = _recomputeTargetContribs(ctx, d, newAssigned);
+    const affected = _applyTargetContribDelta(ctx, d, newContribs);
     for (const c of affected) allAffected.add(c);
   }
 
-  _recomputeAffordanceForCells.call(this, allAffected);
-  this._assignedCounts = newAssigned;
-  this._targetWeights = Object.create(null);
-  for (const d of destinations) this._targetWeights[d] = this.simulationNodes[d]?.weight || 1;
-  _recomputeGlobalPeakFlow.call(this);
-  if (this.updateLayers) this.updateLayers();
+  _recomputeAffordanceForCells(ctx, allAffected);
+  ctx._assignedCounts = newAssigned;
+  ctx._targetWeights = Object.create(null);
+  for (const d of destinations) ctx._targetWeights[d] = ctx.simulationNodes[d]?.weight || 1;
+  _recomputeGlobalPeakFlow(ctx);
+  if (ctx.updateLayers) ctx.updateLayers();
   return { removed: true, changed: Array.from(changed), affectedCells: allAffected.size };
 }

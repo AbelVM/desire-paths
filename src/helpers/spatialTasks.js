@@ -41,14 +41,18 @@ const _polyCellsCacheOrder = [];
 
 function getCachedPolyCells(coords) {
   // Build a deterministic key from coordinates
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
   let points = 0;
   for (let i = 0; i < coords.length; i++) {
     const ring = coords[i] || [];
     points += ring.length;
     for (let j = 0; j < ring.length; j++) {
       const coord = ring[j] || [0, 0];
-      const lng = coord[0], lat = coord[1];
+      const lng = coord[0],
+        lat = coord[1];
       if (lng < minx) minx = lng;
       if (lng > maxx) maxx = lng;
       if (lat < miny) miny = lat;
@@ -64,7 +68,10 @@ function getCachedPolyCells(coords) {
   try {
     result = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
   } catch (err) {
-    try { console.warn && console.warn('computeFastScan: polygonToCells failed for coords', { key, err }); } catch (_e) {}
+    try {
+      console.warn &&
+        console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
+    } catch (_e) {}
     result = [];
   }
   _polyCellsCache[key] = result;
@@ -164,7 +171,13 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
 
   // Process each group in batch using shared cell iterator
   for (const group of Object.values(grouped)) {
-    _applyGroupToBuffer(group.geometries, group.layerKey, group.layerVal, viewLookup, multiFrictionEntries);
+    _applyGroupToBuffer(
+      group.geometries,
+      group.layerKey,
+      group.layerVal,
+      viewLookup,
+      multiFrictionEntries
+    );
   }
 
   const cellFrictionEntries = Object.create(null);
@@ -186,13 +199,21 @@ function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target)
     // Guard per-geometry processing so a single malformed polygon doesn't
     // abort the entire fast-scan chunk (this caused worker failures).
     try {
-      const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+      const coordsArray =
+        geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
       for (let p = 0; p < coordsArray.length; p++) {
         let cells = [];
         try {
           cells = getCachedPolyCells(coordsArray[p]);
         } catch (err) {
-          try { console.warn && console.warn('computeFastScan: failed to get cells for geometry', { layerKey, layerVal, err }); } catch (_e) {}
+          try {
+            console.warn &&
+              console.warn('computeFastScan: failed to get cells for geometry', {
+                layerKey,
+                layerVal,
+                err,
+              });
+          } catch (_e) {}
           continue;
         }
         // Shared cell iterator — no per-feature allocation overhead
@@ -202,20 +223,26 @@ function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target)
 
           let layerMap = target[cell];
           if (!layerMap) layerMap = target[cell] = Object.create(null);
-          if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey]) layerMap[layerKey] = layerVal;
+          if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
+            layerMap[layerKey] = layerVal;
         }
       }
     } catch (err) {
-      try { console.warn && console.warn('computeFastScan: skipping malformed geometry', { layerKey, layerVal, err }); } catch (_e) {}
+      try {
+        console.warn &&
+          console.warn('computeFastScan: skipping malformed geometry', { layerKey, layerVal, err });
+      } catch (_e) {}
       continue;
     }
   }
 }
 
-
 export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) {
   try {
-    const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({ features, viewHexes });
+    const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({
+      features,
+      viewHexes,
+    });
     const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
     return {
       multiFrictionEntries,
@@ -224,8 +251,19 @@ export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) 
       blurUpdates: blur.updates,
     };
   } catch (err) {
-    try { console.error && console.error('computeFastScanSnapshot failed', { err, featuresCount: (features && features.length) || 0 }); } catch (_e) {}
-    return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null), blurWeights: Object.create(null), blurUpdates: [] };
+    try {
+      console.error &&
+        console.error('computeFastScanSnapshot failed', {
+          err,
+          featuresCount: (features && features.length) || 0,
+        });
+    } catch (_e) {}
+    return {
+      multiFrictionEntries: Object.create(null),
+      cellFrictionEntries: Object.create(null),
+      blurWeights: Object.create(null),
+      blurUpdates: [],
+    };
   }
 }
 
@@ -233,7 +271,13 @@ export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } =
   try {
     return collectFastScanEntries({ features, viewHexes });
   } catch (err) {
-    try { console.error && console.error('computeFastScanChunkSnapshot failed', { err, featuresCount: (features && features.length) || 0 }); } catch (_e) {}
+    try {
+      console.error &&
+        console.error('computeFastScanChunkSnapshot failed', {
+          err,
+          featuresCount: (features && features.length) || 0,
+        });
+    } catch (_e) {}
     return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null) };
   }
 }
@@ -295,7 +339,8 @@ export function computeImpassableBlurSnapshot({
     const cell = impassables[i];
     const neighbors = getBlurNeighbors(cell, radius);
 
-    for (let n = 1; n < neighbors.length; n++) { // skip center (index 0)
+    for (let n = 1; n < neighbors.length; n++) {
+      // skip center (index 0)
       const neighborCell = neighbors[n];
       const friction = frictionLookup[neighborCell];
       if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
@@ -308,7 +353,10 @@ export function computeImpassableBlurSnapshot({
         try {
           const prevRing = getBlurNeighbors(cell, radius - 1);
           for (let p = 0; p < prevRing.length; p++) {
-            if (prevRing[p] === neighborCell) { dist = radius - 1; break; }
+            if (prevRing[p] === neighborCell) {
+              dist = radius - 1;
+              break;
+            }
           }
         } catch (_e) {}
       }

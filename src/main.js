@@ -13,7 +13,12 @@ import {
   getSurface,
 } from './helpers/constants.js';
 import { getHexes, triggerFastScan, mapPolygonCells, mapLineCells } from './helpers/grid.js';
-import { renderInterfacePins, updateLayers, clearLayers, exportSimulationGeoJSON } from './helpers/map.js';
+import {
+  renderInterfacePins,
+  updateLayers,
+  clearLayers,
+  exportSimulationGeoJSON,
+} from './helpers/map.js';
 import { setupUI } from './helpers/ui.js';
 import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
 
@@ -26,122 +31,201 @@ class DesireMap {
 
   constructor(map) {
     this.#map = map;
+    // Single consolidated state bag (replace many delegated properties)
+    this._state = Object.create(null);
+
+    // Known state keys previously delegated — reads/writes are routed here.
+    this._knownStateKeys = new Set([
+      'simulationNodes',
+      'multiFrictionMap',
+      'cellFrictionMap',
+      'pathDesireScores',
+      'affordanceMap',
+      'globalPeakFlow',
+      'showFrictionMesh',
+      'mappingReady',
+      'flowsReady',
+      'deckOverlayInstance',
+      'targetLabelLayerId',
+      'placementMode',
+      'placementWeight',
+      'dragOccurred',
+      'aoi',
+      'readyToCompute',
+      'isComputing',
+      'baseLayer',
+      'flowLayer',
+      'aoi_px',
+      'aoi_polygon',
+      '_cachedViewHexes',
+      '_cachedAoiKey',
+      '_lastViewHexesKey',
+      '_frictionObj',
+      '_affordanceObj',
+      '_multiFrictionObj',
+      '_cellState',
+      '_computePathCacheObj',
+      '_computePathCacheOrder',
+      '_computeDiskCacheObj',
+      '_computeDiskCacheOrder',
+      '_visibilityCacheObj',
+      '_visibilityCacheOrder',
+      '_gradientCacheObj',
+      '_perTargetContribs',
+      '_assignedCounts',
+      '_targetWeights',
+      '_mappingGeneration',
+      '_frictionSnapshotGen',
+      '_multiFrictionSnapshotGen',
+      '_cellStateMappingGen',
+      '_precomputedVisibility',
+      '_precomputedNeighborDisks',
+    ]);
+
+    // Initialize state bag from provided map instance (snapshot at construction)
+    // Copy values for known keys from the map into `_state` to avoid runtime fallbacks.
+    const mpInit = map;
+    for (const k of this._knownStateKeys) {
+      if (mpInit && Object.prototype.hasOwnProperty.call(mpInit, k)) {
+        this._state[k] = mpInit[k];
+      }
+    }
+
+    // Return a Proxy so existing property accessors (map.foo) continue to work
+    // but are backed by this single `_state` bag instead of mutating the map instance.
+    return new Proxy(this, {
+      get(target, prop, receiver) {
+        if (prop === 'state') return target._state;
+        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
+          // Return the value from the consolidated state bag only — no runtime fallbacks.
+          return target._state[prop];
+        }
+        // Prefer methods/props on the DesireMap instance
+        if (prop in target) {
+          const v = Reflect.get(target, prop, receiver);
+          if (typeof v === 'function') return v.bind(receiver);
+          return v;
+        }
+        // Fallback to underlying map instance for maplibre methods/properties
+        const mp = target.#map;
+        if (mp && prop in mp) {
+          const mv = mp[prop];
+          if (typeof mv === 'function') return mv.bind(mp);
+          return mv;
+        }
+        return undefined;
+      },
+      set(target, prop, value) {
+        if (prop === 'state') {
+          target._state = value;
+          return true;
+        }
+        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
+          target._state[prop] = value;
+          const mp = target.#map;
+          // Write-through to underlying map when it already has the property
+          if (mp && prop in mp) {
+            try {
+              mp[prop] = value;
+            } catch (e) {}
+          }
+          return true;
+        }
+        if (prop in target) return Reflect.set(target, prop, value);
+        const mp = target.#map;
+        if (mp) {
+          try {
+            mp[prop] = value;
+            return true;
+          } catch (e) {}
+        }
+        // As a last resort, store private-like props in state bag
+        if (typeof prop === 'string' && prop.startsWith('_')) {
+          target._state[prop] = value;
+          return true;
+        }
+        return Reflect.set(target, prop, value);
+      },
+      has(target, prop) {
+        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) return true;
+        if (prop in target) return true;
+        if (prop in target.#map) return true;
+        return false;
+      },
+      ownKeys(target) {
+        return Reflect.ownKeys(target).concat([...target._knownStateKeys]);
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
+          return {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: target._state[prop],
+          };
+        }
+        return (
+          Reflect.getOwnPropertyDescriptor(target, prop) ||
+          Object.getOwnPropertyDescriptor(target.#map, prop)
+        );
+      },
+    });
   }
 
-  // Delegated maplibregl properties
-  get simulationNodes() { return this.#map.simulationNodes; }
-  set simulationNodes(v) { this.#map.simulationNodes = v; }
-  get multiFrictionMap() { return this.#map.multiFrictionMap; }
-  set multiFrictionMap(v) { this.#map.multiFrictionMap = v; }
-  get cellFrictionMap() { return this.#map.cellFrictionMap; }
-  set cellFrictionMap(v) { this.#map.cellFrictionMap = v; }
-  get pathDesireScores() { return this.#map.pathDesireScores; }
-  set pathDesireScores(v) { this.#map.pathDesireScores = v; }
-  get affordanceMap() { return this.#map.affordanceMap; }
-  set affordanceMap(v) { this.#map.affordanceMap = v; }
-  get globalPeakFlow() { return this.#map.globalPeakFlow; }
-  set globalPeakFlow(v) { this.#map.globalPeakFlow = v; }
-  get showFrictionMesh() { return this.#map.showFrictionMesh; }
-  set showFrictionMesh(v) { this.#map.showFrictionMesh = v; }
-  get mappingReady() { return this.#map.mappingReady; }
-  set mappingReady(v) { this.#map.mappingReady = v; }
-  get flowsReady() { return this.#map.flowsReady; }
-  set flowsReady(v) { this.#map.flowsReady = v; }
-  get deckOverlayInstance() { return this.#map.deckOverlayInstance; }
-  set deckOverlayInstance(v) { this.#map.deckOverlayInstance = v; }
-  get targetLabelLayerId() { return this.#map.targetLabelLayerId; }
-  set targetLabelLayerId(v) { this.#map.targetLabelLayerId = v; }
-  get placementMode() { return this.#map.placementMode; }
-  set placementMode(v) { this.#map.placementMode = v; }
-  get placementWeight() { return this.#map.placementWeight; }
-  set placementWeight(v) { this.#map.placementWeight = v; }
-  get dragOccurred() { return this.#map.dragOccurred; }
-  set dragOccurred(v) { this.#map.dragOccurred = v; }
-  get aoi() { return this.#map.aoi; }
-  set aoi(v) { this.#map.aoi = v; }
-  get readyToCompute() { return this.#map.readyToCompute; }
-  set readyToCompute(v) { this.#map.readyToCompute = v; }
-  get isComputing() { return this.#map.isComputing; }
-  set isComputing(v) { this.#map.isComputing = v; }
-  get baseLayer() { return this.#map.baseLayer; }
-  set baseLayer(v) { this.#map.baseLayer = v; }
-  get flowLayer() { return this.#map.flowLayer; }
-  set flowLayer(v) { this.#map.flowLayer = v; }
-  get aoi_px() { return this.#map.aoi_px; }
-  set aoi_px(v) { this.#map.aoi_px = v; }
-  get aoi_polygon() { return this.#map.aoi_polygon; }
-  set aoi_polygon(v) { this.#map.aoi_polygon = v; }
-  get _cachedViewHexes() { return this.#map._cachedViewHexes; }
-  set _cachedViewHexes(v) { this.#map._cachedViewHexes = v; }
-  get _cachedAoiKey() { return this.#map._cachedAoiKey; }
-  set _cachedAoiKey(v) { this.#map._cachedAoiKey = v; }
-  get _lastViewHexesKey() { return this.#map._lastViewHexesKey; }
-  set _lastViewHexesKey(v) { this.#map._lastViewHexesKey = v; }
-  get _frictionObj() { return this.#map._frictionObj; }
-  set _frictionObj(v) { this.#map._frictionObj = v; }
-  get _affordanceObj() { return this.#map._affordanceObj; }
-  set _affordanceObj(v) { this.#map._affordanceObj = v; }
-  get _multiFrictionObj() { return this.#map._multiFrictionObj; }
-  set _multiFrictionObj(v) { this.#map._multiFrictionObj = v; }
-  get _cellState() { return this.#map._cellState; }
-  set _cellState(v) { this.#map._cellState = v; }
-  get _computePathCacheObj() { return this.#map._computePathCacheObj; }
-  set _computePathCacheObj(v) { this.#map._computePathCacheObj = v; }
-  get _computePathCacheOrder() { return this.#map._computePathCacheOrder; }
-  set _computePathCacheOrder(v) { this.#map._computePathCacheOrder = v; }
-  get _computeDiskCacheObj() { return this.#map._computeDiskCacheObj; }
-  set _computeDiskCacheObj(v) { this.#map._computeDiskCacheObj = v; }
-  get _computeDiskCacheOrder() { return this.#map._computeDiskCacheOrder; }
-  set _computeDiskCacheOrder(v) { this.#map._computeDiskCacheOrder = v; }
-  get _visibilityCacheObj() { return this.#map._visibilityCacheObj; }
-  set _visibilityCacheObj(v) { this.#map._visibilityCacheObj = v; }
-  get _visibilityCacheOrder() { return this.#map._visibilityCacheOrder; }
-  set _visibilityCacheOrder(v) { this.#map._visibilityCacheOrder = v; }
-  get _gradientCacheObj() { return this.#map._gradientCacheObj; }
-  set _gradientCacheObj(v) { this.#map._gradientCacheObj = v; }
-  get _perTargetContribs() { return this.#map._perTargetContribs; }
-  set _perTargetContribs(v) { this.#map._perTargetContribs = v; }
-  get _assignedCounts() { return this.#map._assignedCounts; }
-  set _assignedCounts(v) { this.#map._assignedCounts = v; }
-  get _targetWeights() { return this.#map._targetWeights; }
-  set _targetWeights(v) { this.#map._targetWeights = v; }
-
-  // Delegated methods
-  getContainer() { return this.#map.getContainer(); }
-  getLayer(id) { return this.#map.getLayer(id); }
-  getStyle() { return this.#map.getStyle(); }
-  getBounds() { return this.#map.getBounds(); }
-  project(...args) { return this.#map.project(...args); }
-  unproject(...args) { return this.#map.unproject(...args); }
-  queryRenderedFeatures(...args) { return this.#map.queryRenderedFeatures(...args); }
-  getSource(id) { return this.#map.getSource(id); }
-  addSource(...args) { return this.#map.addSource(...args); }
-  addLayer(...args) { return this.#map.addLayer(...args); }
-  addControl(...args) { return this.#map.addControl(...args); }
-  fitBounds(...args) { return this.#map.fitBounds(...args); }
-  getCanvas() { return this.#map.getCanvas(); }
-  on(...args) { return this.#map.on(...args); }
-
   // Domain methods
-  getHexes(...args) { return getHexes.call(this, ...args); }
-  triggerFastScan(...args) { return triggerFastScan.call(this, ...args); }
-  mapPolygonCells(...args) { return mapPolygonCells.call(this, ...args); }
-  mapLineCells(...args) { return mapLineCells.call(this, ...args); }
-  renderInterfacePins(...args) { return renderInterfacePins.call(this, ...args); }
-  updateLayers(...args) { return updateLayers.call(this, ...args); }
-  clearLayers(...args) { return clearLayers.call(this, ...args); }
+  getHexes(...args) {
+    return getHexes(this._state, this, ...args);
+  }
+  triggerFastScan(...args) {
+    return triggerFastScan(this._state, this, ...args);
+  }
+  mapPolygonCells(...args) {
+    return mapPolygonCells(this._state, this, ...args);
+  }
+  mapLineCells(...args) {
+    return mapLineCells(this._state, this, ...args);
+  }
+  renderInterfacePins(...args) {
+    return renderInterfacePins(this._state, this, ...args);
+  }
+  updateLayers(...args) {
+    return updateLayers(this._state, this, ...args);
+  }
+  clearLayers(...args) {
+    return clearLayers(this._state, this, ...args);
+  }
 
-  exportSimulationGeoJSON(...args) { return exportSimulationGeoJSON.call(this, ...args); }
-  computeDesirePaths(...args) { return computeDesirePaths.call(this, ...args); }
-  initializeAffordanceMap(...args) { return initializeAffordanceMap.call(this, ...args); }
-  showAlertCard(...args) { return typeof this._showAlertCard === 'function' ? this._showAlertCard(...args) : this.#map.showAlertCard?.(...args); }
-  syncSimulationUI(...args) { return typeof this._syncSimulationUI === 'function' ? this._syncSimulationUI(...args) : this.#map.syncSimulationUI?.(...args); }
+  exportSimulationGeoJSON(...args) {
+    return exportSimulationGeoJSON(this._state, this, ...args);
+  }
+  computeDesirePaths(...args) {
+    return computeDesirePaths(this._state, this, ...args);
+  }
+  initializeAffordanceMap(...args) {
+    return initializeAffordanceMap(this._state, this, ...args);
+  }
+  showAlertCard(...args) {
+    return typeof this._showAlertCard === 'function'
+      ? this._showAlertCard(...args)
+      : this.#map.showAlertCard?.(...args);
+  }
+  syncSimulationUI(...args) {
+    return typeof this._syncSimulationUI === 'function'
+      ? this._syncSimulationUI(...args)
+      : this.#map.syncSimulationUI?.(...args);
+  }
 }
 
 export function setMapCursor(mapInstance, cursor) {
   const target = mapInstance.getContainer();
   // Clear all cursor classes first
-  target.classList.remove('map-cursor-pointer', 'map-cursor-grab', 'map-cursor-grabbing', 'map-cursor-wait', 'map-cursor-crosshair');
+  target.classList.remove(
+    'map-cursor-pointer',
+    'map-cursor-grab',
+    'map-cursor-grabbing',
+    'map-cursor-wait',
+    'map-cursor-crosshair'
+  );
   if (cursor) {
     target.classList.add(`map-cursor-${cursor}`);
   }
@@ -153,7 +237,7 @@ export function setMapCursorWait(mapInstance, waiting) {
   target.classList.toggle('map-cursor-wait', waiting);
   if (spinner) {
     spinner.style.display = waiting ? 'block' : 'none';
-  } 
+  }
 }
 
 const init = () => {
@@ -207,19 +291,19 @@ const init = () => {
         for (const feature of geojson.features) {
           const center = [
             feature.bbox[0] + (feature.bbox[2] - feature.bbox[0]) / 2,
-            feature.bbox[1] + (feature.bbox[3] - feature.bbox[1]) / 2
+            feature.bbox[1] + (feature.bbox[3] - feature.bbox[1]) / 2,
           ];
           const point = {
             type: 'Feature',
             geometry: {
               type: 'Point',
-              coordinates: center
+              coordinates: center,
             },
             place_name: feature.properties.display_name,
             properties: feature.properties,
             text: feature.properties.display_name,
             place_type: ['place'],
-            center
+            center,
           };
           features.push(point);
         }
@@ -236,20 +320,25 @@ const init = () => {
         console.error(`Failed to forwardGeocode with error: ${e}`);
       }
       return { features };
-    }
+    },
   };
 
-  desireMap.addControl(new MaplibreGeocoder({
-    forwardGeocode: async (config) => {
-      // Debounce: wait 300ms after the last keystroke before firing
-      return new Promise((resolve) => {
-        if (geocoderDebounceTimer) clearTimeout(geocoderDebounceTimer);
-        geocoderDebounceTimer = setTimeout(() => {
-          resolve(geocoderApi.forwardGeocode(config));
-        }, 300);
-      });
-    }
-  }, { maplibregl }));
+  desireMap.addControl(
+    new MaplibreGeocoder(
+      {
+        forwardGeocode: async (config) => {
+          // Debounce: wait 300ms after the last keystroke before firing
+          return new Promise((resolve) => {
+            if (geocoderDebounceTimer) clearTimeout(geocoderDebounceTimer);
+            geocoderDebounceTimer = setTimeout(() => {
+              resolve(geocoderApi.forwardGeocode(config));
+            }, 300);
+          });
+        },
+      },
+      { maplibregl }
+    )
+  );
   setMapCursor(desireMap, 'crosshair');
 
   desireMap.on('load', (e) => {

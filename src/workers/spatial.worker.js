@@ -11,7 +11,13 @@ self.onmessage = (event) => {
   const data = event.data || {};
 
   try {
-    try { console.debug && console.debug('spatial.worker: received message', { kind: data.kind, payloadSummary: data.payload ? Object.keys(data.payload || {}) : null }); } catch (_e) {}
+    try {
+      console.debug &&
+        console.debug('spatial.worker: received message', {
+          kind: data.kind,
+          payloadSummary: data.payload ? Object.keys(data.payload || {}) : null,
+        });
+    } catch (_e) {}
     let result;
     if (data.kind === 'fast-scan') {
       result = computeFastScanSnapshot(data.payload || {});
@@ -20,9 +26,19 @@ self.onmessage = (event) => {
     } else if (data.kind === 'gradient-batch') {
       result = computeGradientBatch(data.payload || {});
     } else if (data.kind === 'agent-batch') {
-      try { console.debug && console.debug('spatial.worker: delegating agent-batch to handler', { planLength: data.payload?.plan?.length ?? null }); } catch (_e) {}
+      try {
+        console.debug &&
+          console.debug('spatial.worker: delegating agent-batch to handler', {
+            planLength: data.payload?.plan?.length ?? null,
+          });
+      } catch (_e) {}
       const ret = handleAgentBatch(data.payload || {});
-      try { console.debug && console.debug('spatial.worker: agent-batch handler returned', { hasTransfers: Array.isArray(ret?.transfers) }); } catch (_e) {}
+      try {
+        console.debug &&
+          console.debug('spatial.worker: agent-batch handler returned', {
+            hasTransfers: Array.isArray(ret?.transfers),
+          });
+      } catch (_e) {}
       if (ret && Array.isArray(ret.transfers)) {
         self.postMessage({ ok: true, result: ret.result }, ret.transfers);
       } else {

@@ -102,7 +102,7 @@ describe('computeDesirePaths regression', () => {
     const pathCells = buildLinearPath(40.4169, -3.7035, 5);
     const ctx = buildContext(pathCells);
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // The core regression: pathDesireScores must NOT be empty
     expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
@@ -113,7 +113,7 @@ describe('computeDesirePaths regression', () => {
     const originCell = pathCells[0];
     const ctx = buildContext(pathCells);
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // The origin cell must have a non-zero desire score
     expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
@@ -123,7 +123,7 @@ describe('computeDesirePaths regression', () => {
     const pathCells = buildLinearPath(40.4169, -3.7035, 5);
     const ctx = buildContext(pathCells);
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     expect(ctx.globalPeakFlow).toBeGreaterThan(1);
   });
@@ -135,7 +135,7 @@ describe('computeDesirePaths regression', () => {
     // Run multiple times to verify consistency
     for (let run = 0; run < 3; run++) {
       const ctx = buildContext(pathCells);
-      await computeDesirePaths.call(ctx);
+      await computeDesirePaths(ctx, ctx);
 
       expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
       expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
@@ -147,7 +147,7 @@ describe('computeDesirePaths regression', () => {
     const pathCells = buildLinearPath(40.4169, -3.7035, 5);
     const ctx = buildContext(pathCells);
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // At least 2 cells must have non-zero desire scores (origin + at least one neighbour)
     let cellsWithDesire = 0;
@@ -163,7 +163,7 @@ describe('computeDesirePaths regression', () => {
     const ctx = buildContext(pathCells);
     ctx.simulationNodes[originCell].weight = 5;
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // Higher weight → more agents → higher desire on the origin
     expect(ctx.pathDesireScores[originCell]).toBeGreaterThan(0);
@@ -192,7 +192,7 @@ describe('computeDesirePaths regression', () => {
       updateLayers: () => {},
     };
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // Should return early without modifying pathDesireScores
     // pathDesireScores is reset to a new plain object; it should be empty
@@ -212,7 +212,7 @@ describe('computeDesirePaths regression', () => {
       updateLayers: () => {},
     };
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     expect(Object.keys(ctx.pathDesireScores).length).toBe(0);
   });
@@ -242,7 +242,7 @@ describe('computeDesirePaths regression', () => {
       updateLayers: () => {},
     };
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // Self-targeting origin should not produce paths (no reachable destinations)
     // but should not crash
@@ -275,7 +275,7 @@ describe('computeDesirePaths regression', () => {
       updateLayers: () => {},
     };
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
   });
@@ -305,7 +305,7 @@ describe('computeDesirePaths regression', () => {
       updateLayers: () => {},
     };
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     // Should work with plain object pathDesireScores
     expect(Object.keys(ctx.pathDesireScores).length).toBeGreaterThan(0);
@@ -323,7 +323,7 @@ describe('computeDesirePaths regression', () => {
     const originCell = pathCells[0];
     const before = ctx._affordanceObj[originCell];
 
-    await computeDesirePaths.call(ctx);
+    await computeDesirePaths(ctx, ctx);
 
     const after = ctx._cellState?.[originCell]?.affordance ?? ctx._affordanceObj?.[originCell];
     expect(after).toBeGreaterThan(before);

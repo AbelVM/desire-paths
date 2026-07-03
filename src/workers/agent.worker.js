@@ -26,17 +26,32 @@ try {
       const data = event.data || {};
       const payload = data && data.kind === 'agent-batch' && data.payload ? data.payload : data;
       try {
-        try { console.debug && console.debug('agent.worker: received agent-batch', { planLength: payload?.plan?.length ?? null }); } catch (e) {}
+        try {
+          console.debug &&
+            console.debug('agent.worker: received agent-batch', {
+              planLength: payload?.plan?.length ?? null,
+            });
+        } catch (e) {}
         const ret = computeAgentBatch(payload || {});
-        try { console.debug && console.debug('agent.worker: finished computeAgentBatch', { processed: ret?.result?.processed ?? ret?.processed ?? 0 }); } catch (e) {}
+        try {
+          console.debug &&
+            console.debug('agent.worker: finished computeAgentBatch', {
+              processed: ret?.result?.processed ?? ret?.processed ?? 0,
+            });
+        } catch (e) {}
         if (ret && Array.isArray(ret.transfers)) {
           self.postMessage({ ok: true, result: ret.result }, ret.transfers);
         } else {
           self.postMessage({ ok: true, result: ret && ret.result ? ret.result : ret });
         }
       } catch (error) {
-        try { console.error && console.error('agent.worker: error', error); } catch (_e) {}
-        self.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        try {
+          console.error && console.error('agent.worker: error', error);
+        } catch (_e) {}
+        self.postMessage({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
   }

@@ -7,7 +7,12 @@ import {
   VISUAL_DEPTH,
 } from './constants.js';
 import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
-import { clearComputeCaches, buildCellStateEntry, precomputeVisibilitySets, precomputeNeighborDisks } from './compute.js';
+import {
+  clearComputeCaches,
+  buildCellStateEntry,
+  precomputeVisibilitySets,
+  precomputeNeighborDisks,
+} from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -70,20 +75,20 @@ function _polyKey(coords) {
 const PATH_CACHE_MAX = 2000;
 const POLY_CACHE_MAX = 2000;
 
-export function getHexes() {
-  const aoiKey = this.aoi_polygon ? _aoiKey(this.aoi_polygon) : '';
+export function getHexes(state, mapInstance) {
+  const aoiKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';
   // Return cached hexes when AOI hasn't changed to avoid repeated expensive H3 calls
-  if (this._cachedViewHexes && this._cachedAoiKey === aoiKey) return this._cachedViewHexes;
+  if (state._cachedViewHexes && state._cachedAoiKey === aoiKey) return state._cachedViewHexes;
   let hexes;
   try {
-    // `this.aoi_polygon` is GeoJSON ([lng, lat]). Use the isGeoJson flag.
-    hexes = polygonToCells(this.aoi_polygon, H3_STRIDE_RESOLUTION, true);
+    // `state.aoi_polygon` is GeoJSON ([lng, lat]). Use the isGeoJson flag.
+    hexes = polygonToCells(state.aoi_polygon, H3_STRIDE_RESOLUTION, true);
   } catch (e) {
     console.error('Error generating hexes for AOI. Please check your AOI geometry.', e);
     return;
   }
-  this._cachedViewHexes = hexes;
-  this._cachedAoiKey = aoiKey;
+  state._cachedViewHexes = hexes;
+  state._cachedAoiKey = aoiKey;
   return hexes;
 }
 
@@ -92,15 +97,15 @@ export function getHexes() {
  * Runs AOI hex generation in a worker (off main thread) in parallel with
  * queryRenderedFeatures, so H3 computation doesn't block feature fetching.
  */
-export async function triggerFastScan() {
+export async function triggerFastScan(state, mapInstance) {
   // Start AOI hex generation in a Web Worker — runs off the main thread.
   // This is CPU-intensive (polygonToCells) and blocks for ~50-200ms otherwise.
-  const aoiPolygon = this.aoi_polygon;
+  const aoiPolygon = state.aoi_polygon;
   const aoiHexPromise = runAoiHexesTask(aoiPolygon).catch(() => []);
 
   // Fetch features in parallel — queryRenderedFeatures depends on map rendering,
   // which is already done (we waited for moveend in fitAoiBounds).
-  const rawFeatures = this.queryRenderedFeatures(this.aoi_px) || [];
+  const rawFeatures = mapInstance.queryRenderedFeatures(state.aoi_px) || [];
 
   // Wait for both AOI hexes and feature data to be ready
   const viewHexes = await aoiHexPromise;
@@ -123,29 +128,30 @@ export async function triggerFastScan() {
 
   const build = await runFastScanTask(viewHexes, buildFeatures);
 
-  this._mappingGeneration = (this._mappingGeneration ?? 0) + 1;
-  clearComputeCaches.call(this);
+  state._mappingGeneration = (state._mappingGeneration ?? 0) + 1;
+  clearComputeCaches(state);
 
   // Reset friction maps in a single pass over viewHexes
-  if (this.cellFrictionMap && typeof this.cellFrictionMap.clear === 'function') {
-    this.cellFrictionMap.clear();
+  if (state.cellFrictionMap && typeof state.cellFrictionMap.clear === 'function') {
+    state.cellFrictionMap.clear();
   }
   const multiEntries = build.multiFrictionEntries ?? Object.create(null);
 
   // Reuse existing multiFrictionMap when AOI hasn't changed to avoid re-allocating objects
-  const aoiKey = this._cachedAoiKey ?? (this.aoi_polygon ? _aoiKey(this.aoi_polygon) : '');
-  if (!this.multiFrictionMap || this._lastViewHexesKey !== aoiKey) {
-    this.multiFrictionMap = new Map();
-    for (let i = 0; i < viewHexes.length; i++) this.multiFrictionMap.set(viewHexes[i], Object.create(null));
-    this._lastViewHexesKey = aoiKey;
+  const aoiKey = state._cachedAoiKey ?? (state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '');
+  if (!state.multiFrictionMap || state._lastViewHexesKey !== aoiKey) {
+    state.multiFrictionMap = new Map();
+    for (let i = 0; i < viewHexes.length; i++)
+      state.multiFrictionMap.set(viewHexes[i], Object.create(null));
+    state._lastViewHexesKey = aoiKey;
   } else {
-    for (const obj of this.multiFrictionMap.values()) {
+    for (const obj of state.multiFrictionMap.values()) {
       const keys = Object.keys(obj);
       for (let k = 0; k < keys.length; k++) delete obj[keys[k]];
     }
   }
 
-// Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
+  // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
   const blurWeights = build.blurWeights ?? Object.create(null);
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
   const pavement = AFFORDANCE.PAVEMENT;
@@ -158,17 +164,17 @@ export async function triggerFastScan() {
   const midPL = (p + l) / 2;
   const midLH = (l + hg) / 2;
 
-  this._frictionObj = Object.create(null);
-  this._multiFrictionObj = Object.create(null);
-  this.affordanceMap.clear();
-  this._affordanceObj = Object.create(null);
-  this._cellState = Object.create(null);
-  this._cellStateMappingGen = this._mappingGeneration;
+  state._frictionObj = Object.create(null);
+  state._multiFrictionObj = Object.create(null);
+  state.affordanceMap.clear();
+  state._affordanceObj = Object.create(null);
+  state._cellState = Object.create(null);
+  state._cellStateMappingGen = state._mappingGeneration;
 
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];
     // Merge multi-friction layer values into the map entry
-    const target = this.multiFrictionMap.get(cell);
+    const target = state.multiFrictionMap.get(cell);
     if (target) {
       const layerMap = multiEntries[cell];
       if (layerMap) {
@@ -187,9 +193,9 @@ export async function triggerFastScan() {
       fr = build.cellFrictionEntries?.[cell] ?? 0;
     }
 
-    this._frictionObj[cell] = fr;
-    this.cellFrictionMap.set(cell, fr);
-    this._multiFrictionObj[cell] = target || Object.create(null);
+    state._frictionObj[cell] = fr;
+    state.cellFrictionMap.set(cell, fr);
+    state._multiFrictionObj[cell] = target || Object.create(null);
 
     // Affordance classification
     let aff;
@@ -203,67 +209,67 @@ export async function triggerFastScan() {
       aff = Math.max(0.0, aff - Math.min(aff, weight * penalty));
     }
 
-    this.affordanceMap.set(cell, aff);
-    this._affordanceObj[cell] = aff;
-    this._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
+    state.affordanceMap.set(cell, aff);
+    state._affordanceObj[cell] = aff;
+    state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
   }
 
   // Precompute visibility sets for all AOI cells to eliminate O(N^2) path lookups during simulation
-  const visibilityData = precomputeVisibilitySets(this._frictionObj, viewHexes, VISUAL_DEPTH);
-  this._precomputedVisibility = { gen: this._mappingGeneration, data: visibilityData };
+  const visibilityData = precomputeVisibilitySets(state._frictionObj, viewHexes, VISUAL_DEPTH);
+  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
 
   // Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
   const neighborDisks = precomputeNeighborDisks(viewHexes, VISUAL_DEPTH);
-  this._precomputedNeighborDisks = { gen: this._mappingGeneration, data: neighborDisks };
+  state._precomputedNeighborDisks = { gen: state._mappingGeneration, data: neighborDisks };
 
-  this.updateLayers();
+  mapInstance.updateLayers?.();
 }
 
-export function mapPolygonCells(coords, surface) {
+export function mapPolygonCells(state, mapInstance, coords, surface) {
   // `coords` is GeoJSON ([lng, lat]) — pass isGeoJson = true
   // Cache polygonToCells results per-feature if geometry unchanged
   const key = _polyKey(coords);
-  if (!this._polyCache) this._polyCache = new Map();
-  let cells = this._polyCache.get(key);
+  if (!state._polyCache) state._polyCache = new Map();
+  let cells = state._polyCache.get(key);
   if (cells) {
     // Refresh LRU order
-    this._polyCache.delete(key);
-    this._polyCache.set(key, cells);
+    state._polyCache.delete(key);
+    state._polyCache.set(key, cells);
   } else {
     cells = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
-    this._polyCache.set(key, cells);
+    state._polyCache.set(key, cells);
     // Evict oldest if over budget
-    if (this._polyCache.size > POLY_CACHE_MAX) {
-      const oldest = this._polyCache.keys().next().value;
-      this._polyCache.delete(oldest);
+    if (state._polyCache.size > POLY_CACHE_MAX) {
+      const oldest = state._polyCache.keys().next().value;
+      state._polyCache.delete(oldest);
     }
   }
-  mapCells(this.multiFrictionMap, cells, surface);
+  mapCells(state.multiFrictionMap, cells, surface);
 }
 
-export function mapLineCells(coords, surface) {
+export function mapLineCells(state, mapInstance, coords, surface) {
   const cLen = coords.length;
   for (let i = 0; i < cLen - 1; i++) {
     const c1 = latLngToCell(coords[i][1], coords[i][0], H3_STRIDE_RESOLUTION);
     const c2 = latLngToCell(coords[i + 1][1], coords[i + 1][0], H3_STRIDE_RESOLUTION);
     // Cache gridPathCells per segment to avoid duplicate expansion with LRU eviction
-    if (!this._pathCache) this._pathCache = new Map();
+    if (!state._pathCache) state._pathCache = new Map();
     const segKey = c1 + '::' + c2;
-    let path = this._pathCache.get(segKey);
+    let path = state._pathCache.get(segKey);
     if (path) {
       // Refresh LRU order: remove and re-insert
-      this._pathCache.delete(segKey);
-      this._pathCache.set(segKey, path);
+      state._pathCache.delete(segKey);
+      state._pathCache.set(segKey, path);
     } else {
       path = gridPathCells(c1, c2);
-      this._pathCache.set(segKey, path);
+      state._pathCache.set(segKey, path);
       // Evict oldest if over budget
-      if (this._pathCache.size > PATH_CACHE_MAX) {
-        const oldest = this._pathCache.keys().next().value;
-        this._pathCache.delete(oldest);
+      if (state._pathCache.size > PATH_CACHE_MAX) {
+        const oldest = state._pathCache.keys().next().value;
+        state._pathCache.delete(oldest);
       }
     }
-    mapCells(this.multiFrictionMap, path, surface);
+    mapCells(state.multiFrictionMap, path, surface);
   }
 }
 

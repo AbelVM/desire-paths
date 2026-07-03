@@ -17,13 +17,11 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors) {
   const visited = new Set();
   const heap = new MinHeap();
 
-  const resolveFriction = typeof frictionLookup === 'function'
-    ? frictionLookup
-    : (cell) => frictionLookup[cell];
+  const resolveFriction =
+    typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
 
-  const resolveNeighbors = typeof getNeighbors === 'function'
-    ? getNeighbors
-    : (cell) => gridDisk(cell, 1);
+  const resolveNeighbors =
+    typeof getNeighbors === 'function' ? getNeighbors : (cell) => gridDisk(cell, 1);
 
   distances[targetCell] = 0;
   heap.insert(targetCell, 0);

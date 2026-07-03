@@ -77,7 +77,10 @@ function getAoiBounds(mapInstance) {
   }
 
   if (!Number.isFinite(minLng)) return null;
-  return [[minLng, minLat], [maxLng, maxLat]];
+  return [
+    [minLng, minLat],
+    [maxLng, maxLat],
+  ];
 }
 
 async function fitAoiBounds(mapInstance) {
@@ -196,7 +199,8 @@ function createUIState(map) {
   state.modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
 
   // Toast container — create if missing
-  const toastContainer = document.getElementById('toast-container') || document.createElement('div');
+  const toastContainer =
+    document.getElementById('toast-container') || document.createElement('div');
   toastContainer.id = 'toast-container';
   toastContainer.className = 'toast-container';
   if (!toastContainer.parentNode) {
@@ -222,28 +226,28 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
+
     let icon = 'ℹ️';
     if (type === 'success') icon = '✅';
     else if (type === 'warning') icon = '⚠️';
     else if (type === 'error') icon = '❌';
-    
+
     toast.innerHTML = `
       <span class="toast-icon">${icon}</span>
       <div class="toast-message">${message}</div>
       <button class="toast-close" type="button" aria-label="Dismiss notification">×</button>
     `;
-    
+
     uiState.toastContainer.appendChild(toast);
-    
+
     requestAnimationFrame(() => {
       toast.classList.add('show');
     });
-    
+
     const timeoutId = setTimeout(() => {
       hideToastNotification(toast);
     }, duration);
-    
+
     const closeBtn = toast.querySelector('.toast-close');
     if (closeBtn) {
       closeBtn.onclick = () => {
@@ -316,7 +320,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   // ──────────────────────────────────────────────
   const createContextMenu = () => {
     if (uiState.contextMenu) return uiState.contextMenu;
-    
+
     const menu = document.createElement('div');
     menu.id = 'context-menu';
     menu.className = 'context-menu';
@@ -399,8 +403,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
       // Capture type at setup time to prevent cascading mutations from stacked listeners
       const currentType = node.type;
-      const nextType = currentType === 'origin' ? 'destination' : 
-                       currentType === 'destination' ? 'dual' : 'origin';
+      const nextType =
+        currentType === 'origin'
+          ? 'destination'
+          : currentType === 'destination'
+            ? 'dual'
+            : 'origin';
       const label = nextType.charAt(0).toUpperCase() + nextType.slice(1);
 
       const nodeCellKey = cell;
@@ -597,13 +605,19 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     if (uiState.modeLabel) {
       uiState.modeLabel.innerText = modeText;
-      
+
       // Add keyboard shortcut hint when nodes are placed
       const hasNodes = originCount + destCount > 0;
       if (hasNodes && !readyToCompute) {
-        uiState.modeLabel.setAttribute('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
+        uiState.modeLabel.setAttribute(
+          'title',
+          'Drag nodes to move them · ↑↓ arrows adjust placement weight'
+        );
       } else if (readyToCompute) {
-        uiState.modeLabel.setAttribute('title', 'Ready — press Simulate Flows · Drag nodes to reposition');
+        uiState.modeLabel.setAttribute(
+          'title',
+          'Ready — press Simulate Flows · Drag nodes to reposition'
+        );
       } else {
         uiState.modeLabel.removeAttribute('title');
       }
@@ -636,13 +650,16 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.frictionButton) {
       uiState.frictionButton.classList.toggle('is-active', enabled);
     }
-    
+
     if (iconEl) {
       iconEl.textContent = enabled ? '−' : '+';
       iconEl.style.transform = 'rotate(360deg)';
-      setTimeout(() => iconEl.style.transform = '', 140);
+      setTimeout(() => (iconEl.style.transform = ''), 140);
     }
-    uiState.frictionButton?.setAttribute('aria-label', enabled ? 'Hide friction legend' : 'Show friction legend');
+    uiState.frictionButton?.setAttribute(
+      'aria-label',
+      enabled ? 'Hide friction legend' : 'Show friction legend'
+    );
     uiState.frictionButton?.setAttribute('aria-pressed', String(enabled));
     if (uiState.frictionLegendBody) uiState.frictionLegendBody.hidden = !enabled;
     if (map.baseLayer || map.flowLayer) {
@@ -675,9 +692,13 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       } else if (map.flowsReady === true) {
         uiState.progressLabel.innerHTML = `<span class="progress-phase">Simulation complete</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Export or reset to start new</span>`;
       } else {
-        const hasOrigins = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'origin' || n.type === 'dual') && n.weight > 0);
-        const hasDests = Object.values(map.simulationNodes ?? {}).some(n => (n.type === 'destination' || n.type === 'dual') && n.weight > 0);
-        
+        const hasOrigins = Object.values(map.simulationNodes ?? {}).some(
+          (n) => (n.type === 'origin' || n.type === 'dual') && n.weight > 0
+        );
+        const hasDests = Object.values(map.simulationNodes ?? {}).some(
+          (n) => (n.type === 'destination' || n.type === 'dual') && n.weight > 0
+        );
+
         if (!hasOrigins && !hasDests) {
           uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Place origin and destination nodes on the map</span>`;
         } else if (hasOrigins && hasDests) {
@@ -774,7 +795,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._gradientCacheGen = undefined;
     map._visibilityCacheGen = undefined;
     map.simulationProgress = undefined;
-    clearComputeCaches.call(map);
+    clearComputeCaches(map);
     clearLatLngCache();
     terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
@@ -799,7 +820,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // --- Keyboard Shortcuts ---
   document.addEventListener('keydown', (e) => {
-    if (document.activeElement === uiState.weightInput || document.activeElement === uiState.weightReadout) {
+    if (
+      document.activeElement === uiState.weightInput ||
+      document.activeElement === uiState.weightReadout
+    ) {
       let currentValue = parseInt(uiState.weightInput.value, 10);
       if (isNaN(currentValue)) currentValue = 1;
 
@@ -864,9 +888,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const handleDragMove = (e) => {
     if (!dragState.active || !dragState.startCell) return;
-    
+
     if (!isFiniteLngLat(e.lngLat)) return;
-    
+
     dragState.moved = true;
 
     // Snap to nearest H3 cell
@@ -890,7 +914,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const handleDragEnd = () => {
     if (!dragState.active) return;
-    
+
     dragState.active = false;
     dragState.startCell = null;
     map.isDragging = false;
@@ -958,14 +982,18 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
               node = map.simulationNodes?.[cell];
             }
           }
-        } catch (_) { /* queryRenderedFeatures may fail in tests */ }
+        } catch (_) {
+          /* queryRenderedFeatures may fail in tests */
+        }
       }
     }
 
     if (node && isActiveNode(node)) {
-      const cell = node.cell || (isFiniteLngLat(e.lngLat)
-        ? latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION)
-        : undefined);
+      const cell =
+        node.cell ||
+        (isFiniteLngLat(e.lngLat)
+          ? latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION)
+          : undefined);
       if (cell) {
         e.preventDefault();
         showContextMenu(e, node, cell);
@@ -999,7 +1027,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   uiState.computeButton.addEventListener('click', async () => {
     if (!hasBuildInputs(map.simulationNodes)) {
-      showToastNotification('Place at least one origin/dual node and one destination/dual node before simulating flows.', 'warning');
+      showToastNotification(
+        'Place at least one origin/dual node and one destination/dual node before simulating flows.',
+        'warning'
+      );
       return;
     }
 
@@ -1013,7 +1044,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         map.mappingReady = map.cellFrictionMap.size > 0;
         map.flowsReady = false;
         if (!map.mappingReady) {
-          showToastNotification('The current layout did not produce a mapping. Add more nodes and try again.', 'warning');
+          showToastNotification(
+            'The current layout did not produce a mapping. Add more nodes and try again.',
+            'warning'
+          );
           setBusyState(false);
           syncSimulationUI();
           return;
@@ -1057,7 +1091,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       }
       try {
         const geojson = map.exportSimulationGeoJSON();
-        showToastNotification(`Exported ${geojson.features.length} flow cells as GeoJSON.`, 'success');
+        showToastNotification(
+          `Exported ${geojson.features.length} flow cells as GeoJSON.`,
+          'success'
+        );
       } catch (err) {
         console.error('GeoJSON export failed:', err);
         showToastNotification('GeoJSON export failed. Please try again.', 'error');

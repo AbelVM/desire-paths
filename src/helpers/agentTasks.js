@@ -102,7 +102,7 @@ function _getCachedDisk(center, r, precomputedDisks) {
     const disk = precomputedDisks[center];
     if (disk) return disk;
   }
-  
+
   // Fall back to LRU cache
   let inner = _diskCache[center];
   if (inner) {
@@ -131,7 +131,7 @@ function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
       return !!visible[b];
     }
   }
-  
+
   const path = _getCachedPathCells(a, b);
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
@@ -174,7 +174,17 @@ function getBearing(start, end) {
   return _bearingFromLatLngs(s, e);
 }
 
-function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLookup, affordanceLookup, cellState, visibilityMap, neighborDisks) {
+function getBestNextStep(
+  curr,
+  gradient,
+  currentDirection,
+  agentId,
+  frictionLookup,
+  affordanceLookup,
+  cellState,
+  visibilityMap,
+  neighborDisks
+) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const weights = WEIGHTS;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
@@ -185,8 +195,12 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
-  const getFriction = cellState ? (n) => (cellState[n] ? cellState[n].friction : undefined) : (n) => frictionLookup[n];
-  const getAffordance = cellState ? (n) => (cellState[n]?.affordance ?? 0.1) : (n) => (affordanceLookup?.[n] ?? 0.1);
+  const getFriction = cellState
+    ? (n) => (cellState[n] ? cellState[n].friction : undefined)
+    : (n) => frictionLookup[n];
+  const getAffordance = cellState
+    ? (n) => cellState[n]?.affordance ?? 0.1
+    : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
   const anglesArr = [];
@@ -226,7 +240,11 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
   for (let i = 0; i < cellsArr.length; i++) {
     if (anglesArr[i] <= visualAngleHalf) {
       if (hardCount !== i) {
-        const swap = (arr) => { const temp = arr[i]; arr[i] = arr[hardCount]; arr[hardCount] = temp; };
+        const swap = (arr) => {
+          const temp = arr[i];
+          arr[i] = arr[hardCount];
+          arr[hardCount] = temp;
+        };
         swap(cellsArr);
         swap(anglesArr);
         swap(affsArr);
@@ -263,7 +281,7 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
         const f = getFriction(n);
         if (f === undefined || f >= impassableVal) continue;
 
-        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (Infinity);
+        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : Infinity;
         if (g < bestGrad) {
           bestGrad = g;
           bestCandidate = n;
@@ -313,7 +331,8 @@ function getBestNextStep(curr, gradient, currentDirection, agentId, frictionLook
       bestScore = affsArr[i];
       bestIndex = i;
     } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost = (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
+      const currentBestCost =
+        (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
       const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
       if (candidateCost < currentBestCost) {
         bestIndex = i;
@@ -339,10 +358,24 @@ function recordTraversal(map, cell) {
   map.set(cell, (map.get(cell) || 0) + 1);
 }
 
-function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, cellState, visibilityMap, neighborDisks) {
+function runAgentPath(
+  originCell,
+  destCell,
+  destGradientObj,
+  maxTicks,
+  simAgentId,
+  pathDesireMap,
+  frictionLookup,
+  affordanceLookup,
+  cellState,
+  visibilityMap,
+  neighborDisks
+) {
   let simCurrent = originCell;
   const simTarget = destCell;
-  let simDirection = getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks) ?? getBearing(simCurrent, simTarget);
+  let simDirection =
+    getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks) ??
+    getBearing(simCurrent, simTarget);
   const simPath = [originCell];
   if (pathDesireMap) recordTraversal(pathDesireMap, originCell);
 
@@ -355,14 +388,25 @@ function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentI
       break;
     }
 
-    const nextStep = getBestNextStep(simCurrent, destGradientObj, simDirection, simAgentId, frictionLookup, affordanceLookup, cellState, visibilityMap, neighborDisks);
+    const nextStep = getBestNextStep(
+      simCurrent,
+      destGradientObj,
+      simDirection,
+      simAgentId,
+      frictionLookup,
+      affordanceLookup,
+      cellState,
+      visibilityMap,
+      neighborDisks
+    );
     if (!nextStep || nextStep === simCurrent) break;
 
     const line = _getCachedPathCells(simCurrent, nextStep);
     let hitTarget = false;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
-      const stepF = cellState && cellState[stepCell] ? cellState[stepCell].friction : frictionLookup[stepCell];
+      const stepF =
+        cellState && cellState[stepCell] ? cellState[stepCell].friction : frictionLookup[stepCell];
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);
@@ -382,7 +426,16 @@ function runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentI
   return simPath;
 }
 
-export function computeAgentBatch({ plan = [], frictionEntries = null, gradients = {}, affordanceEntries = null, hexCount = 0, visibilityEntries = null, neighborDisks = null, options = {} } = {}) {
+export function computeAgentBatch({
+  plan = [],
+  frictionEntries = null,
+  gradients = {},
+  affordanceEntries = null,
+  hexCount = 0,
+  visibilityEntries = null,
+  neighborDisks = null,
+  options = {},
+} = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
   const visibilityMap = visibilityEntries || null;
@@ -395,7 +448,8 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
   }
 
   try {
-    console.debug && console.debug('computeAgentBatch: received', { planLength: plan?.length ?? 0, totalAgents });
+    console.debug &&
+      console.debug('computeAgentBatch: received', { planLength: plan?.length ?? 0, totalAgents });
   } catch (_e) {}
 
   const emitEvery = Math.max(1, Math.floor(totalAgents / 20));
@@ -420,7 +474,13 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
       // gradients are always plain objects — the Map branch is dead code
       destGradientObj = destGradient;
       if (typeof destGradientObj[originCell] !== 'number') {
-        try { console.debug && console.debug('computeAgentBatch: skipping dest because origin missing in gradient', { originCell, destCell }); } catch (_e) {}
+        try {
+          console.debug &&
+            console.debug('computeAgentBatch: skipping dest because origin missing in gradient', {
+              originCell,
+              destCell,
+            });
+        } catch (_e) {}
         continue;
       }
 
@@ -429,7 +489,19 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
 
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
-        const simPath = runAgentPath(originCell, destCell, destGradientObj, maxTicks, simAgentId, pathDesireMap, frictionLookup, affordanceLookup, null, visibilityMap, neighborDisks);
+        const simPath = runAgentPath(
+          originCell,
+          destCell,
+          destGradientObj,
+          maxTicks,
+          simAgentId,
+          pathDesireMap,
+          frictionLookup,
+          affordanceLookup,
+          null,
+          visibilityMap,
+          neighborDisks
+        );
 
         for (let k = 0; k < simPath.length; k++) {
           const cell = simPath[k];
@@ -440,7 +512,12 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
         if (processed % emitEvery === 0) {
           try {
             if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
-              self.postMessage({ progress: true, phase: 'agent-batch', processed, total: totalAgents });
+              self.postMessage({
+                progress: true,
+                phase: 'agent-batch',
+                processed,
+                total: totalAgents,
+              });
             }
           } catch (_e) {}
         }
@@ -472,7 +549,15 @@ export function computeAgentBatch({ plan = [], frictionEntries = null, gradients
     perTargetContribs: perTargetFlat,
   };
 
-  try { console.debug && console.debug('computeAgentBatch: returning', { processed: result.processed, total: result.total, pathDesireKeys: pdKeys.length, perTargetCount: Object.keys(perTargetFlat).length }); } catch (_e) {}
+  try {
+    console.debug &&
+      console.debug('computeAgentBatch: returning', {
+        processed: result.processed,
+        total: result.total,
+        pathDesireKeys: pdKeys.length,
+        perTargetCount: Object.keys(perTargetFlat).length,
+      });
+  } catch (_e) {}
 
   return { result, transfers };
 }

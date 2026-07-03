@@ -235,7 +235,7 @@ describe('grid.js', () => {
     it('should return hexes from polygonToCells when AOI is set', async () => {
       const map = createMockMap();
       const { getHexes } = await import('../src/helpers/grid.js');
-      const hexes = getHexes.call(map);
+      const hexes = getHexes(map, map);
       expect(hexes).toBeDefined();
       expect(Array.isArray(hexes)).toBe(true);
       expect(hexes.length).toBeGreaterThan(0);
@@ -244,12 +244,12 @@ describe('grid.js', () => {
     it('should cache hexes when AOI key is unchanged', async () => {
       const map = createMockMap();
       const { getHexes } = await import('../src/helpers/grid.js');
-      getHexes.call(map);
+      getHexes(map, map);
       const cached = map._cachedViewHexes;
       expect(cached).toBeDefined();
       expect(map._cachedAoiKey).toBeDefined();
       // Second call should return cached
-      const hexes2 = getHexes.call(map);
+      const hexes2 = getHexes(map, map);
       expect(hexes2).toBe(cached);
     });
 
@@ -261,7 +261,7 @@ describe('grid.js', () => {
       };
       // polygonToCells returns empty array for null polygon
       const { getHexes } = await import('../src/helpers/grid.js');
-      const result = getHexes.call(map);
+      const result = getHexes(map, map);
       // When aoi_polygon is null, polygonToCells returns empty array, so getHexes returns []
       expect(Array.isArray(result)).toBe(true);
     });
@@ -273,7 +273,7 @@ describe('grid.js', () => {
         _cachedAoiKey: '0.000000:0.000000:1.000000:1.000000',
       };
       const { getHexes } = await import('../src/helpers/grid.js');
-      const hexes = getHexes.call(map);
+      const hexes = getHexes(map, map);
       expect(hexes).toBe(map._cachedViewHexes);
     });
   });
@@ -284,7 +284,7 @@ describe('grid.js', () => {
       // Set aoi_polygon to null so runAoiHexesTask returns empty array
       map.aoi_polygon = null;
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       // triggerFastScan returns early when viewHexes is empty
       expect(map.cellFrictionMap.size).toBe(0);
     });
@@ -292,7 +292,7 @@ describe('grid.js', () => {
     it('should populate friction maps after triggerFastScan', async () => {
       const map = createMockMap();
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       expect(map.cellFrictionMap.size).toBeGreaterThan(0);
       expect(map.multiFrictionMap.size).toBeGreaterThan(0);
       expect(map.affordanceMap.size).toBeGreaterThan(0);
@@ -301,7 +301,7 @@ describe('grid.js', () => {
     it('should create _frictionObj and _affordanceObj snapshots', async () => {
       const map = createMockMap();
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       expect(map._frictionObj).toBeDefined();
       expect(map._affordanceObj).toBeDefined();
       expect(map._multiFrictionObj).toBeDefined();
@@ -311,16 +311,16 @@ describe('grid.js', () => {
     it('should reuse multiFrictionMap when AOI key unchanged', async () => {
       const map = createMockMap();
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       const firstMap = map.multiFrictionMap;
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       expect(map.multiFrictionMap).toBe(firstMap);
     });
 
     it('should apply blur weights to affordance', async () => {
       const map = createMockMap();
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       // Affordance should be set for all cells
       for (const hex of map.affordanceMap.keys()) {
         expect(typeof map.affordanceMap.get(hex)).toBe('number');
@@ -332,7 +332,7 @@ describe('grid.js', () => {
       let layersCalled = false;
       map.updateLayers = () => { layersCalled = true; };
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       expect(layersCalled).toBe(true);
     });
 
@@ -340,7 +340,7 @@ describe('grid.js', () => {
       const map = createMockMap();
       map.updateLayers = () => {};
       const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan.call(map);
+      await triggerFastScan(map, map);
       // Check that impassable cells get IMPASSABLE affordance
       for (const [cell, aff] of map.affordanceMap) {
         if (map._frictionObj?.[cell] >= FRICTION_COSTS.IMPASSABLE) {
@@ -367,7 +367,7 @@ describe('grid.js', () => {
         [-3.7035, 40.4169],
       ];
       const surface = { layer: '0', cost: 'PAVEMENT' };
-      mapPolygonCells.call(map, coords, surface);
+      mapPolygonCells(map, map, coords, surface);
       expect(map._polyCache).toBeDefined();
     });
 
@@ -384,7 +384,7 @@ describe('grid.js', () => {
           [-3.7035 + i * 0.0001, 40.417],
           [-3.7035 + i * 0.0001, 40.4169],
         ];
-        mapPolygonCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+        mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       }
       expect(map._polyCache.size).toBeLessThanOrEqual(2000);
     });
@@ -401,9 +401,9 @@ describe('grid.js', () => {
         [-3.7035, 40.417],
         [-3.7035, 40.4169],
       ];
-      mapPolygonCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       const firstCall = map._polyCache.get(map._polyCache.keys().next().value);
-      mapPolygonCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       // Cache should still have the entry
       expect(map._polyCache.size).toBe(1);
     });
@@ -422,7 +422,7 @@ describe('grid.js', () => {
         [-3.7035, 40.4169],
         [-3.7034, 40.417],
       ];
-      mapLineCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       expect(map._pathCache).toBeDefined();
     });
 
@@ -439,7 +439,7 @@ describe('grid.js', () => {
           [-3.7035 + i * 0.0001, 40.4169],
           [-3.7034 + i * 0.0001, 40.417],
         ];
-        mapLineCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+        mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       }
       expect(map._pathCache.size).toBeLessThanOrEqual(2000);
     });
@@ -456,8 +456,8 @@ describe('grid.js', () => {
         [-3.7035, 40.4169],
         [-3.7034, 40.417],
       ];
-      mapLineCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
-      mapLineCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       expect(map._pathCache.size).toBe(1);
     });
 
@@ -470,7 +470,7 @@ describe('grid.js', () => {
       }
 
       const coords = [[-3.7035, 40.4169]];
-      mapLineCells.call(map, coords, { layer: '0', cost: 'PAVEMENT' });
+      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       // Single point = no segments, so _pathCache may not be created
       expect(map._pathCache).toBeUndefined();
     });
@@ -485,7 +485,7 @@ describe('map.js', () => {
     it('should return early when no simulationNodes', async () => {
       const map = createMockMap({ simulationNodes: {} });
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
       expect(map.aoi_px).toBeUndefined();
       expect(map.aoi_polygon).toBeUndefined();
     });
@@ -493,7 +493,7 @@ describe('map.js', () => {
     it('should set aoi_polygon and aoi_px when nodes exist', async () => {
       const map = createMockMap();
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
       expect(map.aoi_polygon).toBeDefined();
       expect(map.aoi_px).toBeDefined();
       expect(Array.isArray(map.aoi_polygon)).toBe(true);
@@ -507,7 +507,7 @@ describe('map.js', () => {
       });
       const viewportSE = map.getBounds().getSouthEast();
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
 
       const ring = map.aoi_polygon[0];
       const lngs = ring.map(([lng]) => lng);
@@ -529,7 +529,7 @@ describe('map.js', () => {
       const map = createMockMap();
       map.getSource = vi.fn(() => null);
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
       expect(map.addSource).toHaveBeenCalled();
       expect(map.addLayer).toHaveBeenCalled();
     });
@@ -539,7 +539,7 @@ describe('map.js', () => {
       const sourceMock = { setData: vi.fn() };
       map.getSource = vi.fn(() => sourceMock);
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
       expect(sourceMock.setData).toHaveBeenCalled();
     });
 
@@ -547,8 +547,9 @@ describe('map.js', () => {
       const map = createMockMap({ simulationNodes: {} });
       map.clearLayers = vi.fn();
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
-      expect(map.clearLayers).toHaveBeenCalled();
+      renderInterfacePins(map, map);
+      expect(map.baseLayer).toBeNull();
+      expect(map.flowLayer).toBeNull();
     });
 
     it('should clear all cached properties when no nodes', async () => {
@@ -561,7 +562,7 @@ describe('map.js', () => {
       });
       map.clearLayers = vi.fn();
       const { renderInterfacePins } = await import('../src/helpers/map.js');
-      renderInterfacePins.call(map);
+      renderInterfacePins(map, map);
       expect(map._cachedViewHexes).toBeUndefined();
       expect(map._cachedAoiKey).toBeUndefined();
       expect(map._lastViewHexesKey).toBeUndefined();
@@ -581,7 +582,7 @@ describe('map.js', () => {
       map.pathDesireScores.set(mockHexes[1], 3);
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
       expect(map.flowLayer).toBeDefined();
@@ -595,7 +596,7 @@ describe('map.js', () => {
       map.pathDesireScores.set(mockHexes[0], 5);
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       // baseLayer is always created, but layers passed to deck only include flowLayer
       expect(map.flowLayer).toBeDefined();
@@ -608,7 +609,7 @@ describe('map.js', () => {
       map.pathDesireScores = new Map();
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
       expect(map.flowLayer).toBeDefined();
@@ -622,7 +623,7 @@ describe('map.js', () => {
       map.pathDesireScores = { [mockHexes[0]]: 5, [mockHexes[1]]: 3 };
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
     });
@@ -635,7 +636,7 @@ describe('map.js', () => {
       map.pathDesireScores = new Map();
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
     });
@@ -649,7 +650,7 @@ describe('map.js', () => {
       map.globalPeakFlow = 100;
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.flowLayer).toBeDefined();
     });
@@ -661,7 +662,7 @@ describe('map.js', () => {
       }
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
     });
@@ -675,7 +676,7 @@ describe('map.js', () => {
       map.pathDesireScores = new Map();
 
       const { updateLayers } = await import('../src/helpers/map.js');
-      updateLayers.call(map);
+      updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
     });
@@ -689,7 +690,7 @@ describe('map.js', () => {
       map.deckOverlayInstance = { setProps: vi.fn() };
 
       const { clearLayers } = await import('../src/helpers/map.js');
-      clearLayers.call(map);
+      clearLayers(map, map);
 
       expect(map.baseLayer).toBeNull();
       expect(map.flowLayer).toBeNull();
@@ -700,7 +701,7 @@ describe('map.js', () => {
       map.deckOverlayInstance = { setProps: vi.fn() };
 
       const { clearLayers } = await import('../src/helpers/map.js');
-      clearLayers.call(map);
+      clearLayers(map, map);
 
       expect(map.deckOverlayInstance.setProps).toHaveBeenCalledWith({ layers: [] });
     });
@@ -712,7 +713,7 @@ describe('map.js', () => {
       map.deckOverlayInstance = { setProps: vi.fn() };
 
       const { clearLayers } = await import('../src/helpers/map.js');
-      clearLayers.call(map);
+      clearLayers(map, map);
 
       expect(map.getCanvas().style.cursor).toBe('crosshair');
     });
@@ -722,7 +723,7 @@ describe('map.js', () => {
       map.getCanvas = () => null;
 
       const { clearLayers } = await import('../src/helpers/map.js');
-      expect(() => clearLayers.call(map)).not.toThrow();
+      expect(() => clearLayers(map, map)).not.toThrow();
     });
 
     it('should handle missing getCanvas', async () => {
@@ -730,7 +731,7 @@ describe('map.js', () => {
       map.getCanvas = undefined;
 
       const { clearLayers } = await import('../src/helpers/map.js');
-      expect(() => clearLayers.call(map)).not.toThrow();
+      expect(() => clearLayers(map, map)).not.toThrow();
     });
   });
 });

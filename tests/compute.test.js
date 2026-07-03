@@ -69,7 +69,7 @@ describe('initializeAffordanceMap', () => {
       affordanceMap: new Map([['a', 0.5], ['b', 0.3]]),
       cellFrictionMap: new Map(),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.size).toBe(0);
   });
 
@@ -81,7 +81,7 @@ describe('initializeAffordanceMap', () => {
         ['b', 1],
       ]),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.get('a')).toBe(0.0);
   });
 
@@ -92,7 +92,7 @@ describe('initializeAffordanceMap', () => {
         ['a', 1], // PAVEMENT = 1.0, midPL = 1.75
       ]),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.get('a')).toBe(1.0);
   });
 
@@ -103,7 +103,7 @@ describe('initializeAffordanceMap', () => {
         ['a', 2.5], // midPL=1.75, midLH=3.25
       ]),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.get('a')).toBe(0.6);
   });
 
@@ -114,7 +114,7 @@ describe('initializeAffordanceMap', () => {
         ['a', 5], // >= midLH=3.25
       ]),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.get('a')).toBe(0.3);
   });
 
@@ -127,7 +127,7 @@ describe('initializeAffordanceMap', () => {
       ]),
       _cellState: Object.create(null),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map._cellState['a'].affordance).toBe(1.0);
     expect(map._cellState['b'].affordance).toBe(0.0);
     expect(map._cellState['a'].desire).toBe(0);
@@ -142,7 +142,7 @@ describe('initializeAffordanceMap', () => {
         a: { friction: 1, affordance: 0.5, desire: 10, multi: null },
       },
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map._cellState['a'].affordance).toBe(1.0);
     expect(map._cellState['a'].desire).toBe(10); // desire preserved
   });
@@ -152,7 +152,7 @@ describe('initializeAffordanceMap', () => {
       affordanceMap: new Map(),
       cellFrictionMap: new Map(),
     };
-    initializeAffordanceMap.call(map);
+    initializeAffordanceMap(map);
     expect(map.affordanceMap.size).toBe(0);
   });
 });
@@ -223,7 +223,7 @@ describe('gradient cache helpers', () => {
       ]),
       _cellState: Object.create(null),
     };
-    computeAndCacheGradient.call(map, h3);
+    computeAndCacheGradient(map, h3);
     expect(map._gradientCacheObj).toBeDefined();
     expect(map._gradientCacheObj[h3]).toBeDefined();
   });
@@ -235,14 +235,14 @@ describe('gradient cache helpers', () => {
         b: { a: 1, b: 0 },
       },
     };
-    expect(getCachedGradient.call(map, 'a')).toEqual({ a: 0, b: 1 });
-    expect(getCachedGradient.call(map, 'b')).toEqual({ a: 1, b: 0 });
-    expect(getCachedGradient.call(map, 'c')).toBeUndefined();
+    expect(getCachedGradient(map, 'a')).toEqual({ a: 0, b: 1 });
+    expect(getCachedGradient(map, 'b')).toEqual({ a: 1, b: 0 });
+    expect(getCachedGradient(map, 'c')).toBeUndefined();
   });
 
   it('getCachedGradient should return undefined when no cache', () => {
     const map = {};
-    expect(getCachedGradient.call(map, 'a')).toBeUndefined();
+    expect(getCachedGradient(map, 'a')).toBeUndefined();
   });
 
   it('clearGradientCache should clear the cache', () => {
@@ -252,14 +252,14 @@ describe('gradient cache helpers', () => {
         b: { b: 0 },
       },
     };
-    clearGradientCache.call(map);
+    clearGradientCache(map);
     expect(map._gradientCacheObj).toBeDefined();
     expect(Object.keys(map._gradientCacheObj).length).toBe(0);
   });
 
   it('clearGradientCache should handle missing cache', () => {
     const map = {};
-    clearGradientCache.call(map);
+    clearGradientCache(map);
     expect(map._gradientCacheObj).toBeDefined();
     expect(Object.keys(map._gradientCacheObj).length).toBe(0);
   });
@@ -277,7 +277,7 @@ describe('addDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, h3, 2);
+    addDestination(map, h3, 2);
     expect(map.simulationNodes[h3]).toBeDefined();
     expect(map.simulationNodes[h3].type).toBe('destination');
     expect(map.simulationNodes[h3].weight).toBe(2);
@@ -294,7 +294,7 @@ describe('addDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, h3, 1);
+    addDestination(map, h3, 1);
     expect(map.simulationNodes[h3].type).toBe('dual');
   });
 
@@ -309,7 +309,7 @@ describe('addDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, h3, 5);
+    addDestination(map, h3, 5);
     expect(map.simulationNodes[h3].weight).toBe(5);
   });
 
@@ -325,7 +325,7 @@ describe('addDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    addDestination.call(map, h3, 1);
+    addDestination(map, h3, 1);
     expect(map.simulationNodes[h3].type).toBe('dual');
     expect(map.globalPeakFlow).toBeGreaterThan(1);
   });
@@ -343,7 +343,7 @@ describe('updateDestinationWeight', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    updateDestinationWeight.call(map, h3, 3);
+    updateDestinationWeight(map, h3, 3);
     expect(map.simulationNodes[h3].weight).toBe(3);
   });
 
@@ -358,7 +358,7 @@ describe('updateDestinationWeight', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    updateDestinationWeight.call(map, h3, 3);
+    updateDestinationWeight(map, h3, 3);
     expect(map.simulationNodes[h3]).toBeDefined();
     expect(map.simulationNodes[h3].weight).toBe(3);
   });
@@ -376,7 +376,7 @@ describe('removeDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = removeDestination.call(map, h3);
+    const result = removeDestination(map, h3);
     expect(result.removed).toBe(true);
     expect(map.simulationNodes[h3]).toBeUndefined();
   });
@@ -392,7 +392,7 @@ describe('removeDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = removeDestination.call(map, h3);
+    const result = removeDestination(map, h3);
     expect(result.removed).toBe(true);
     expect(map.simulationNodes[h3].type).toBe('origin');
   });
@@ -408,7 +408,7 @@ describe('removeDestination', () => {
       _cellState: Object.create(null),
       globalPeakFlow: 1,
     };
-    const result = removeDestination.call(map, h3);
+    const result = removeDestination(map, h3);
     expect(result.removed).toBe(false);
   });
 
@@ -430,7 +430,7 @@ describe('removeDestination', () => {
       _targetWeights: { [dest]: 1 },
       updateLayers: () => {},
     };
-    const result = removeDestination.call(map, dest);
+    const result = removeDestination(map, dest);
     expect(result.removed).toBe(true);
     expect(map.simulationNodes[dest]).toBeUndefined();
     expect(map._assignedCounts).toBeDefined();
@@ -449,7 +449,7 @@ describe('removeDestination', () => {
       globalPeakFlow: 5,
       updateLayers: () => {},
     };
-    const result = removeDestination.call(map, h3);
+    const result = removeDestination(map, h3);
     expect(result.removed).toBe(true);
     expect(map.globalPeakFlow).toBeDefined();
   });
@@ -476,7 +476,7 @@ describe('removeDestination', () => {
       _targetWeights: { [dest1]: 1, [dest2]: 1 },
       updateLayers: () => {},
     };
-    const result = removeDestination.call(map, dest1);
+    const result = removeDestination(map, dest1);
     expect(result.removed).toBe(true);
     // dest1 is removed, so it should NOT be in changed (no recomputation needed)
     // dest2 should be in changed because its assigned count changed
@@ -497,7 +497,7 @@ describe('removeDestination', () => {
       globalPeakFlow: 1,
       updateLayers: () => {},
     };
-    const result = removeDestination.call(map, h3);
+    const result = removeDestination(map, h3);
     expect(result.removed).toBe(true);
     // _computeAssignedCounts calls ensureGradientCacheFresh which clears the cache
     // The cache should be empty after removal
@@ -513,7 +513,7 @@ describe('_computeDijkstraGradient', () => {
     const map = {
       cellFrictionMap: frictionMap,
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
   });
 
@@ -530,7 +530,7 @@ describe('_computeDijkstraGradient', () => {
     const map = {
       cellFrictionMap: frictionMap,
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
     // All neighbors should be reachable with distance = 1
     for (const n of neighbors) {
@@ -551,7 +551,7 @@ describe('_computeDijkstraGradient', () => {
     const map = {
       _frictionObj: frictionObj,
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
@@ -575,7 +575,7 @@ describe('_computeDijkstraGradient', () => {
       cellFrictionMap: frictionMap,
       _cellState: cellState,
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
@@ -596,7 +596,7 @@ describe('_computeDijkstraGradient', () => {
     const map = {
       cellFrictionMap: frictionMap,
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
     expect(result[neighborCell]).toBeUndefined();
   });
@@ -606,7 +606,7 @@ describe('_computeDijkstraGradient', () => {
     const map = {
       cellFrictionMap: new Map(),
     };
-    const result = _computeDijkstraGradient.call(map, h3);
+    const result = _computeDijkstraGradient(map, h3);
     expect(result[h3]).toBe(0);
   });
 });
@@ -618,7 +618,7 @@ describe('_isVisible', () => {
       cellFrictionMap: new Map([[h3, 1]]),
       _cellState: Object.create(null),
     };
-    const result = _isVisible.call(map, h3, h3);
+    const result = _isVisible(map, h3, h3);
     expect(typeof result).toBe('boolean');
   });
 
@@ -628,7 +628,7 @@ describe('_isVisible', () => {
       _frictionObj: { [h3]: 1 },
       _cellState: Object.create(null),
     };
-    const result = _isVisible.call(map, h3, h3);
+    const result = _isVisible(map, h3, h3);
     expect(typeof result).toBe('boolean');
   });
 
@@ -638,7 +638,7 @@ describe('_isVisible', () => {
       _frictionObj: { [h3]: 1 },
       _cellState: { [h3]: { friction: 1 } },
     };
-    const result = _isVisible.call(map, h3, h3);
+    const result = _isVisible(map, h3, h3);
     expect(typeof result).toBe('boolean');
   });
 
@@ -649,7 +649,7 @@ describe('_isVisible', () => {
       cellFrictionMap: frictionMap,
       _cellState: Object.create(null),
     };
-    const result = _isVisible.call(map, h3, h3);
+    const result = _isVisible(map, h3, h3);
     expect(typeof result).toBe('boolean');
   });
 });
@@ -680,7 +680,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     expect(result).toBeNull();
   });
 
@@ -697,7 +697,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     // Should return a valid neighbor or null if no visible neighbors
     expect(result === null || typeof result === 'string').toBe(true);
   });
@@ -715,7 +715,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -735,7 +735,7 @@ describe('_getBestNextStep', () => {
       _cellState: cellState,
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -752,7 +752,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     // Should not return the impassable neighbor
     expect(result).not.toBe(neighborCell);
   });
@@ -775,7 +775,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, gradient, 0);
+    const result = _getBestNextStep(map, h3, gradient, 0);
     // Should prefer the neighbor with lower gradient
     expect(result === null || typeof result === 'string').toBe(true);
   });
@@ -795,7 +795,7 @@ describe('_getBestNextStep', () => {
       debugCompute: true,
     };
     // Should not throw with debugCompute enabled
-    const result = _getBestNextStep.call(map, h3, {}, 0, 'test-agent');
+    const result = _getBestNextStep(map, h3, {}, 0, 'test-agent');
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -809,7 +809,7 @@ describe('_getBestNextStep', () => {
       _affordanceObj: { [h3]: 0.5, [neighborCell]: 0.8 },
       // No _cellState
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -824,7 +824,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, gradientObj, 0);
+    const result = _getBestNextStep(map, h3, gradientObj, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -844,7 +844,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     // Should return null when all neighbors are impassable
     expect(result).toBeNull();
   });
@@ -862,7 +862,7 @@ describe('_getBestNextStep', () => {
       _cellState: Object.create(null),
       _affordanceObj: Object.create(null),
     };
-    const result = _getBestNextStep.call(map, h3, {}, 0);
+    const result = _getBestNextStep(map, h3, {}, 0);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 });
@@ -880,7 +880,7 @@ describe('clearComputeCaches', () => {
       _gradientCacheGen: 1,
       _visibilityCacheGen: 1,
     };
-    clearComputeCaches.call(map);
+    clearComputeCaches(map);
     expect(map._computePathCacheObj).toBeUndefined();
     expect(map._computeDiskCacheObj).toBeUndefined();
     expect(map._visibilityCacheObj).toBeUndefined();
@@ -916,7 +916,7 @@ describe('buildSimulationGeoJSON', () => {
       _affordanceObj: { [h3]: 0.4 },
     };
 
-    const geojson = buildSimulationGeoJSON.call(ctx);
+    const geojson = buildSimulationGeoJSON(ctx, ctx);
 
     expect(geojson.type).toBe('FeatureCollection');
     expect(geojson.features).toHaveLength(1);
@@ -936,7 +936,7 @@ describe('buildSimulationGeoJSON', () => {
       _affordanceObj: { [h3]: 0.4 },
     };
 
-    const geojson = buildSimulationGeoJSON.call(ctx);
+    const geojson = buildSimulationGeoJSON(ctx, ctx);
 
     expect(geojson.features).toHaveLength(0);
   });
@@ -971,7 +971,7 @@ describe('getGradientDirection', () => {
       map.cellFrictionMap.set(n, 1);
     }
 
-    const bearing = _getGradientDirection.call(map, center, gradient);
+    const bearing = _getGradientDirection(map, center, gradient);
     expect(typeof bearing).toBe('number');
     expect(bearing).toBeGreaterThanOrEqual(0);
     expect(bearing).toBeLessThan(360);

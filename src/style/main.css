@@ -62,7 +62,13 @@ html {
   padding: 0;
   width: 100%;
   height: 100%;
-  font-family: 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family:
+    'IBM Plex Sans',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   overflow: hidden;
   background:
     radial-gradient(circle at top left, var(--primary-soft), transparent 35%),
@@ -128,8 +134,14 @@ html {
   padding: 20px 20px 18px;
   border-radius: 28px;
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgb(from var(--surface-soft) r g b / 0.96), rgb(from var(--bg) r g b / 0.92));
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: linear-gradient(
+    180deg,
+    rgb(from var(--surface-soft) r g b / 0.96),
+    rgb(from var(--bg) r g b / 0.92)
+  );
+  box-shadow:
+    var(--shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(18px) saturate(1.08);
 }
 
@@ -184,7 +196,8 @@ html {
   height: 54px;
   border-radius: 50%;
   background-color: var(--primary);
-  background-image: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.35) 0%, transparent 40%),
+  background-image:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.35) 0%, transparent 40%),
     radial-gradient(circle at 65% 70%, rgba(242, 0, 132, 0.3), transparent 60%);
   box-shadow:
     0 14px 30px rgb(from var(--primary-rgb) r g b / 0.25),
@@ -239,7 +252,9 @@ html {
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgb(from var(--surface-soft) r g b / 0.92);
-  box-shadow: 0 8px 32px rgb(from var(--black-rgb) r g b / 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow:
+    0 8px 32px rgb(from var(--black-rgb) r g b / 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .alert-card[hidden] {
@@ -289,7 +304,9 @@ html {
   font-weight: 600;
   cursor: pointer;
   border: 1px solid var(--line);
-  transition: background-color 140ms ease, color 140ms ease;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .alert-card-dismiss:hover {
@@ -364,7 +381,11 @@ html {
   font-size: 12px;
   border: 1px solid var(--line);
   cursor: pointer;
-  transition: transform 140ms ease, background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
 }
 
 .btn-segment:hover:not(:disabled) {
@@ -515,7 +536,10 @@ html {
   background: rgb(from var(--white-rgb) r g b / 0.03);
   color: var(--text);
   border: 1px solid var(--line);
-  transition: transform 140ms ease, background-color 140ms ease, color 140ms ease;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
 }
 
 .btn:hover:not(:disabled) {
@@ -541,7 +565,6 @@ html {
   box-shadow: 0 12px 40px rgb(from var(--black-rgb) r g b / 0.45);
 }
 
-
 .btn-ghost:hover:not(:disabled) {
   background: rgb(from var(--black-rgb) r g b / 0.22);
   color: var(--text-strong);
@@ -549,7 +572,7 @@ html {
 }
 
 .btn-ghost {
-  background: rgb(from var(--black-rgb) r g b / 0.10);
+  background: rgb(from var(--black-rgb) r g b / 0.1);
   color: var(--text);
   border-color: var(--line);
 }
@@ -629,7 +652,11 @@ html {
   position: absolute;
   bottom: 20px;
   right: 20px;
-  background: linear-gradient(180deg, rgb(from var(--surface-soft) r g b / 0.96), rgb(from var(--bg) r g b / 0.92));
+  background: linear-gradient(
+    180deg,
+    rgb(from var(--surface-soft) r g b / 0.96),
+    rgb(from var(--bg) r g b / 0.92)
+  );
   padding: 14px 14px 12px;
   border-radius: 28px;
   border: 1px solid var(--line);
@@ -676,7 +703,11 @@ html {
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .legend-icon-button:hover {
@@ -869,7 +900,9 @@ html {
   border: 1px solid var(--line);
   background: rgb(from var(--surface-soft) r g b / 0.96);
   backdrop-filter: blur(24px) saturate(1.1);
-  box-shadow: 0 32px 80px rgb(from var(--black-rgb) r g b / 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow:
+    0 32px 80px rgb(from var(--black-rgb) r g b / 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   max-width: 400px;
 }
 
@@ -879,7 +912,9 @@ html {
   gap: 14px;
   padding: 10px 0;
   opacity: 0.35;
-  transition: opacity 260ms ease, transform 260ms ease;
+  transition:
+    opacity 260ms ease,
+    transform 260ms ease;
 }
 
 .onboarding-step.active {
@@ -927,7 +962,11 @@ html {
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .onboarding-close:hover {
@@ -1003,7 +1042,9 @@ html {
   background: linear-gradient(90deg, var(--primary), var(--accent));
   transform: scaleX(0);
   transform-origin: left center;
-  transition: transform 180ms ease, filter 140ms ease;
+  transition:
+    transform 180ms ease,
+    filter 140ms ease;
   position: relative;
   overflow: hidden;
 }
@@ -1035,7 +1076,6 @@ html {
 }
 
 @keyframes pulse {
-
   0%,
   100% {
     opacity: 1;
@@ -1268,9 +1308,7 @@ html {
   }
 }
 
-
 /* SPINNER */
-
 
 .loading {
   position: fixed;
@@ -1282,7 +1320,7 @@ html {
   background: rgba(0, 0, 0, 0.7);
   pointer-events: all;
   user-select: none;
-  z-index: 99999999999999999
+  z-index: 99999999999999999;
 }
 
 .spinner {
@@ -1293,55 +1331,55 @@ html {
   position: absolute;
   top: 50%;
   left: 50%;
-  margin-left: var(--as-spinner-margin)
+  margin-left: var(--as-spinner-margin);
 }
 
-.spinner>div {
+.spinner > div {
   background-color: color-mix(in srgb, var(--as--color--spinner-bg) 20%, transparent);
   height: 100%;
   position: absolute;
   width: 100%;
-  border: 2.9px solid var(--as--color--spinner-border)
+  border: 2.9px solid var(--as--color--spinner-border);
 }
 
 .spinner div:nth-of-type(1) {
-  transform: translateZ(-28.8px) rotateY(180deg)
+  transform: translateZ(-28.8px) rotateY(180deg);
 }
 
 .spinner div:nth-of-type(2) {
   transform: rotateY(-270deg) translate(50%);
-  transform-origin: top right
+  transform-origin: top right;
 }
 
 .spinner div:nth-of-type(3) {
   transform: rotateY(270deg) translate(-50%);
-  transform-origin: center left
+  transform-origin: center left;
 }
 
 .spinner div:nth-of-type(4) {
   transform: rotateX(90deg) translateY(-50%);
-  transform-origin: top center
+  transform-origin: top center;
 }
 
 .spinner div:nth-of-type(5) {
   transform: rotateX(-90deg) translateY(50%);
-  transform-origin: bottom center
+  transform-origin: bottom center;
 }
 
 .spinner div:nth-of-type(6) {
-  transform: translateZ(28.8px)
+  transform: translateZ(28.8px);
 }
 
 @keyframes spinner-animation {
   0% {
-    transform: rotate(45deg) rotateX(-25deg) rotateY(25deg)
+    transform: rotate(45deg) rotateX(-25deg) rotateY(25deg);
   }
 
   50% {
-    transform: rotate(45deg) rotateX(-385deg) rotateY(25deg)
+    transform: rotate(45deg) rotateX(-385deg) rotateY(25deg);
   }
 
   to {
-    transform: rotate(45deg) rotateX(-385deg) rotateY(385deg)
+    transform: rotate(45deg) rotateX(-385deg) rotateY(385deg);
   }
 }

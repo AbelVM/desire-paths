@@ -55,12 +55,12 @@ function buildCircularAoiPolygon(mapInstance, nodePoints) {
   };
 }
 
-export function renderInterfacePins() {
-  const nodePoints = Object.entries(this.simulationNodes ?? {}).map(([k, node]) => {
+export function renderInterfacePins(state, mapInstance) {
+  const nodePoints = Object.entries(state.simulationNodes ?? {}).map(([k, node]) => {
     const pt = cellToLatLng(k);
     return {
       cell: k,
-      point: this.project([pt[1], pt[0]]),
+      point: mapInstance.project([pt[1], pt[0]]),
       lng: pt[1],
       lat: pt[0],
       type: node.type,
@@ -75,29 +75,29 @@ export function renderInterfacePins() {
   }));
 
   if (feats.length === 0) {
-    this.aoi_px = undefined;
-    this.aoi_polygon = undefined;
-    this._cachedViewHexes = undefined;
-    this._cachedAoiKey = undefined;
-    this._lastViewHexesKey = undefined;
-    this._multiFrictionObj = undefined;
-    if (this.getSource('pins')) {
-      this.getSource('pins').setData({ type: 'FeatureCollection', features: [] });
+    state.aoi_px = undefined;
+    state.aoi_polygon = undefined;
+    state._cachedViewHexes = undefined;
+    state._cachedAoiKey = undefined;
+    state._lastViewHexesKey = undefined;
+    state._multiFrictionObj = undefined;
+    if (mapInstance.getSource('pins')) {
+      mapInstance.getSource('pins').setData({ type: 'FeatureCollection', features: [] });
     }
-    this.clearLayers();
+    clearLayers(state, mapInstance);
     return;
   }
 
-  const aoi = buildCircularAoiPolygon(this, nodePoints);
-  this.aoi_px = aoi.aoiPx;
-  this.aoi_polygon = aoi.aoiPolygon;
+  const aoi = buildCircularAoiPolygon(mapInstance, nodePoints);
+  state.aoi_px = aoi.aoiPx;
+  state.aoi_polygon = aoi.aoiPolygon;
 
-  if (!this.getSource('pins')) {
-    this.addSource('pins', {
+  if (!mapInstance.getSource('pins')) {
+    mapInstance.addSource('pins', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: feats },
     });
-    this.addLayer({
+    mapInstance.addLayer({
       id: 'pin-circles',
       type: 'circle',
       source: 'pins',
@@ -124,12 +124,12 @@ export function renderInterfacePins() {
           0.9,
           ['==', ['get', 'type'], 'dual'],
           0.95,
-          0.7
+          0.7,
         ],
         'circle-blur': 0.1,
       },
     });
-    this.addLayer({
+    mapInstance.addLayer({
       id: 'pin-labels',
       type: 'symbol',
       source: 'pins',
@@ -143,7 +143,7 @@ export function renderInterfacePins() {
       paint: { 'text-color': '#ffffff' },
     });
     // Add glow effect for dual nodes
-    this.addLayer({
+    mapInstance.addLayer({
       id: 'pin-glow',
       type: 'circle',
       source: 'pins',
@@ -154,15 +154,15 @@ export function renderInterfacePins() {
           ['get', 'type'],
           'dual',
           'rgba(246, 200, 95, 0.3)',
-          'rgba(0, 0, 0, 0)'
+          'rgba(0, 0, 0, 0)',
         ],
         'circle-blur': 15,
         'circle-opacity': 0.6,
       },
-      filter: ['==', ['get', 'type'], 'dual']
+      filter: ['==', ['get', 'type'], 'dual'],
     });
   } else {
-    this.getSource('pins').setData({
+    mapInstance.getSource('pins').setData({
       type: 'FeatureCollection',
       features: feats,
     });
@@ -184,17 +184,26 @@ function updateOrCreateLayer(existingLayer, layerProps) {
   return new H3HexagonLayer(layerProps);
 }
 
-export function updateLayers() {
-  const viewHexes = this.getHexes() ?? Array.from(this.cellFrictionMap?.keys() ?? []);
+export function updateLayers(state, mapInstance) {
+  const viewHexes = mapInstance.getHexes?.() ?? Array.from(state.cellFrictionMap?.keys() ?? []);
 
   const frictionObj = Object.create(null);
-  for (const [k, v] of this.cellFrictionMap ?? []) frictionObj[k] = v;
-  const pathObj = Object.create(null);
-  if (this.pathDesireScores) {
-    for (const k in this.pathDesireScores) pathObj[k] = this.pathDesireScores[k];
+  if (state.cellFrictionMap && typeof state.cellFrictionMap.entries === 'function') {
+    for (const [k, v] of state.cellFrictionMap.entries()) frictionObj[k] = v;
+  } else {
+    for (const k in state.cellFrictionMap ?? {}) frictionObj[k] = state.cellFrictionMap[k];
   }
 
-  const logMax = Math.log1p(this.globalPeakFlow ?? 1);
+  const pathObj = Object.create(null);
+  if (state.pathDesireScores) {
+    if (typeof state.pathDesireScores.entries === 'function') {
+      for (const [k, v] of state.pathDesireScores.entries()) pathObj[k] = v;
+    } else {
+      for (const k in state.pathDesireScores) pathObj[k] = state.pathDesireScores[k];
+    }
+  }
+
+  const logMax = Math.log1p(state.globalPeakFlow ?? 1);
   const invLogMax = logMax > 0 ? 1 / logMax : 0;
 
   const _stopsR = [235, 198, 156, 129, 77];
@@ -204,12 +213,12 @@ export function updateLayers() {
 
   // Reuse pre-allocated object pools to avoid per-frame allocations at scale.
   const len = viewHexes.length;
-  if (!this._flatPool) {
-    this._flatPool = [];
-    this._flowPool = [];
+  if (!state._flatPool) {
+    state._flatPool = [];
+    state._flowPool = [];
   }
-  while (this._flatPool.length < len) {
-    this._flatPool.push({ hex: '', f: 0, s: 0 });
+  while (state._flatPool.length < len) {
+    state._flatPool.push({ hex: '', f: 0, s: 0 });
   }
 
   let flatCount = 0;
@@ -218,32 +227,32 @@ export function updateLayers() {
   for (let i = 0; i < len; i++) {
     const h = viewHexes[i];
     const s = pathObj[h] ?? 0;
-    const entry = this._flatPool[flatCount++];
+    const entry = state._flatPool[flatCount++];
     entry.hex = h;
     entry.f = frictionObj[h] ?? 0;
     entry.s = s;
     if (s > 0) {
-      while (this._flowPool.length < flowCount + 1) {
-        this._flowPool.push({ hex: '', f: 0, s: 0 });
+      while (state._flowPool.length < flowCount + 1) {
+        state._flowPool.push({ hex: '', f: 0, s: 0 });
       }
-      this._flowPool[flowCount++] = entry;
+      state._flowPool[flowCount++] = entry;
     }
   }
 
-  const flatData = this._flatPool.slice(0, flatCount);
-  const flowData = this._flowPool.slice(0, flowCount);
+  const flatData = state._flatPool.slice(0, flatCount);
+  const flowData = state._flowPool.slice(0, flowCount);
 
   // Version counters let updateTriggers fire only when data actually changes,
   // without relying on array-reference churn.
-  this._flatDataVersion = (this._flatDataVersion || 0) + 1;
-  this._flowDataVersion = (this._flowDataVersion || 0) + 1;
+  state._flatDataVersion = (state._flatDataVersion || 0) + 1;
+  state._flowDataVersion = (state._flowDataVersion || 0) + 1;
 
   const baseLayerProps = {
     id: 'friction-mesh',
     data: flatData,
     extruded: false,
     pickable: false,
-    beforeId: this.targetLabelLayerId,
+    beforeId: state.targetLabelLayerId,
     stroked: false,
     getLineWidth: 0,
     filled: true,
@@ -254,7 +263,7 @@ export function updateLayers() {
       if (d.f === FRICTION_COSTS.LIGHT_PARK) return [166, 216, 84, 90];
       return [0, 150, 255, 25];
     },
-    updateTriggers: { getFillColor: [this._flatDataVersion] },
+    updateTriggers: { getFillColor: [state._flatDataVersion] },
   };
 
   const flowLayerProps = {
@@ -263,7 +272,7 @@ export function updateLayers() {
     extruded: false,
     pickable: true,
     onHover: (info) => handleFlowHover(info),
-    beforeId: this.targetLabelLayerId,
+    beforeId: state.targetLabelLayerId,
     stroked: false,
     getLineWidth: 0,
     filled: true,
@@ -277,39 +286,42 @@ export function updateLayers() {
       const c1g = _stopsG[idx];
       const c1b = _stopsB[idx];
       const c2i = idx + 1 < stopsN ? idx + 1 : idx;
-      const r = c1r + ((_stopsR[c2i] - c1r) * t) | 0;
-      const g = c1g + ((_stopsG[c2i] - c1g) * t) | 0;
-      const b = c1b + ((_stopsB[c2i] - c1b) * t) | 0;
-      const a = 140 + (115 * ratio) | 0;
+      const r = (c1r + (_stopsR[c2i] - c1r) * t) | 0;
+      const g = (c1g + (_stopsG[c2i] - c1g) * t) | 0;
+      const b = (c1b + (_stopsB[c2i] - c1b) * t) | 0;
+      const a = (140 + 115 * ratio) | 0;
       return [r, g, b, a];
     },
-    updateTriggers: { getFillColor: [this._flowDataVersion, this.globalPeakFlow] },
+    updateTriggers: { getFillColor: [state._flowDataVersion, state.globalPeakFlow] },
   };
 
-  this.baseLayer = updateOrCreateLayer(this.baseLayer, baseLayerProps);
-  this.flowLayer = updateOrCreateLayer(this.flowLayer, flowLayerProps);
+  state.baseLayer = updateOrCreateLayer(state.baseLayer, baseLayerProps);
+  state.flowLayer = updateOrCreateLayer(state.flowLayer, flowLayerProps);
 
-  const layers = this.showFrictionMesh === false ? [this.flowLayer] : [this.baseLayer, this.flowLayer];
-  this.deckOverlayInstance?.setProps({ layers });
+  const layers =
+    state.showFrictionMesh === false ? [state.flowLayer] : [state.baseLayer, state.flowLayer];
+  state.deckOverlayInstance?.setProps({ layers });
 }
 
-function getScore(cell) {
-  const scores = this.pathDesireScores;
+function getScore(state, cell) {
+  const scores = state.pathDesireScores;
   if (!scores) return 0;
+  if (typeof scores.get === 'function') return scores.get(cell) || 0;
   return scores[cell] || 0;
 }
 
-export function buildSimulationGeoJSON() {
-  const pathScores = this.pathDesireScores;
+export function buildSimulationGeoJSON(state, mapInstance) {
+  const pathScores = state.pathDesireScores;
   let scoreCells;
   if (pathScores) {
-    scoreCells = Object.keys(pathScores);
+    if (typeof pathScores.keys === 'function') scoreCells = Array.from(pathScores.keys());
+    else scoreCells = Object.keys(pathScores);
   }
 
-  const viewHexes = this.getHexes?.() ?? Array.from(this.cellFrictionMap?.keys() ?? []);
+  const viewHexes = mapInstance.getHexes?.() ?? Array.from(state.cellFrictionMap?.keys() ?? []);
 
   // Merge: scored cells + visible hexes that aren't already scored
-  const allHexes = new Set(scoreCells);
+  const allHexes = new Set(scoreCells ?? []);
   for (const h of viewHexes) {
     if (!allHexes.has(h)) allHexes.add(h);
   }
@@ -317,15 +329,20 @@ export function buildSimulationGeoJSON() {
   const features = [];
 
   for (const cell of allHexes) {
-    const score = getScore.call(this, cell);
+    const score = getScore(state, cell);
     if (!score) continue;
 
     const boundary = cellToBoundary(cell, true);
-    const frictionObj = this._frictionObj || {};
-    const affordanceObj = this._affordanceObj || {};
-    const friction = typeof frictionObj[cell] === 'number' ? frictionObj[cell] : this.cellFrictionMap?.get(cell) ?? 0;
+    const frictionObj = state._frictionObj || {};
+    const affordanceObj = state._affordanceObj || {};
+    const friction =
+      typeof frictionObj[cell] === 'number'
+        ? frictionObj[cell]
+        : (state.cellFrictionMap?.get(cell) ?? 0);
     const affordance =
-      typeof affordanceObj[cell] === 'number' ? affordanceObj[cell] : this.affordanceMap?.get(cell) ?? 0;
+      typeof affordanceObj[cell] === 'number'
+        ? affordanceObj[cell]
+        : (state.affordanceMap?.get(cell) ?? 0);
 
     features.push({
       type: 'Feature',
@@ -348,8 +365,8 @@ export function buildSimulationGeoJSON() {
   };
 }
 
-export function exportSimulationGeoJSON() {
-  const geojson = buildSimulationGeoJSON.call(this);
+export function exportSimulationGeoJSON(state, mapInstance) {
+  const geojson = buildSimulationGeoJSON(state, mapInstance);
   const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -363,10 +380,10 @@ export function exportSimulationGeoJSON() {
   return geojson;
 }
 
-export function clearLayers() {
-  this.baseLayer = null;
-  this.flowLayer = null;
-  this.deckOverlayInstance?.setProps({ layers: [] });
-  const canvas = this.getCanvas?.();
+export function clearLayers(state, mapInstance) {
+  state.baseLayer = null;
+  state.flowLayer = null;
+  state.deckOverlayInstance?.setProps({ layers: [] });
+  const canvas = mapInstance.getCanvas?.();
   if (canvas) canvas.style.cursor = 'crosshair';
 }
