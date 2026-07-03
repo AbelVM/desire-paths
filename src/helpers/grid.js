@@ -163,7 +163,7 @@ export async function triggerFastScan() {
   this.affordanceMap.clear();
   this._affordanceObj = Object.create(null);
   this._cellState = Object.create(null);
-  this._affordanceSnapshotGen = this._mappingGeneration;
+  this._cellStateMappingGen = this._mappingGeneration;
 
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];

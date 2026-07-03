@@ -307,7 +307,6 @@ export function clearComputeCaches() {
   this._visibilityCacheMisses = 0;
   this._visibilityCacheGen = undefined;
   this._cellStateMappingGen = undefined;
-  this._cellStateAffordanceGen = undefined;
   clearGradientCache.call(this);
   this._gradientCacheGen = undefined;
   clearLatLngCache();
@@ -631,11 +630,11 @@ export async function computeDesirePaths() {
   }
 
   // Consolidated per-cell state object for hot-path reads/writes.
-  // Only rebuild when friction or affordance actually changed to avoid object churn.
-  const affordanceGen = this._affordanceSnapshotGen ?? 0;
+  // Only rebuild when friction actually changed to avoid object churn.
+  // Affordance is updated in-place during simulation, so no separate tracking needed.
   const lastCellStateMappingGen = this._cellStateMappingGen ?? -1;
-  const lastCellStateAffordanceGen = this._cellStateAffordanceGen ?? -1;
-  if (!this._cellState || lastCellStateMappingGen !== mappingGen || lastCellStateAffordanceGen !== affordanceGen) {
+  if (!this._cellState || lastCellStateMappingGen !== mappingGen) {
+    const existingState = this._cellState;
     this._cellState = Object.create(null);
     const frictionObj = this._frictionObj;
     const affordanceObj = this._affordanceObj;
@@ -647,10 +646,9 @@ export async function computeDesirePaths() {
       const aff = affordanceObj?.[k] ?? 0.1;
       const desire = desireScores?.[k] ?? 0;
       const multi = multiFrictionObj?.[k] ?? null;
-      this._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, null, k);
+      this._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
     }
     this._cellStateMappingGen = mappingGen;
-    this._cellStateAffordanceGen = affordanceGen;
   }
 
   // Grass recovery between user-triggered simulation runs (not after wear in the same pass)
@@ -1127,8 +1125,6 @@ function updateAffordance(cell, volume = 1) {
 
   if (cs) cs.affordance = newVal;
   if (this._affordanceObj) this._affordanceObj[cell] = newVal;
-  // Bump affordance gen to invalidate _cellState on next compute
-  this._affordanceSnapshotGen = (this._affordanceSnapshotGen ?? 0) + 1;
 }
 
 /**
@@ -1148,8 +1144,6 @@ function decayAffordance(cell) {
 
   if (cs) cs.affordance = newVal;
   if (this._affordanceObj) this._affordanceObj[cell] = newVal;
-  // Bump affordance gen to invalidate _cellState on next compute
-  this._affordanceSnapshotGen = (this._affordanceSnapshotGen ?? 0) + 1;
 }
 
 /**
