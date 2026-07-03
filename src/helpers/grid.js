@@ -145,7 +145,7 @@ export async function triggerFastScan() {
     }
   }
 
-  // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
+// Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
   const blurWeights = build.blurWeights ?? Object.create(null);
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
   const pavement = AFFORDANCE.PAVEMENT;
@@ -163,6 +163,7 @@ export async function triggerFastScan() {
   this.affordanceMap.clear();
   this._affordanceObj = Object.create(null);
   this._cellState = Object.create(null);
+  this._affordanceSnapshotGen = this._mappingGeneration;
 
   for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
     const cell = viewHexes[i];
