@@ -202,16 +202,41 @@ export function updateLayers() {
   const _stopsB = [236, 201, 160, 124, 73];
   const stopsN = 5;
 
-  const flatData = [];
-  const flowData = [];
+  // Reuse pre-allocated object pools to avoid per-frame allocations at scale.
   const len = viewHexes.length;
+  if (!this._flatPool) {
+    this._flatPool = [];
+    this._flowPool = [];
+  }
+  while (this._flatPool.length < len) {
+    this._flatPool.push({ hex: '', f: 0, s: 0 });
+  }
+
+  let flatCount = 0;
+  let flowCount = 0;
+
   for (let i = 0; i < len; i++) {
     const h = viewHexes[i];
     const s = pathObj[h] ?? 0;
-    const entry = { hex: h, f: frictionObj[h] ?? 0, s };
-    flatData.push(entry);
-    if (s > 0) flowData.push(entry);
+    const entry = this._flatPool[flatCount++];
+    entry.hex = h;
+    entry.f = frictionObj[h] ?? 0;
+    entry.s = s;
+    if (s > 0) {
+      while (this._flowPool.length < flowCount + 1) {
+        this._flowPool.push({ hex: '', f: 0, s: 0 });
+      }
+      this._flowPool[flowCount++] = entry;
+    }
   }
+
+  const flatData = this._flatPool.slice(0, flatCount);
+  const flowData = this._flowPool.slice(0, flowCount);
+
+  // Version counters let updateTriggers fire only when data actually changes,
+  // without relying on array-reference churn.
+  this._flatDataVersion = (this._flatDataVersion || 0) + 1;
+  this._flowDataVersion = (this._flowDataVersion || 0) + 1;
 
   const baseLayerProps = {
     id: 'friction-mesh',
@@ -229,7 +254,7 @@ export function updateLayers() {
       if (d.f === FRICTION_COSTS.LIGHT_PARK) return [166, 216, 84, 90];
       return [0, 150, 255, 25];
     },
-    updateTriggers: { getFillColor: [flatData] },
+    updateTriggers: { getFillColor: [this._flatDataVersion] },
   };
 
   const flowLayerProps = {
@@ -258,7 +283,7 @@ export function updateLayers() {
       const a = 140 + (115 * ratio) | 0;
       return [r, g, b, a];
     },
-    updateTriggers: { getFillColor: [flowData, this.globalPeakFlow] },
+    updateTriggers: { getFillColor: [this._flowDataVersion, this.globalPeakFlow] },
   };
 
   this.baseLayer = updateOrCreateLayer(this.baseLayer, baseLayerProps);
