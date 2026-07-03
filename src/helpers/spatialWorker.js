@@ -307,6 +307,7 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
       : normalizeFrictionEntries(affordanceSource);
 
   const visibilityEntries = options?.visibilityEntries || null;
+  const neighborDisks = options?.neighborDisks || null;
 
   // Normalize gradients into a plain object for structured-clone
   const gradientsObj = Object.create(null);
@@ -356,7 +357,7 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
   try { console.debug && console.debug(`runAgentBatches: dispatching agent-batches workerCount=${workerCount} planLength=${plan.length}`); } catch (_e) {}
   if (workerCount <= 1) {
     // run locally on main thread
-    const ret = computeAgentBatch({ plan, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, options });
+    const ret = computeAgentBatch({ plan, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, neighborDisks, options });
     // computeAgentBatch returns { result, transfers } when used in a worker; normalize
     const result = ret && ret.result ? ret.result : ret;
     // convert flattened structures into plain objects
@@ -385,7 +386,7 @@ export async function runAgentBatches(plan, frictionSource, gradients, affordanc
   const chunks = splitIntoChunks(plan, workerCount);
   try { console.debug && console.debug('runAgentBatches: chunks', chunks.map((c) => c.length)); } catch (_e) {}
   const results = await Promise.all(
-    chunks.map((chunk) => runWorker('agent-batch', { plan: chunk, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, options }))
+    chunks.map((chunk) => runWorker('agent-batch', { plan: chunk, frictionEntries, gradients: gradientsObj, affordanceEntries, hexCount, visibilityEntries, neighborDisks, options }))
   );
 
   const mergedPath = Object.create(null);

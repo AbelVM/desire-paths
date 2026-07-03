@@ -137,6 +137,20 @@ function _getCachedPathCells(ctx, a, b) {
 }
 
 function _getCachedDisk(ctx, center, r) {
+  // Use precomputed neighbor disk when available and fresh (VISUAL_DEPTH only)
+  if (r === VISUAL_DEPTH) {
+    const precomputed = ctx._precomputedNeighborDisks;
+    const currentGen = ctx._mappingGeneration ?? 0;
+    if (precomputed && precomputed.gen === currentGen) {
+      const disk = precomputed.data[center];
+      if (disk) {
+        ctx._computeDiskCacheHits++;
+        return disk;
+      }
+    }
+  }
+  
+  // Fall back to LRU cache for other radii
   if (!ctx._computeDiskCacheObj) {
     ctx._computeDiskCacheObj = Object.create(null);
     ctx._computeDiskCacheOrder = [];
@@ -166,6 +180,18 @@ function _getCachedDisk(ctx, center, r) {
     delete ctx._computeDiskCacheObj[old];
   }
   return arr;
+}
+
+// Precompute neighbor disks for all AOI cells at mapping time.
+// Stores gridDisk(cell, VISUAL_DEPTH) for each cell to avoid millions of redundant calls.
+// Keyed by mapping generation so it invalidates on remap.
+function precomputeNeighborDisks(cells, visualDepth) {
+  const result = Object.create(null);
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    result[cell] = gridDisk(cell, visualDepth);
+  }
+  return result;
 }
 
 // Precompute visibility sets for all cells within the AOI.
@@ -272,6 +298,7 @@ export function clearComputeCaches() {
   this._visibilityCacheObj = undefined;
   this._visibilityCacheOrder = undefined;
   this._precomputedVisibility = undefined;
+  this._precomputedNeighborDisks = undefined;
   this._computePathCacheHits = 0;
   this._computePathCacheMisses = 0;
   this._computeDiskCacheHits = 0;
@@ -1163,6 +1190,7 @@ export {
   yieldToMain as _yieldToMain,
   buildCellStateEntry,
   precomputeVisibilitySets,
+  precomputeNeighborDisks,
 };
 
 // Diagnostic helper to inspect cache instrumentation
