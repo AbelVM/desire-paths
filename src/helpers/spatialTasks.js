@@ -39,32 +39,45 @@ export function computeAoiHexes(aoiPolygon) {
   }
 }
 
+// --- Deterministic coordinate hash for precise deduplication -----------------
+// FNV-1a style hash over downsampled coordinates of the first ring.
+function _hashCoords(coords) {
+  const ring = coords && coords[0];
+  if (!ring || !ring.length) return '';
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < ring.length; i++) {
+    const c = ring[i] || [0, 0];
+    h ^= Math.imul(Math.round(c[0] * 1e4), 16777619) >>> 0;
+    h = Math.imul(h, 16777619) >>> 0;
+    h ^= Math.imul(Math.round(c[1] * 1e4), 16777619) >>> 0;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `${h}:${ring.length}`;
+}
+
 // Cache polygonToCells results to avoid repeated H3 computation for identical geometries
 const _polyCellsCache = Object.create(null);
 const _polyCellsCacheOrder = [];
 
 function getCachedPolyCells(coords) {
-  // Build a deterministic key from coordinates
+  // Build a deterministic key from coordinates using hash + bbox + structure
   let minx = Infinity,
     miny = Infinity,
     maxx = -Infinity,
     maxy = -Infinity;
-  let points = 0;
   for (let i = 0; i < coords.length; i++) {
     const ring = coords[i] || [];
-    points += ring.length;
     for (let j = 0; j < ring.length; j++) {
       const coord = ring[j] || [0, 0];
-      const lng = coord[0],
-        lat = coord[1];
-      if (lng < minx) minx = lng;
-      if (lng > maxx) maxx = lng;
-      if (lat < miny) miny = lat;
-      if (lat > maxy) maxy = lat;
+      if (coord[0] < minx) minx = coord[0];
+      if (coord[0] > maxx) maxx = coord[0];
+      if (coord[1] < miny) miny = coord[1];
+      if (coord[1] > maxy) maxy = coord[1];
     }
   }
   if (!isFinite(minx)) return [];
-  const key = `${minx.toFixed(4)}:${miny.toFixed(4)}:${maxx.toFixed(4)}:${maxy.toFixed(4)}:${points}`;
+
+  const key = `${_hashCoords(coords)}:${minx.toFixed(4)}:${miny.toFixed(4)}:${maxx.toFixed(4)}:${maxy.toFixed(4)}:${coords.length}`;
   const cached = _polyCellsCache[key];
   if (cached) return cached;
 

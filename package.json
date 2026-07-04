@@ -34,12 +34,12 @@
     "deploy": "push-dir --dir=dist --branch=gh-pages"
   },
   "dependencies": {
-    "@deck.gl/core": "^9.3.5",
-    "@deck.gl/geo-layers": "^9.3.5",
-    "@deck.gl/layers": "^9.3.5",
-    "@deck.gl/mapbox": "^9.3.5",
+    "@deck.gl/core": "^9.3.6",
+    "@deck.gl/geo-layers": "^9.3.6",
+    "@deck.gl/layers": "^9.3.6",
+    "@deck.gl/mapbox": "^9.3.6",
     "@maplibre/maplibre-gl-geocoder": "^1.9.4",
-    "h3-js": "^4.4.0",
+    "h3-js": "^4.5.0",
     "maplibre-gl": "^5.24.0"
   },
   "devDependencies": {
@@ -55,7 +55,7 @@
     "prettier": "^3.9.4",
     "push-dir": "^0.4.1",
     "terser": "^5.48.0",
-    "vite": "^8.1.2",
+    "vite": "^8.1.3",
     "vitest": "^4.1.9"
   }
 }
