@@ -214,12 +214,15 @@ function precomputeNeighborDisks(cells, visualDepth) {
 // Precompute bearings between all AOI cell pairs within VISUAL_DEPTH radius.
 // Returns a flat string-keyed map: "center::neighbor" → bearing (degrees).
 // This eliminates billions of _bearingFromLatLngs trig calls during simulation.
-function precomputeBearingMap(cells, visualDepth) {
+// OPTIMIZATION: Reuses precomputed neighbor disks to avoid redundant gridDisk calls.
+function precomputeBearingMap(cells, visualDepth, precomputedDisks) {
   const result = Object.create(null);
+  const disks = precomputedDisks || (cells.length > 0 ? precomputeNeighborDisks(cells, visualDepth) : null);
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
     const sLatLng = _getCachedLatLng(cell);
-    const disk = gridDisk(cell, visualDepth);
+    // Use precomputed disks if available, otherwise compute on-demand
+    const disk = disks ? disks[cell] : gridDisk(cell, visualDepth);
     for (let j = 0; j < disk.length; j++) {
       const n = disk[j];
       if (n === cell) continue;
@@ -251,7 +254,8 @@ function precomputeOriginDestDistances(origins, destinations) {
 // For each cell, stores a plain-object map of visible neighbor -> true.
 // This eliminates O(N^2) gridPathCells lookups during simulation.
 // Keyed by mapping generation so it invalidates on remap.
-function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
+// OPTIMIZATION: Accepts precomputed neighbor disks to avoid redundant gridDisk calls.
+function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDisks) {
   const result = Object.create(null);
   const impassable = FRICTION_COSTS.IMPASSABLE;
 
@@ -266,8 +270,10 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
     const cell = cells[i];
     if (!isPassable[cell]) continue; // origin must be passable
 
-    const disk = gridDisk(cell, maxDepth);
+    // Use precomputed disks to avoid redundant gridDisk call
+    const disk = precomputedDisks ? precomputedDisks[cell] : gridDisk(cell, maxDepth);
     const visible = Object.create(null);
+    let visibleCount = 0;
 
     for (let j = 0; j < disk.length; j++) {
       const candidate = disk[j];
@@ -280,10 +286,13 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
         if (!isPassable[path[k]]) { isVisible = false; break; }
       }
 
-      if (isVisible) visible[candidate] = true;
+      if (isVisible) {
+        visible[candidate] = true;
+        visibleCount++;
+      }
     }
 
-    if (Object.keys(visible).length > 0) result[cell] = visible;
+    if (visibleCount > 0) result[cell] = visible;
   }
 
   return result;

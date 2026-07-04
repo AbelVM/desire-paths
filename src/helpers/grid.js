@@ -221,16 +221,17 @@ export async function triggerFastScan(state, mapInstance) {
     state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
   }
 
-  // Precompute visibility sets for all AOI cells to eliminate O(N^2) path lookups during simulation
-  const visibilityData = precomputeVisibilitySets(state._frictionObj, viewHexes, VISUAL_DEPTH);
-  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
-
-  // Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
+// Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
   const neighborDisks = precomputeNeighborDisks(viewHexes, VISUAL_DEPTH);
   state._precomputedNeighborDisks = { gen: state._mappingGeneration, data: neighborDisks };
 
+  // Precompute visibility sets using shared neighbor disks (avoids redundant gridDisk calls)
+  const visibilityData = precomputeVisibilitySets(state._frictionObj, viewHexes, VISUAL_DEPTH, neighborDisks);
+  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
+
   // Precompute bearings between all cell pairs within VISUAL_DEPTH to eliminate per-tick trig calls
-  const bearingMap = precomputeBearingMap(viewHexes, VISUAL_DEPTH);
+  // OPTIMIZATION: Pass neighborDisks to avoid redundant gridDisk calls
+  const bearingMap = precomputeBearingMap(viewHexes, VISUAL_DEPTH, neighborDisks);
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();

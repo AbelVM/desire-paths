@@ -60,7 +60,7 @@ const _polyCellsCache = Object.create(null);
 const _polyCellsCacheOrder = [];
 
 function getCachedPolyCells(coords) {
-  // Build a deterministic key from coordinates using hash + bbox + structure
+  // Fast bbox check: compute key only on cache miss
   let minx = Infinity,
     miny = Infinity,
     maxx = -Infinity,
@@ -236,20 +236,17 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   // Reconstruct multiFrictionEntries from typed arrays for backward compatibility
   const multiFrictionEntries = Object.create(null);
   for (let i = 0; i < n; i++) {
-    let hasData = false;
     const base = i * MAX_LAYER_KEYS;
-    for (let l = 0; l < nextIdx; l++) {
-      if (hasLayer[base + l]) { hasData = true; break; }
-    }
-    if (!hasData) continue;
-
+    let hasData = false;
+    // Check and build in single pass
     const entry = Object.create(null);
     for (let l = 0; l < nextIdx; l++) {
       if (hasLayer[base + l]) {
+        hasData = true;
         entry[idxToKey[l]] = layerFrictions[base + l];
       }
     }
-    multiFrictionEntries[viewHexes[i]] = entry;
+    if (hasData) multiFrictionEntries[viewHexes[i]] = entry;
   }
 
   return { multiFrictionEntries, cellFrictionEntries };
@@ -258,50 +255,31 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
 /**
  * Writes layer friction values into flat typed arrays.
  * Replaces the old nested-object allocation pattern with O(1) per-cell writes.
+ * OPTIMIZED: Reduced try-catch overhead, inlined lookups.
  */
 function _applyGroupToBufferTyped(geometries, layerId, layerVal, cellToIdx, numCells, maxKeys, layerFrictions, hasLayer) {
+  const offsetBase = layerId;
   for (let g = 0; g < geometries.length; g++) {
     const geometry = geometries[g];
     if (!geometry || !geometry.coordinates) continue;
 
-    try {
-      const coordsArray =
-        geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
-      for (let p = 0; p < coordsArray.length; p++) {
-        let cells = [];
-        try {
-          cells = getCachedPolyCells(coordsArray[p]);
-        } catch (err) {
-          try {
-            console.warn &&
-              console.warn('computeFastScan: failed to get cells for geometry', {
-                layerId,
-                layerVal,
-                err,
-              });
-          } catch (_e) {}
-          continue;
-        }
-        for (let c = 0; c < cells.length; c++) {
-          const cell = cells[c];
-          const idx = cellToIdx[cell];
-          if (idx === undefined) continue;
+    const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+    for (let p = 0; p < coordsArray.length; p++) {
+      const cells = getCachedPolyCells(coordsArray[p]);
+      if (!cells) continue;
 
-          const offset = idx * maxKeys + layerId;
-          // Max-keeping per (cell, key): store highest friction value for this slot
-          // Semantics match the original nested-object implementation
-          if (!hasLayer[offset] || layerVal > layerFrictions[offset]) {
-            hasLayer[offset] = 1;
-            layerFrictions[offset] = layerVal;
-          }
+      for (let c = 0; c < cells.length; c++) {
+        const cell = cells[c];
+        const idx = cellToIdx[cell];
+        if (idx === undefined) continue;
+
+        const offset = idx * maxKeys + offsetBase;
+        // Max-keeping per (cell, key): store highest friction value for this slot
+        if (!hasLayer[offset] || layerVal > layerFrictions[offset]) {
+          hasLayer[offset] = 1;
+          layerFrictions[offset] = layerVal;
         }
       }
-    } catch (err) {
-      try {
-        console.warn &&
-          console.warn('computeFastScan: skipping malformed geometry', { layerId, layerVal, err });
-      } catch (_e) {}
-      continue;
     }
   }
 }
@@ -374,16 +352,27 @@ export function computeImpassableBlurSnapshot({
 
   // Multi-source BFS: all impassables start at distance 0.
   // Each cell is visited once — its distance equals the nearest impassable.
+  // Plain object for visited is faster than Set in V8 for this use case.
   const blurWeights = Object.create(null);
-  const visited = new Set(impassables);
+  const visited = Object.create(null);
+  const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
+  const updates = [];
+
+  // Initialize: all impassables are visited at distance 0
+  for (let i = 0; i < impassables.length; i++) {
+    visited[impassables[i]] = 0;
+  }
+
+  // Multi-source BFS using gridDisk (neighbors at distance 1)
+  // This correctly computes the nearest impassable distance
   let queue = [];
   for (let i = 0; i < impassables.length; i++) {
     try {
       const neighbors = gridDisk(impassables[i], 1);
       for (let n = 0; n < neighbors.length; n++) {
         const nc = neighbors[n];
-        if (!visited.has(nc)) {
-          visited.add(nc);
+        if (visited[nc] === undefined) {
+          visited[nc] = 1;
           queue.push([nc, 1]);
         }
       }
@@ -400,8 +389,8 @@ export function computeImpassableBlurSnapshot({
         const neighbors = gridDisk(cell, 1);
         for (let n = 0; n < neighbors.length; n++) {
           const nc = neighbors[n];
-          if (!visited.has(nc)) {
-            visited.add(nc);
+          if (visited[nc] === undefined) {
+            visited[nc] = currentDist + 1;
             nextQueue.push([nc, currentDist + 1]);
           }
         }
@@ -411,23 +400,17 @@ export function computeImpassableBlurSnapshot({
     currentDist++;
   }
 
-  // Accumulate gaussian weights — only for cells with valid (non-impassable) friction
-  for (let i = 0; i < queue.length; i++) {
-    const cell = queue[i][0];
-    const dist = queue[i][1];
+  // Accumulate gaussian weights and build updates in single pass
+  // Process all cells in visited (excluding impassables at distance 0)
+  for (const cell in visited) {
+    const dist = visited[cell];
+    if (dist === 0) continue; // skip impassables
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
-    blurWeights[cell] = (blurWeights[cell] ?? 0) + gaussianWeights[dist];
-  }
-
-  // Build friction updates capped at impassable limit
-  const updates = [];
-  const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
-  const keys = Object.keys(blurWeights);
-  for (let k = 0; k < keys.length; k++) {
-    const cell = keys[k];
+    const weight = gaussianWeights[dist];
+    blurWeights[cell] = weight;
     updates.push([
       cell,
-      Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + blurWeights[cell] * addFactor),
+      Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor),
     ]);
   }
 
