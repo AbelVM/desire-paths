@@ -255,27 +255,29 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth) {
   const result = Object.create(null);
   const impassable = FRICTION_COSTS.IMPASSABLE;
 
+  // Pre-build a passable lookup for O(1) checks — eliminates repeated friction lookups
+  const isPassable = Object.create(null);
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
+    isPassable[cell] = (frictionLookup[cell] ?? 0) < impassable;
+  }
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (!isPassable[cell]) continue; // origin must be passable
+
     const disk = gridDisk(cell, maxDepth);
     const visible = Object.create(null);
 
     for (let j = 0; j < disk.length; j++) {
       const candidate = disk[j];
-      if (candidate === cell) continue;
+      if (candidate === cell || !isPassable[candidate]) continue;
 
-      const f = frictionLookup[candidate];
-      if (typeof f === 'undefined' || f >= impassable) continue;
-
+      // Quick check: does the path exist at all? Reuse pre-built lookup.
       const path = gridPathCells(cell, candidate);
       let isVisible = true;
       for (let k = 0; k < path.length; k++) {
-        const c = path[k];
-        const pf = frictionLookup[c];
-        if (typeof pf === 'undefined' || pf >= impassable) {
-          isVisible = false;
-          break;
-        }
+        if (!isPassable[path[k]]) { isVisible = false; break; }
       }
 
       if (isVisible) visible[candidate] = true;
