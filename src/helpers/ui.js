@@ -732,7 +732,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const mappingReady = map.mappingReady === true;
     const canBuild = hasBuildInputs(map.simulationNodes);
     const canCompute = mappingReady && canBuild;
-    const canExport = map.flowsReady === true && (map.pathDesireScores?.size ?? 0) > 0;
+    const canExport = map.flowsReady === true && (map.pathDesireScores instanceof Map ? map.pathDesireScores.size : Object.keys(map.pathDesireScores ?? {}).length) > 0;
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
     // Build Mapping button removed — simulation auto-builds on demand
@@ -783,7 +783,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const resetSimulationState = () => {
     hideAlertCard();
     map.simulationNodes = {};
-    map.pathDesireScores?.clear();
+    if (map.pathDesireScores instanceof Map) {
+      map.pathDesireScores.clear();
+    } else {
+      for (const k in map.pathDesireScores ?? {}) delete map.pathDesireScores[k];
+    }
     map.affordanceMap?.clear();
     map.cellFrictionMap?.clear();
     map.multiFrictionMap?.clear();
