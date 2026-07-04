@@ -211,6 +211,42 @@ function precomputeNeighborDisks(cells, visualDepth) {
   return result;
 }
 
+// Precompute bearings between all AOI cell pairs within VISUAL_DEPTH radius.
+// Returns a flat string-keyed map: "center::neighbor" → bearing (degrees).
+// This eliminates billions of _bearingFromLatLngs trig calls during simulation.
+function precomputeBearingMap(cells, visualDepth) {
+  const result = Object.create(null);
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    const sLatLng = _getCachedLatLng(cell);
+    const disk = gridDisk(cell, visualDepth);
+    for (let j = 0; j < disk.length; j++) {
+      const n = disk[j];
+      if (n === cell) continue;
+      const eLatLng = _getCachedLatLng(n);
+      result[cell + '::' + n] = _bearingFromLatLngs(sLatLng, eLatLng);
+    }
+  }
+  return result;
+}
+
+// Precompute grid distances for all origin-destination pairs.
+// Returns a flat string-keyed map: "origin::dest" → distance (H3 grid units).
+// Eliminates per-tick gridDistance calls in runSingleAgentPath termination checks.
+function precomputeOriginDestDistances(origins, destinations) {
+  const result = Object.create(null);
+  for (let i = 0; i < origins.length; i++) {
+    const o = origins[i];
+    for (let j = 0; j < destinations.length; j++) {
+      const d = destinations[j];
+      if (o === d) continue;
+      result[o + '::' + d] = gridDistance(o, d);
+      result[d + '::' + o] = gridDistance(d, o);
+    }
+  }
+  return result;
+}
+
 // Precompute visibility sets for all cells within the AOI.
 // For each cell, stores a plain-object map of visible neighbor -> true.
 // This eliminates O(N^2) gridPathCells lookups during simulation.
@@ -409,7 +445,7 @@ export async function yieldToMain() {
 }
 
 /** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
-function getGradientDirection(ctx, curr, gradientObj) {
+function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   if (!gradientObj) return null;
   const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
@@ -442,7 +478,7 @@ function getGradientDirection(ctx, curr, gradientObj) {
     }
   }
 
-  return bestNeighbor ? getBearing(curr, bestNeighbor) : null;
+  return bestNeighbor ? getBearingFast(ctx, curr, bestNeighbor, bearingMap) : null;
 }
 
 function recordTraversal(pathDesireDeltas, cell) {
@@ -478,12 +514,22 @@ function runSingleAgentPath(
     pathDesireDeltas = null,
     applyWear = false,
     accumulatedFootprints = null,
+    bearingMap = null,
+    originDestDistances = null,
   }
 ) {
   let simCurrent = originCell;
   const simTarget = destCell;
+
+  // Precomputed distance check — eliminates per-tick gridDistance H3 call
+  let distToTarget = 0;
+  if (originDestDistances) {
+    const d = originDestDistances[originCell + '::' + destCell];
+    if (typeof d === 'number') distToTarget = d;
+  }
+
   let simDirection =
-    getGradientDirection(ctx, simCurrent, destGradientObj) ?? getBearing(simCurrent, simTarget);
+    getGradientDirection(ctx, simCurrent, destGradientObj, bearingMap) ?? getBearingFast(ctx, simCurrent, simTarget, bearingMap);
   const simPath = [originCell];
 
   if (pathDesireDeltas) recordTraversal(pathDesireDeltas, originCell);
@@ -500,7 +546,8 @@ function runSingleAgentPath(
   const cellState = ctx._cellState;
 
   for (let tick = 0; tick < maxTicks; tick++) {
-    if (gridDistance(simCurrent, simTarget) <= 1) {
+    // Use precomputed distance when available — eliminates gridDistance H3 call per tick
+    if (distToTarget <= 1) {
       if (simTarget !== simCurrent) {
         simPath.push(simTarget);
         if (pathDesireDeltas) recordTraversal(pathDesireDeltas, simTarget);
@@ -509,7 +556,7 @@ function runSingleAgentPath(
       break;
     }
 
-    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId, accumulatedFootprints);
+    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId, accumulatedFootprints, bearingMap);
     if (!nextStep || nextStep === simCurrent) break;
 
     const line = _getCachedPathCells(ctx, simCurrent, nextStep);
@@ -530,7 +577,8 @@ function runSingleAgentPath(
 
     if (hitTarget) break;
 
-    simDirection = getBearing(simCurrent, nextStep);
+    // Use precomputed bearing map — eliminates trig call per direction update
+    simDirection = getBearingFast(ctx, simCurrent, nextStep, bearingMap);
     simCurrent = nextStep;
     if (simCurrent === simTarget) break;
   }
@@ -876,6 +924,9 @@ export async function computeDesirePaths(state, mapInstance) {
   let nextYieldAt = resetYieldDeadline();
   updateSimulationProgress(state, 0, totalAgents);
 
+  // Precompute origin-destination grid distances to eliminate per-tick H3 calls
+  const odDistances = precomputeOriginDestDistances(agents, destinations);
+
   // Offload per-origin agent path sims to worker pool (workers are stateless)
   try {
     setSpatialWorkerProgressHandler((m) => {
@@ -898,7 +949,7 @@ export async function computeDesirePaths(state, mapInstance) {
       goalGradients,
       state._affordanceObj || state.affordanceMap,
       hexes,
-      { visibilityEntries: state._precomputedVisibility?.data || null, accumulatedFootprints }
+      { visibilityEntries: state._precomputedVisibility?.data || null, accumulatedFootprints, originDestDistances: odDistances, bearingMap: state._precomputedBearings?.data || null }
     );
 
     // Merge returned path desire into Map
@@ -950,7 +1001,7 @@ export async function computeDesirePaths(state, mapInstance) {
 /**
   * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
   */
-function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', accumulatedFootprints = null) {
+function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', accumulatedFootprints = null, bearingMap = null) {
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
   const frictionLookup =
     ctx._frictionObj ||
@@ -973,6 +1024,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
+  // Inline friction/affordance lookups — direct property access is ~3× faster than function calls
   const getFriction = stateEnabled
     ? (n) => {
       const s = cellState[n];
@@ -980,7 +1032,10 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
     }
     : (n) => frictionLookup[n];
   const getAffordance = stateEnabled
-    ? (n) => cellState[n]?.affordance ?? 0.1
+    ? (n) => {
+      const s = cellState[n];
+      return s ? (s.affordance ?? 0.1) : 0.1;
+    }
     : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
@@ -997,8 +1052,21 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
     if (f === undefined || f >= impassableVal) continue;
     if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
 
-    const eLatLng = _getCachedLatLng(n);
-    const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+    // Use precomputed bearing map — eliminates trig call per neighbor
+    let ang;
+    if (bearingMap) {
+      const bng = bearingMap[curr + '::' + n];
+      if (typeof bng === 'number') {
+        ang = angleDiff(bng, currentDirection);
+      } else {
+        // Fallback: compute bearing for uncached pair
+        const eLatLng = _getCachedLatLng(n);
+        ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+      }
+    } else {
+      const eLatLng = _getCachedLatLng(n);
+      ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+    }
     const aff = getAffordance(n);
 
     if (useGradient) {
@@ -1087,7 +1155,17 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
         if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
 
         const eLatLng = _getCachedLatLng(n);
-        const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+        let ang;
+        if (bearingMap) {
+          const bng = bearingMap[curr + '::' + n];
+          if (typeof bng === 'number') {
+            ang = angleDiff(bng, currentDirection);
+          } else {
+            ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+          }
+        } else {
+          ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+        }
         if (ang > visualAngleHalf) continue;
 
         const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradient[n] ?? Infinity);
@@ -1104,7 +1182,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
             // debug logging is non-critical
           }
         }
-        return bestCandidate;
+        return getBearingFast(ctx, curr, bestCandidate, bearingMap);
       }
     }
     return null;
@@ -1240,6 +1318,19 @@ function getBearing(start, end) {
   return _bearingFromLatLngs(s, e);
 }
 
+// Fast bearing lookup: uses precomputed bearing map when available,
+// falls back to trig-based calculation otherwise.
+function getBearingFast(ctx, a, b, bearingMap) {
+  if (bearingMap) {
+    const bng = bearingMap[a + '::' + b];
+    if (typeof bng === 'number') return bng;
+  }
+  // Fallback: compute via lat/lng (expensive, called rarely for uncached pairs)
+  const s = _getCachedLatLng(a);
+  const e = _getCachedLatLng(b);
+  return _bearingFromLatLngs(s, e);
+}
+
 // Smallest absolute angular difference between two bearings (degrees)
 function angleDiff(a, b) {
   // normalize to [0,360), then compute minimal signed diff
@@ -1347,6 +1438,8 @@ export {
   buildCellStateEntry,
   precomputeVisibilitySets,
   precomputeNeighborDisks,
+  precomputeBearingMap,
+  precomputeOriginDestDistances,
 };
 
 // Diagnostic helper to inspect cache instrumentation
@@ -1522,6 +1615,8 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
         simAgentId,
         applyWear: false,
         accumulatedFootprints: null, // incremental API — not part of main ABM loop
+        bearingMap: ctx._precomputedBearings?.data || null,
+        originDestDistances: precomputeOriginDestDistances([o], [targetCell]),
       });
 
       for (let p = 0; p < simPath.length; p++) {

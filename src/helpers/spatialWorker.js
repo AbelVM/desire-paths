@@ -381,6 +381,10 @@ export async function runAgentBatches(
   // When present, computeAgentBatch runs a tick-based loop where each agent's
   // positions accumulate as footprints that modify affordance for subsequent agents.
   const accumulatedFootprints = options?.accumulatedFootprints || null;
+  // Precomputed origin-destination grid distances — eliminates per-tick H3 calls
+  const originDestDistances = options?.originDestDistances || null;
+  // Precomputed bearing map — eliminates per-tick trig calls in getBestNextStep
+  const bearingMap = options?.bearingMap || null;
 
   // Normalize gradients into a plain object for structured-clone
   const gradientsObj = Object.create(null);
@@ -464,6 +468,8 @@ export async function runAgentBatches(
       neighborDisks,
       options,
       accumulatedFootprints,
+      originDestDistances,
+      bearingMap,
     });
     // computeAgentBatch returns { result, transfers } when used in a worker; normalize
     const result = ret && ret.result ? ret.result : ret;
@@ -519,6 +525,8 @@ export async function runAgentBatches(
         neighborDisks,
         options,
         accumulatedFootprints,
+        originDestDistances,
+        bearingMap,
       })
     )
   );

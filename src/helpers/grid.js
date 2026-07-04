@@ -14,6 +14,7 @@ import {
   buildCellStateEntry,
   precomputeVisibilitySets,
   precomputeNeighborDisks,
+  precomputeBearingMap,
 } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
@@ -220,6 +221,10 @@ export async function triggerFastScan(state, mapInstance) {
   // Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
   const neighborDisks = precomputeNeighborDisks(viewHexes, VISUAL_DEPTH);
   state._precomputedNeighborDisks = { gen: state._mappingGeneration, data: neighborDisks };
+
+  // Precompute bearings between all cell pairs within VISUAL_DEPTH to eliminate per-tick trig calls
+  const bearingMap = precomputeBearingMap(viewHexes, VISUAL_DEPTH);
+  state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();
 }
