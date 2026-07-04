@@ -59,12 +59,9 @@ function _hashCoords(coords) {
 const _polyCellsCache = Object.create(null);
 const _polyCellsCacheOrder = [];
 
-function getCachedPolyCells(coords) {
-  // Fast bbox check: compute key only on cache miss
-  let minx = Infinity,
-    miny = Infinity,
-    maxx = -Infinity,
-    maxy = -Infinity;
+// Fast bbox check: compute key only on cache miss
+function _computeBboxKey(coords) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
   for (let i = 0; i < coords.length; i++) {
     const ring = coords[i] || [];
     for (let j = 0; j < ring.length; j++) {
@@ -75,9 +72,13 @@ function getCachedPolyCells(coords) {
       if (coord[1] > maxy) maxy = coord[1];
     }
   }
-  if (!isFinite(minx)) return [];
+  if (!isFinite(minx)) return '';
+  return `${minx.toFixed(4)}:${miny.toFixed(4)}:${maxx.toFixed(4)}:${maxy.toFixed(4)}:${coords.length}`;
+}
 
-  const key = `${_hashCoords(coords)}:${minx.toFixed(4)}:${miny.toFixed(4)}:${maxx.toFixed(4)}:${maxy.toFixed(4)}:${coords.length}`;
+function getCachedPolyCells(coords) {
+  // Fast bbox check: compute key only on cache miss (moved from top of function)
+  const key = _computeBboxKey(coords) + ':' + _hashCoords(coords);
   const cached = _polyCellsCache[key];
   if (cached) return cached;
 
@@ -86,8 +87,7 @@ function getCachedPolyCells(coords) {
     result = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
   } catch (err) {
     try {
-      console.warn &&
-        console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
+      console.warn && console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
     } catch (_e) {}
     result = [];
   }
@@ -363,40 +363,35 @@ export function computeImpassableBlurSnapshot({
     visited[impassables[i]] = 0;
   }
 
-  // Multi-source BFS using gridDisk (neighbors at distance 1)
-  // This correctly computes the nearest impassable distance
-  let queue = [];
+  // Multi-source BFS using gridRing for proper ring-by-ring expansion.
+  // gridRing(d) returns only cells at exactly distance d, avoiding the center cell.
+  // This is more efficient than gridDisk(cell, 1) in a loop.
+  // Track frontier: cells at distance d-1 that need to expand to distance d
+  const frontier = [];
   for (let i = 0; i < impassables.length; i++) {
-    try {
-      const neighbors = gridDisk(impassables[i], 1);
-      for (let n = 0; n < neighbors.length; n++) {
-        const nc = neighbors[n];
-        if (visited[nc] === undefined) {
-          visited[nc] = 1;
-          queue.push([nc, 1]);
-        }
-      }
-    } catch (_e) {}
+    frontier.push(impassables[i]);
   }
 
-  // Expand BFS ring-by-ring until radius limit or exhaustion
   let currentDist = 1;
-  while (currentDist < radius && queue.length > 0) {
-    const nextQueue = [];
-    for (let i = 0; i < queue.length; i++) {
-      const cell = queue[i][0];
+  while (currentDist <= radius && frontier.length > 0) {
+    const nextFrontier = [];
+    for (let i = 0; i < frontier.length; i++) {
+      const cell = frontier[i];
       try {
-        const neighbors = gridDisk(cell, 1);
-        for (let n = 0; n < neighbors.length; n++) {
-          const nc = neighbors[n];
+        const ring = gridRing(cell, 1);
+        for (let n = 0; n < ring.length; n++) {
+          const nc = ring[n];
           if (visited[nc] === undefined) {
-            visited[nc] = currentDist + 1;
-            nextQueue.push([nc, currentDist + 1]);
+            visited[nc] = currentDist;
+            nextFrontier.push(nc);
           }
         }
       } catch (_e) {}
     }
-    queue = nextQueue;
+    frontier.length = 0;
+    for (let i = 0; i < nextFrontier.length; i++) {
+      frontier.push(nextFrontier[i]);
+    }
     currentDist++;
   }
 
@@ -407,6 +402,7 @@ export function computeImpassableBlurSnapshot({
     if (dist === 0) continue; // skip impassables
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
     const weight = gaussianWeights[dist];
+    if (weight === undefined) continue;
     blurWeights[cell] = weight;
     updates.push([
       cell,

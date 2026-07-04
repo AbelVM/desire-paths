@@ -1,4 +1,4 @@
-import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
+import { gridPathCells, gridDisk, gridRing, cellToLatLng, gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
   WEIGHTS,
@@ -211,6 +211,66 @@ function precomputeNeighborDisks(cells, visualDepth) {
   return result;
 }
 
+// Precompute visibility sets for all cells within the AOI.
+// For each cell, stores a plain-object map of visible neighbor -> true.
+// This eliminates O(N^2) gridPathCells lookups during simulation.
+// Keyed by mapping generation so it invalidates on remap.
+// OPTIMIZATION: Accepts precomputed neighbor disks to avoid redundant gridDisk calls.
+// OPTIMIZATION: Uses flood-fill with gridDisk(1) for proper ring-by-ring expansion.
+function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDisks) {
+  const result = Object.create(null);
+  const impassable = FRICTION_COSTS.IMPASSABLE;
+
+  // Pre-build a passable lookup for O(1) checks — eliminates repeated friction lookups
+  const isPassable = Object.create(null);
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    isPassable[cell] = (frictionLookup[cell] ?? 0) < impassable;
+  }
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (!isPassable[cell]) continue; // origin must be passable
+
+    const visible = Object.create(null);
+    const visited = Object.create(null); // flood-fill visited set
+    const queue = [cell]; // BFS queue
+    visited[cell] = true;
+
+    // Flood-fill from origin using gridDisk(1) for proper ring-by-ring expansion.
+    // This marks all cells reachable without crossing impassable terrain.
+    // Each cell is visited once, and we use gridDisk(1) to get immediate neighbors.
+    let currentDist = 0;
+    while (currentDist < maxDepth && queue.length > 0) {
+      const nextQueue = [];
+      for (let q = 0; q < queue.length; q++) {
+        const current = queue[q];
+        // Get immediate neighbors (distance 1)
+        const neighbors = gridDisk(current, 1);
+        for (let n = 0; n < neighbors.length; n++) {
+          const neighbor = neighbors[n];
+          if (neighbor === current) continue;
+          if (visited[neighbor]) continue;
+          if (!isPassable[neighbor]) continue;
+
+          visited[neighbor] = true;
+          visible[neighbor] = true;
+          nextQueue.push(neighbor);
+        }
+      }
+      queue.length = 0;
+      for (let q = 0; q < nextQueue.length; q++) {
+        queue.push(nextQueue[q]);
+      }
+      currentDist++;
+    }
+
+    if (Object.keys(visible).length > 0) result[cell] = visible;
+  }
+
+  return result;
+}
+
 // Precompute bearings between all AOI cell pairs within VISUAL_DEPTH radius.
 // Returns a flat string-keyed map: "center::neighbor" → bearing (degrees).
 // This eliminates billions of _bearingFromLatLngs trig calls during simulation.
@@ -247,54 +307,6 @@ function precomputeOriginDestDistances(origins, destinations) {
       result[d + '::' + o] = gridDistance(d, o);
     }
   }
-  return result;
-}
-
-// Precompute visibility sets for all cells within the AOI.
-// For each cell, stores a plain-object map of visible neighbor -> true.
-// This eliminates O(N^2) gridPathCells lookups during simulation.
-// Keyed by mapping generation so it invalidates on remap.
-// OPTIMIZATION: Accepts precomputed neighbor disks to avoid redundant gridDisk calls.
-function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDisks) {
-  const result = Object.create(null);
-  const impassable = FRICTION_COSTS.IMPASSABLE;
-
-  // Pre-build a passable lookup for O(1) checks — eliminates repeated friction lookups
-  const isPassable = Object.create(null);
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    isPassable[cell] = (frictionLookup[cell] ?? 0) < impassable;
-  }
-
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    if (!isPassable[cell]) continue; // origin must be passable
-
-    // Use precomputed disks to avoid redundant gridDisk call
-    const disk = precomputedDisks ? precomputedDisks[cell] : gridDisk(cell, maxDepth);
-    const visible = Object.create(null);
-    let visibleCount = 0;
-
-    for (let j = 0; j < disk.length; j++) {
-      const candidate = disk[j];
-      if (candidate === cell || !isPassable[candidate]) continue;
-
-      // Quick check: does the path exist at all? Reuse pre-built lookup.
-      const path = gridPathCells(cell, candidate);
-      let isVisible = true;
-      for (let k = 0; k < path.length; k++) {
-        if (!isPassable[path[k]]) { isVisible = false; break; }
-      }
-
-      if (isVisible) {
-        visible[candidate] = true;
-        visibleCount++;
-      }
-    }
-
-    if (visibleCount > 0) result[cell] = visible;
-  }
-
   return result;
 }
 
