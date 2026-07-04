@@ -12,6 +12,10 @@ import { computeDijkstra } from './dijkstra.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
+// Maximum distinct vertical layer keys expected per fast-scan run.
+// MVT elevation values are typically small integers (-3..+5), so 64 is more than sufficient.
+const MAX_LAYER_KEYS = 64;
+
 // Emit lightweight progress messages when running inside a Worker.
 function emitProgress(phase, processed, total) {
   try {
@@ -135,16 +139,12 @@ export function computeGradientBatch({ frictionEntries, targets }) {
   return gradients;
 }
 
-function getEffectiveFriction(layerMap) {
-  if (!layerMap) return 0;
-  if (typeof layerMap['0'] === 'number') return layerMap['0'];
-  const values = Object.values(layerMap);
-  return values.length > 0 ? Math.min(...values) : 0;
-}
+export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
+  const n = viewHexes.length;
 
-function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
-  const viewLookup = Object.create(null);
-  for (let i = 0; i < viewHexes.length; i++) viewLookup[viewHexes[i]] = 1;
+  // Build cell→index map once — used by typed-array writes
+  const cellToIdx = Object.create(null);
+  for (let i = 0; i < n; i++) cellToIdx[viewHexes[i]] = i;
 
   // Group features by surface classification tuple to enable batch processing
   // Key: "layerKey|layerVal" → array of {geometry}
@@ -166,38 +166,91 @@ function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     grouped[groupKey].geometries.push(feature.geometry);
   }
 
-  // Shared result buffer — reuse across groups
-  const multiFrictionEntries = Object.create(null);
+  // Pre-allocate typed arrays sized for worst-case (all cells × max distinct keys)
+  const layerFrictions = new Float32Array(n * MAX_LAYER_KEYS);
+  const hasLayer = new Uint8Array(n * MAX_LAYER_KEYS);
 
-  // Process each group in batch using shared cell iterator
+  // Dynamic key→index map — grows as new layer keys are encountered
+  const keyToIdx = Object.create(null);
+  let nextIdx = 0;
+
+  function getOrCreateKeyId(key) {
+    let idx = keyToIdx[key];
+    if (idx === undefined) {
+      if (nextIdx >= MAX_LAYER_KEYS) return -1; // safety cap
+      idx = nextIdx++;
+      keyToIdx[key] = idx;
+    }
+    return idx;
+  }
+
+  // Process each group in batch — writes directly into typed arrays
   for (const group of Object.values(grouped)) {
-    _applyGroupToBuffer(
+    const layerId = getOrCreateKeyId(group.layerKey);
+    if (layerId < 0) continue; // exceeded key budget, skip this group
+    _applyGroupToBufferTyped(
       group.geometries,
-      group.layerKey,
+      layerId,
       group.layerVal,
-      viewLookup,
-      multiFrictionEntries
+      cellToIdx,
+      n,
+      MAX_LAYER_KEYS,
+      layerFrictions,
+      hasLayer
     );
   }
 
+  // Build reverse key→index map for output reconstruction
+  const idxToKey = new Array(nextIdx);
+  for (const k of Object.keys(keyToIdx)) {
+    idxToKey[keyToIdx[k]] = k;
+  }
+
+  // Build cellFrictionEntries: min friction across all keys per cell
   const cellFrictionEntries = Object.create(null);
-  for (let i = 0; i < viewHexes.length; i++) {
-    const cell = viewHexes[i];
-    const layerMap = multiFrictionEntries[cell];
-    cellFrictionEntries[cell] = getEffectiveFriction(layerMap);
+  for (let i = 0; i < n; i++) {
+    let min = Infinity;
+    const base = i * MAX_LAYER_KEYS;
+    for (let l = 0; l < nextIdx; l++) {
+      if (hasLayer[base + l]) {
+        const v = layerFrictions[base + l];
+        if (v < min) min = v;
+      }
+    }
+    cellFrictionEntries[viewHexes[i]] = min === Infinity ? 0 : min;
+  }
+
+  // Reconstruct multiFrictionEntries from typed arrays for backward compatibility
+  const multiFrictionEntries = Object.create(null);
+  for (let i = 0; i < n; i++) {
+    let hasData = false;
+    const base = i * MAX_LAYER_KEYS;
+    for (let l = 0; l < nextIdx; l++) {
+      if (hasLayer[base + l]) { hasData = true; break; }
+    }
+    if (!hasData) continue;
+
+    const entry = Object.create(null);
+    for (let l = 0; l < nextIdx; l++) {
+      if (hasLayer[base + l]) {
+        entry[idxToKey[l]] = layerFrictions[base + l];
+      }
+    }
+    multiFrictionEntries[viewHexes[i]] = entry;
   }
 
   return { multiFrictionEntries, cellFrictionEntries };
 }
 
-function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target) {
-  // Process all geometries in this group using a shared iteration pattern
+/**
+ * Writes layer friction values into flat typed arrays.
+ * Replaces the old nested-object allocation pattern with O(1) per-cell writes.
+ */
+function _applyGroupToBufferTyped(geometries, layerId, layerVal, cellToIdx, numCells, maxKeys, layerFrictions, hasLayer) {
   for (let g = 0; g < geometries.length; g++) {
     const geometry = geometries[g];
     if (!geometry || !geometry.coordinates) continue;
 
-    // Guard per-geometry processing so a single malformed polygon doesn't
-    // abort the entire fast-scan chunk (this caused worker failures).
     try {
       const coordsArray =
         geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
@@ -209,28 +262,31 @@ function _applyGroupToBuffer(geometries, layerKey, layerVal, viewLookup, target)
           try {
             console.warn &&
               console.warn('computeFastScan: failed to get cells for geometry', {
-                layerKey,
+                layerId,
                 layerVal,
                 err,
               });
           } catch (_e) {}
           continue;
         }
-        // Shared cell iterator — no per-feature allocation overhead
         for (let c = 0; c < cells.length; c++) {
           const cell = cells[c];
-          if (!viewLookup[cell]) continue;
+          const idx = cellToIdx[cell];
+          if (idx === undefined) continue;
 
-          let layerMap = target[cell];
-          if (!layerMap) layerMap = target[cell] = Object.create(null);
-          if (layerMap[layerKey] === undefined || layerVal > layerMap[layerKey])
-            layerMap[layerKey] = layerVal;
+          const offset = idx * maxKeys + layerId;
+          // Max-keeping per (cell, key): store highest friction value for this slot
+          // Semantics match the original nested-object implementation
+          if (!hasLayer[offset] || layerVal > layerFrictions[offset]) {
+            hasLayer[offset] = 1;
+            layerFrictions[offset] = layerVal;
+          }
         }
       }
     } catch (err) {
       try {
         console.warn &&
-          console.warn('computeFastScan: skipping malformed geometry', { layerKey, layerVal, err });
+          console.warn('computeFastScan: skipping malformed geometry', { layerId, layerVal, err });
       } catch (_e) {}
       continue;
     }
