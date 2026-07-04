@@ -34,6 +34,11 @@ const _cellLatLngCacheObj = Object.create(null);
 const _cellLatLngCacheOrder = [];
 const CELL_LATLNG_CACHE_MAX = 1024;
 
+function _clearLatLngCache() {
+  for (const key in _cellLatLngCacheObj) delete _cellLatLngCacheObj[key];
+  _cellLatLngCacheOrder.length = 0;
+}
+
 function _getCachedLatLng(cell) {
   const c = _cellLatLngCacheObj[cell];
   if (c) return c;
@@ -48,6 +53,10 @@ function _getCachedLatLng(cell) {
   if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX) {
     const old = _cellLatLngCacheOrder.shift();
     delete _cellLatLngCacheObj[old];
+  }
+  // Periodic full GC pass to reclaim drift from repeated miss/evict cycles.
+  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX * 1.5) {
+    _clearLatLngCache();
   }
   return stored;
 }

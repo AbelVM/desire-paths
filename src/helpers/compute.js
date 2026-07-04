@@ -111,6 +111,12 @@ function _getCachedLatLng(cell) {
     const old = _cellLatLngCacheOrder.shift();
     delete _cellLatLngCacheObj[old];
   }
+  // Periodic full GC: when the order array grows 1.5× past the limit,
+  // dead entries have accumulated from repeated miss/evict cycles;
+  // a full reset is cheaper than incremental drift.
+  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX * 1.5) {
+    clearLatLngCache();
+  }
   return stored;
 }
 
