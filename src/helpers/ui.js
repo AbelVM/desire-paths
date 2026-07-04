@@ -12,7 +12,12 @@ const uiCleanupListeners = [];
 function cleanupUIListeners() {
   for (const { target, event, handler } of uiCleanupListeners) {
     try {
-      target.removeEventListener(event, handler);
+      // Maplibre uses .on/.off instead of addEventListener/removeEventListener
+      if (typeof target.off === 'function') {
+        target.off(event, handler);
+      } else {
+        target.removeEventListener(event, handler);
+      }
     } catch {
       // ignore stale entries
     }
@@ -20,8 +25,15 @@ function cleanupUIListeners() {
   uiCleanupListeners.length = 0;
 }
 
-function addUIListener(target, event, handler) {
-  target.addEventListener(event, handler);
+function addUIListener(target, event, handler, options) {
+  // Maplibre maps use .on/.off; DOM elements use addEventListener/removeEventListener.
+  // Detect map objects: they have a custom `.on` that is not addEventListener itself.
+  const isMap = typeof target.on === 'function' && typeof target.off === 'function';
+  if (isMap) {
+    target.on(event, handler);
+  } else {
+    target.addEventListener?.(event, handler, options);
+  }
   uiCleanupListeners.push({ target, event, handler });
 }
 
@@ -212,6 +224,9 @@ function createUIState(map) {
 }
 
 export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
+  // Remove stale listeners from prior `setupUI` calls (hot reloads, re-invocations)
+  cleanupUIListeners();
+
   const uiState = createUIState(map);
   let alertTimer;
 
@@ -819,7 +834,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   }
 
   // --- Keyboard Shortcuts ---
-  document.addEventListener('keydown', (e) => {
+  addUIListener(document, 'keydown', (e) => {
     if (
       document.activeElement === uiState.weightInput ||
       document.activeElement === uiState.weightReadout
@@ -846,13 +861,13 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   });
 
   if (uiState.weightInput) {
-    uiState.weightInput.addEventListener('input', () => {
+    addUIListener(uiState.weightInput, 'input', () => {
       map.placementWeight = clampWeight(uiState.weightInput.value);
       syncWeightUI();
     });
   }
 
-  uiState.frictionButton.addEventListener('click', () => {
+  addUIListener(uiState.frictionButton, 'click', () => {
     map.showFrictionMesh = map.showFrictionMesh === false;
     syncFrictionUI();
   });
@@ -926,13 +941,13 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   if (map.on) {
-    map.on('mousedown', handleDragStart);
-    map.on('mousemove', handleDragMove);
+    addUIListener(map, 'mousedown', handleDragStart);
+    addUIListener(map, 'mousemove', handleDragMove);
   }
-  window.addEventListener?.('mouseup', handleDragEnd, { passive: true });
+  addUIListener(window, 'mouseup', handleDragEnd, { passive: true });
 
   // Right-click on map shows context menu for nodes at cursor position
-  map.on?.('contextmenu', (e) => {
+  const handleContextMenu = (e) => {
     if (!uiState.mapContainer) return;
 
     // Block context menu while computing
@@ -1003,10 +1018,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     } else {
       hideContextMenu();
     }
-  });
+  };
+
+  addUIListener(map, 'contextmenu', handleContextMenu);
 
   // Left-click on the map canvas — ignore when context menu is open or clicking on a pin feature
-  map.on?.('click', (e) => {
+  const handleClick = (e) => {
     const ctxMenu = uiState.contextMenu;
     if (ctxMenu && !ctxMenu.hidden) return;
     if (dragState.active) return; // Skip if currently dragging a node
@@ -1023,9 +1040,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
     const existingNode = map.simulationNodes?.[cell];
     if (existingNode && isActiveNode(existingNode)) return;
-  });
+  };
 
-  uiState.computeButton.addEventListener('click', async () => {
+  addUIListener(map, 'click', handleClick);
+
+  const handleComputeClick = async () => {
     if (!hasBuildInputs(map.simulationNodes)) {
       showToastNotification(
         'Place at least one origin/dual node and one destination/dual node before simulating flows.',
@@ -1081,10 +1100,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       setBusyState(false);
       syncSimulationUI();
     }
-  });
+  };
+
+  addUIListener(uiState.computeButton, 'click', handleComputeClick);
 
   if (uiState.exportButton) {
-    uiState.exportButton.addEventListener('click', () => {
+    const handleExportClick = () => {
       if (map.flowsReady !== true) {
         showToastNotification('Simulate flows before exporting GeoJSON.', 'warning');
         return;
@@ -1099,26 +1120,28 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         console.error('GeoJSON export failed:', err);
         showToastNotification('GeoJSON export failed. Please try again.', 'error');
       }
-    });
+    };
+
+    addUIListener(uiState.exportButton, 'click', handleExportClick);
   }
 
-  uiState.clearButton.addEventListener('click', () => {
+  addUIListener(uiState.clearButton, 'click', () => {
     resetSimulationState();
   });
 
   if (uiState.alertDismiss) {
-    uiState.alertDismiss.addEventListener('click', hideAlertCard);
+    addUIListener(uiState.alertDismiss, 'click', hideAlertCard);
   }
 
   // Onboarding dismiss button + backdrop click-to-dismiss
   if (uiState.onboardingDismissBtn) {
-    uiState.onboardingDismissBtn.addEventListener('click', () => {
+    addUIListener(uiState.onboardingDismissBtn, 'click', () => {
       dismissOnboarding();
     });
   }
   // Click outside card dismisses overlay
   if (uiState.onboardingOverlay) {
-    uiState.onboardingOverlay.addEventListener('click', (e) => {
+    addUIListener(uiState.onboardingOverlay, 'click', (e) => {
       if (!e.target.closest('.onboarding-card')) {
         dismissOnboarding();
       }
