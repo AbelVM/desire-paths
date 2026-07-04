@@ -339,6 +339,18 @@ export function clearComputeCaches(ctx) {
 
   ctx._cellStateMappingGen = undefined;
 
+  // Clear accumulated desire scores and per-cell desire values so they don't carry over
+  // between simulation runs when the friction topology changes but _mappingGeneration does not.
+  if (ctx.pathDesireScores) {
+    for (const k in ctx.pathDesireScores) delete ctx.pathDesireScores[k];
+  }
+  if (ctx._cellState) {
+    for (const cell in ctx._cellState) {
+      const cs = ctx._cellState[cell];
+      if (cs && typeof cs.desire === 'number') cs.desire = 0;
+    }
+  }
+
   // Clear gradient cache and module-level lat/lng cache
   clearGradientCache(ctx);
   ctx._gradientCacheGen = undefined;
@@ -634,6 +646,16 @@ export async function computeDesirePaths(state, mapInstance) {
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.
   state.pathDesireScores = Object.create(null);
+
+  // Zero out per-cell desire values in _cellState so stale scores from prior runs don't
+  // leak into the new simulation via applyPathDesireDeltas (which reads _cellState.desire
+  // before falling back to pathDesireScores).
+  if (state._cellState) {
+    for (const cell in state._cellState) {
+      const cs = state._cellState[cell];
+      if (cs && typeof cs.desire === 'number') cs.desire = 0;
+    }
+  }
 
   // Guard: ensure the friction map has been built before simulating
   if (!state.cellFrictionMap || state.cellFrictionMap.size === 0) {
