@@ -48,6 +48,7 @@ const COMPUTE_PATH_CACHE_MAX = 256;
 const COMPUTE_DISK_CACHE_MAX = 256;
 const COMPUTE_VISIBILITY_CACHE_MAX = 2048;
 const CELL_LATLNG_CACHE_MAX = 1024;
+const GRADIENT_CACHE_MAX_ENTRIES = 16;
 
 // Module-level lat/lng cache (FIFO object-based cache to avoid Map hotspots)
 const _cellLatLngCacheObj = Object.create(null);
@@ -1337,8 +1338,24 @@ export function getComputeCacheStats(ctx = {}) {
 // Gradient cache helpers: compute, inspect, and clear per-target gradients.
 export function computeAndCacheGradient(ctx, targetCell) {
   if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
+  const order = ctx._gradientCacheOrder;
+
+  // Promote to most-recently-used (remove from old position and push to end)
+  if (order && order.includes(targetCell)) {
+    const idx = order.indexOf(targetCell);
+    order.splice(idx, 1);
+  } else if (order) {
+    // Evict least-recently-used when at capacity
+    while (order.length >= GRADIENT_CACHE_MAX_ENTRIES) {
+      const evicted = order.shift();
+      delete ctx._gradientCacheObj[evicted];
+    }
+  }
+
   const g = computeDijkstraGradient(ctx, targetCell);
   ctx._gradientCacheObj[targetCell] = g;
+  if (!order) ctx._gradientCacheOrder = [targetCell];
+  else order.push(targetCell);
   return g;
 }
 
@@ -1348,6 +1365,7 @@ export function getCachedGradient(ctx, targetCell) {
 
 export function clearGradientCache(ctx) {
   ctx._gradientCacheObj = Object.create(null);
+  ctx._gradientCacheOrder = undefined;
   ctx._gradientCacheGen = undefined;
   ctx._pendingGradientPromises = Object.create(null);
 }

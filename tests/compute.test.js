@@ -263,6 +263,37 @@ describe('gradient cache helpers', () => {
     expect(map._gradientCacheObj).toBeDefined();
     expect(Object.keys(map._gradientCacheObj).length).toBe(0);
   });
+
+  it('computeAndCacheGradient should evict LRU when over max entries', () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    // Create a map with a pre-populated cache at capacity (16 entries)
+    const cells = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p'];
+    const map = {
+      cellFrictionMap: new Map([[h3, 1]]),
+      _cellState: Object.create(null),
+      _gradientCacheObj: Object.create(null),
+      _gradientCacheOrder: [...cells],
+    };
+    for (const c of cells) {
+      map._gradientCacheObj[c] = { [c]: 0 };
+    }
+    expect(Object.keys(map._gradientCacheObj).length).toBe(16);
+
+    // Adding a 17th entry should evict 'a' (LRU) and keep the rest
+    computeAndCacheGradient(map, 'q');
+    const keys = Object.keys(map._gradientCacheObj);
+    expect(keys.length).toBe(16);
+    expect(keys.includes('a')).toBe(false); // evicted
+    expect(keys.includes('q')).toBe(true);  // added
+
+    // Accessing an existing entry promotes it to MRU (no eviction)
+    computeAndCacheGradient(map, 'p');
+    const keys2 = Object.keys(map._gradientCacheObj);
+    expect(keys2.length).toBe(16);
+    expect(keys2.includes('b')).toBe(true);  // still there
+
+    clearGradientCache(map);
+  });
 });
 
 describe('addDestination', () => {
