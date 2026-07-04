@@ -186,8 +186,15 @@ export async function triggerFastScan(state, mapInstance) {
     // Effective friction: min across all layers, or 0 if no data
     let fr = 0;
     if (target) {
-      const vals = Object.values(target);
-      fr = vals.length > 0 ? Math.min(...vals) : 0;
+      const keys = Object.keys(target);
+      if (keys.length > 0) {
+        let min = Infinity;
+        for (let k = 0; k < keys.length; k++) {
+          const v = target[keys[k]];
+          if (v < min) min = v;
+        }
+        fr = min;
+      }
     } else {
       // Fallback: look up from build result directly
       fr = build.cellFrictionEntries?.[cell] ?? 0;
