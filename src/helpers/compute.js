@@ -1042,6 +1042,11 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
         if (n === curr) continue;
         const f = getFriction(n);
         if (f === undefined || f >= impassableVal) continue;
+        if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
+
+        const eLatLng = _getCachedLatLng(n);
+        const ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+        if (ang > visualAngleHalf) continue;
 
         const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradient[n] ?? Infinity);
         if (g < bestGrad) {
