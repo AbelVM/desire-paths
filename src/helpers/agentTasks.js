@@ -379,6 +379,9 @@ function runAgentPath(
   const simPath = [originCell];
   if (pathDesireMap) recordTraversal(pathDesireMap, originCell);
 
+  let stuckCount = 0;
+  const STUCK_THRESHOLD = 3;
+
   for (let tick = 0; tick < maxTicks; tick++) {
     if (gridDistance(simCurrent, simTarget) <= 1) {
       if (simTarget !== simCurrent) {
@@ -399,7 +402,13 @@ function runAgentPath(
       visibilityMap,
       neighborDisks
     );
-    if (!nextStep || nextStep === simCurrent) break;
+    if (!nextStep || nextStep === simCurrent) {
+      stuckCount++;
+      if (stuckCount >= STUCK_THRESHOLD) break;
+      continue;
+    }
+
+    stuckCount = 0;
 
     const line = _getCachedPathCells(simCurrent, nextStep);
     let hitTarget = false;
