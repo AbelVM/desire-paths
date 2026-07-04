@@ -15,6 +15,11 @@ import {
   SIM_TICK_BUFFER,
   YIELD_EVERY_AGENTS,
   SIM_YIELD_MS,
+  COMPUTE_PATH_CACHE_MAX,
+  COMPUTE_DISK_CACHE_MAX,
+  COMPUTE_VISIBILITY_CACHE_MAX,
+  CELL_LATLNG_CACHE_MAX,
+  GRADIENT_CACHE_MAX_ENTRIES,
 } from './constants.js';
 import {
   runGradientBatches,
@@ -42,13 +47,6 @@ function _strHash(s) {
   }
   return h >>> 0;
 }
-
-// Local cache bounds for compute-heavy H3 calls (tuned from instrumentation)
-const COMPUTE_PATH_CACHE_MAX = 256;
-const COMPUTE_DISK_CACHE_MAX = 256;
-const COMPUTE_VISIBILITY_CACHE_MAX = 2048;
-const CELL_LATLNG_CACHE_MAX = 1024;
-const GRADIENT_CACHE_MAX_ENTRIES = 16;
 
 // Module-level lat/lng cache (FIFO object-based cache to avoid Map hotspots)
 const _cellLatLngCacheObj = Object.create(null);
@@ -550,7 +548,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
       try {
         console.debug &&
           console.debug('getReachableDestinations: missing gradient', { originCell, destCell });
-      } catch (_e) {}
+      } catch (_e) { }
       continue;
     }
     const hasOrigin =
@@ -562,7 +560,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
             originCell,
             destCell,
           });
-      } catch (_e) {}
+      } catch (_e) { }
       continue;
     }
     const w = ctx.simulationNodes[destCell]?.weight || 1;
@@ -663,7 +661,7 @@ export async function computeDesirePaths(state, mapInstance) {
     if (mapInstance.showAlertCard) {
       mapInstance.showAlertCard(
         'Build the mapping first by clicking "Build Mapping". ' +
-          'The simulation requires a friction map generated from the map tiles.',
+        'The simulation requires a friction map generated from the map tiles.',
         { title: 'Mapping not built', tone: 'warning' }
       );
     }
@@ -796,14 +794,14 @@ export async function computeDesirePaths(state, mapInstance) {
     // Centralized error handling: surface to UI and ensure handler cleared
     try {
       clearSpatialWorkerProgressHandler();
-    } catch (_e) {}
+    } catch (_e) { }
     if (typeof mapInstance?.showAlertCard === 'function') {
       try {
         mapInstance.showAlertCard(err?.message || String(err), {
           title: 'Simulation error',
           tone: 'error',
         });
-      } catch (_e) {}
+      } catch (_e) { }
     } else if (typeof console !== 'undefined') {
       console.error('Gradient computation failed:', err);
     }
@@ -837,7 +835,7 @@ export async function computeDesirePaths(state, mapInstance) {
           assignedLen: p.assigned?.length ?? 0,
         })),
       });
-  } catch (_e) {}
+  } catch (_e) { }
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
   for (let pi = 0; pi < plan.length; pi++) {
     const originCell = plan[pi].originCell;
@@ -862,7 +860,7 @@ export async function computeDesirePaths(state, mapInstance) {
               title: 'Simulation aborted',
               tone: 'warning',
             });
-        } catch (_e) {}
+        } catch (_e) { }
         // Do not apply an incomplete plan; abort early.
         return;
       }
@@ -885,7 +883,7 @@ export async function computeDesirePaths(state, mapInstance) {
           );
           mapInstance?.syncSimulationUI?.();
         }
-      } catch (_e) {}
+      } catch (_e) { }
     });
 
     const agentResults = await runAgentBatches(
@@ -913,7 +911,7 @@ export async function computeDesirePaths(state, mapInstance) {
   } finally {
     try {
       clearSpatialWorkerProgressHandler();
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   applyPathDesireDeltas(state, pathDesireDeltas);
@@ -938,7 +936,7 @@ export async function computeDesirePaths(state, mapInstance) {
   updateSimulationProgress(state, totalAgents, totalAgents, 'Complete');
   try {
     clearSpatialWorkerProgressHandler();
-  } catch (_e) {}
+  } catch (_e) { }
   mapInstance?.updateLayers?.();
   state.flowsReady = true;
 }
@@ -971,9 +969,9 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
 
   const getFriction = stateEnabled
     ? (n) => {
-        const s = cellState[n];
-        return s ? s.friction : undefined;
-      }
+      const s = cellState[n];
+      return s ? s.friction : undefined;
+    }
     : (n) => frictionLookup[n];
   const getAffordance = stateEnabled
     ? (n) => cellState[n]?.affordance ?? 0.1
@@ -1187,9 +1185,9 @@ function computeDijkstraGradient(ctx, targetCell) {
 
   const getFriction = stateEnabled
     ? (n) => {
-        const s = cellState[n];
-        return s ? s.friction : undefined;
-      }
+      const s = cellState[n];
+      return s ? s.friction : undefined;
+    }
     : (n) => frictionLookup[n];
 
   const getNeighbors = (cell) => _getCachedDisk(ctx, cell, 1);

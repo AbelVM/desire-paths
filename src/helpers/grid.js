@@ -5,6 +5,8 @@ import {
   H3_STRIDE_RESOLUTION,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
   VISUAL_DEPTH,
+  PATH_CACHE_MAX,
+  POLY_CACHE_MAX
 } from './constants.js';
 import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
 import {
@@ -71,9 +73,6 @@ function _polyKey(coords) {
   if (!isFinite(minx)) return '';
   return `${minx.toFixed(6)}:${miny.toFixed(6)}:${maxx.toFixed(6)}:${maxy.toFixed(6)}:${points}:${firstLng.toFixed(6)}:${firstLat.toFixed(6)}:${lastLng.toFixed(6)}:${lastLat.toFixed(6)}`;
 }
-
-const PATH_CACHE_MAX = 2000;
-const POLY_CACHE_MAX = 2000;
 
 export function getHexes(state, mapInstance) {
   const aoiKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';

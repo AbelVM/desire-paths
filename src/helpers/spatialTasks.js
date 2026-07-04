@@ -6,6 +6,7 @@ import {
   IMPASSABLE_BLUR_SIGMA,
   IMPASSABLE_BLUR_FRICTION_ADD,
   getSurface,
+  POLY_CELLS_CACHE_MAX,
 } from './constants.js';
 import { computeDijkstra } from './dijkstra.js';
 
@@ -35,7 +36,6 @@ export function computeAoiHexes(aoiPolygon) {
 }
 
 // Cache polygonToCells results to avoid repeated H3 computation for identical geometries
-const POLY_CELLS_CACHE_MAX = 512;
 const _polyCellsCache = Object.create(null);
 const _polyCellsCacheOrder = [];
 

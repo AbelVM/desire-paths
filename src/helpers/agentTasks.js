@@ -8,6 +8,7 @@ import {
   TEMPERATURE,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
+  CELL_LATLNG_CACHE_MAX,
 } from './constants.js';
 
 // Deterministic seeded RNG (LCG)
@@ -32,7 +33,6 @@ function _strHash(s) {
 // Small local caches (keeps worker stateless w.r.t. main thread)
 const _cellLatLngCacheObj = Object.create(null);
 const _cellLatLngCacheOrder = [];
-const CELL_LATLNG_CACHE_MAX = 1024;
 
 function _clearLatLngCache() {
   for (const key in _cellLatLngCacheObj) delete _cellLatLngCacheObj[key];

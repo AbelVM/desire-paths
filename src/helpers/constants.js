@@ -507,3 +507,19 @@ function _getSurfaceFallback(feature) {
   // 6. Default assumption for unclassified features
   return { cost: 'PAVEMENT', layer: parseLayerValue(layer) };
 }
+
+// Cache size limit for cell lat/lng cache (used in visibility checks)
+export const CELL_LATLNG_CACHE_MAX = 1024;
+
+// Local cache bounds for compute-heavy H3 calls (tuned from instrumentation)
+export const COMPUTE_PATH_CACHE_MAX = 256;
+export const COMPUTE_DISK_CACHE_MAX = 256;
+export const COMPUTE_VISIBILITY_CACHE_MAX = 2048;
+export const GRADIENT_CACHE_MAX_ENTRIES = 16;
+
+// Cache size limit for path and polygon caches (used in compute-heavy operations)
+export const PATH_CACHE_MAX = 2000;
+export const POLY_CACHE_MAX = 2000;
+
+// Cache size limit for poly cells cache (used in spatial operations)
+export const POLY_CELLS_CACHE_MAX = 512;
