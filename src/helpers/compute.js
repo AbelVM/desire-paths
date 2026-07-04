@@ -477,6 +477,7 @@ function runSingleAgentPath(
     simAgentId,
     pathDesireDeltas = null,
     applyWear = false,
+    accumulatedFootprints = null,
   }
 ) {
   let simCurrent = originCell;
@@ -508,7 +509,7 @@ function runSingleAgentPath(
       break;
     }
 
-    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId);
+    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId, accumulatedFootprints);
     if (!nextStep || nextStep === simCurrent) break;
 
     const line = _getCachedPathCells(ctx, simCurrent, nextStep);
@@ -814,6 +815,11 @@ export async function computeDesirePaths(state, mapInstance) {
   }
 
   const pathDesireDeltas = new Map();
+  // True ABM: shared footprint accumulator — all agents in this simulation
+  // see each other's positions as accumulated footprints.  This is the key
+  // difference from Monte-Carlo sampling where every agent plans independently.
+  const accumulatedFootprints = Object.create(null);
+
   let perTargetContribs = Object.create(null);
   const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
     state,
@@ -892,7 +898,7 @@ export async function computeDesirePaths(state, mapInstance) {
       goalGradients,
       state._affordanceObj || state.affordanceMap,
       hexes,
-      { visibilityEntries: state._precomputedVisibility?.data || null }
+      { visibilityEntries: state._precomputedVisibility?.data || null, accumulatedFootprints }
     );
 
     // Merge returned path desire into Map
@@ -942,9 +948,9 @@ export async function computeDesirePaths(state, mapInstance) {
 }
 
 /**
- * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
- */
-function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
+  * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
+  */
+function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', accumulatedFootprints = null) {
   // _frictionObj is the canonical lookup; build it once from cellFrictionMap if absent
   const frictionLookup =
     ctx._frictionObj ||
@@ -1035,8 +1041,17 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
   if (useGradient) {
     for (let i = 0; i < cLen; i++) {
       const gN = gNsArr[i];
-      const aff = affsArr[i];
+      let aff = affsArr[i];
       const stepCost = frictionArr[i] || 0;
+
+      // True ABM: boost effective affordance by accumulated footprints.
+      // Cells that more agents have traversed become easier to enter,
+      // creating positive feedback that produces emergent path formation.
+      if (accumulatedFootprints) {
+        const fp = accumulatedFootprints[cellsArr[i]] || 0;
+        aff += Math.log1p(fp) * 0.05;
+      }
+
       const delta = stepCost + gN - gCurr;
       let S_ij = weights.w_a * aff - weights.w_d * delta;
       S_ij -= (weights.w_theta || 0) * (anglesArr[i] / 180);
@@ -1140,18 +1155,27 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '') {
     if (isScoreValid && S_ij > bestScore) {
       bestScore = S_ij;
       bestIndex = i;
-    } else if (!isScoreValid && affsArr[i] > bestScore) {
-      bestScore = affsArr[i];
-      bestIndex = i;
-    } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost =
-        (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
-      const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
-      if (candidateCost < currentBestCost) {
+    } else if (!isScoreValid) {
+      // No gradient: fall back to affordance, boosted by accumulated footprints.
+      let effAff = affsArr[i];
+      if (accumulatedFootprints) {
+        const fp = accumulatedFootprints[cellsArr[i]] || 0;
+        effAff += Math.log1p(fp) * 0.05;
+      }
+      if (effAff > bestScore) {
+        bestScore = effAff;
         bestIndex = i;
-      } else if (candidateCost === currentBestCost) {
-        if (gridDistance(curr, cellsArr[i]) < gridDistance(curr, cellsArr[bestIndex])) {
+      } else if (Math.abs(effAff - bestScore) < 1e-9) {
+        // Tiebreak: prefer lower cost when affordance is equal.
+        const currentBestCost =
+          (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
+        const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
+        if (candidateCost < currentBestCost) {
           bestIndex = i;
+        } else if (candidateCost === currentBestCost) {
+          if (gridDistance(curr, cellsArr[i]) < gridDistance(curr, cellsArr[bestIndex])) {
+            bestIndex = i;
+          }
         }
       }
     }
@@ -1497,6 +1521,7 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
         maxTicks,
         simAgentId,
         applyWear: false,
+        accumulatedFootprints: null, // incremental API — not part of main ABM loop
       });
 
       for (let p = 0; p < simPath.length; p++) {

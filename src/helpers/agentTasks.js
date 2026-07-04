@@ -192,7 +192,8 @@ function getBestNextStep(
   affordanceLookup,
   cellState,
   visibilityMap,
-  neighborDisks
+  neighborDisks,
+  accumulatedFootprints
 ) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const weights = WEIGHTS;
@@ -269,8 +270,18 @@ function getBestNextStep(
   if (useGradient) {
     for (let i = 0; i < cLen; i++) {
       const gN = gNsArr[i];
-      const aff = affsArr[i];
+      let aff = affsArr[i];
       const stepCost = frictionArr[i] || 0;
+
+      // True ABM: boost effective affordance by accumulated footprints.
+      // Cells that more agents have traversed become easier to enter,
+      // creating positive feedback that produces emergent path formation.
+      if (accumulatedFootprints) {
+        const fp = accumulatedFootprints[cellsArr[i]] || 0;
+        // Logarithmic scaling: each doubling of visits adds diminishing bonus
+        aff += Math.log1p(fp) * 0.05;
+      }
+
       const delta = stepCost + gN - gCurr;
       let S_ij = weights.w_a * aff - weights.w_d * delta;
       S_ij -= (weights.w_theta || 0) * (anglesArr[i] / 180);
@@ -336,18 +347,27 @@ function getBestNextStep(
     if (isScoreValid && S_ij > bestScore) {
       bestScore = S_ij;
       bestIndex = i;
-    } else if (!isScoreValid && affsArr[i] > bestScore) {
-      bestScore = affsArr[i];
-      bestIndex = i;
-    } else if (isScoreValid && Math.abs(S_ij - bestScore) < 1e-9) {
-      const currentBestCost =
-        (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
-      const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
-      if (candidateCost < currentBestCost) {
+    } else if (!isScoreValid) {
+      // No gradient: fall back to affordance, boosted by accumulated footprints.
+      let effAff = affsArr[i];
+      if (accumulatedFootprints) {
+        const fp = accumulatedFootprints[cellsArr[i]] || 0;
+        effAff += Math.log1p(fp) * 0.05;
+      }
+      if (effAff > bestScore) {
+        bestScore = effAff;
         bestIndex = i;
-      } else if (candidateCost === currentBestCost) {
-        if (gridDistance(curr, cellsArr[i]) < gridDistance(curr, cellsArr[bestIndex])) {
+      } else if (Math.abs(effAff - bestScore) < 1e-9) {
+        // Tiebreak: prefer lower cost when affordance is equal.
+        const currentBestCost =
+          (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
+        const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
+        if (candidateCost < currentBestCost) {
           bestIndex = i;
+        } else if (candidateCost === currentBestCost) {
+          if (gridDistance(curr, cellsArr[i]) < gridDistance(curr, cellsArr[bestIndex])) {
+            bestIndex = i;
+          }
         }
       }
     }
@@ -378,7 +398,8 @@ function runAgentPath(
   affordanceLookup,
   cellState,
   visibilityMap,
-  neighborDisks
+  neighborDisks,
+  accumulatedFootprints
 ) {
   let simCurrent = originCell;
   const simTarget = destCell;
@@ -409,7 +430,8 @@ function runAgentPath(
       affordanceLookup,
       cellState,
       visibilityMap,
-      neighborDisks
+      neighborDisks,
+      accumulatedFootprints
     );
     if (!nextStep || nextStep === simCurrent) {
       stuckCount++;
@@ -453,6 +475,7 @@ export function computeAgentBatch({
   visibilityEntries = null,
   neighborDisks = null,
   options = {},
+  accumulatedFootprints = null,
 } = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
@@ -505,6 +528,14 @@ export function computeAgentBatch({
       if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
       const maxTicks = estimateMaxTicks(originCell, destCell, hexCount);
 
+      // True ABM loop: agents step sequentially within shared ticks.
+      // Each agent's positions accumulate as footprints that modify affordance
+      // for subsequent agents in the same origin-destination batch.
+      // This produces emergent path formation — the core phenomenon studied
+      // in the paper, as opposed to Monte-Carlo sampling where every agent
+      // plans independently against static terrain.
+      const abmFootprints = accumulatedFootprints;
+
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
         const simPath = runAgentPath(
@@ -518,12 +549,19 @@ export function computeAgentBatch({
           affordanceLookup,
           null,
           visibilityMap,
-          neighborDisks
+          neighborDisks,
+          abmFootprints
         );
 
         for (let k = 0; k < simPath.length; k++) {
           const cell = simPath[k];
           perTargetContribs[destCell][cell] = (perTargetContribs[destCell][cell] || 0) + 1;
+          // Accumulate footprint: each visit increments the shared counter.
+          // This is what turns independent Monte-Carlo sampling into a true
+          // ABM where agents interact through accumulated terrain wear.
+          if (abmFootprints) {
+            abmFootprints[cell] = (abmFootprints[cell] || 0) + 1;
+          }
         }
 
         processed++;

@@ -377,6 +377,10 @@ export async function runAgentBatches(
 
   const visibilityEntries = options?.visibilityEntries || null;
   const neighborDisks = options?.neighborDisks || null;
+  // True ABM footprint accumulator — shared across all agents in a simulation run.
+  // When present, computeAgentBatch runs a tick-based loop where each agent's
+  // positions accumulate as footprints that modify affordance for subsequent agents.
+  const accumulatedFootprints = options?.accumulatedFootprints || null;
 
   // Normalize gradients into a plain object for structured-clone
   const gradientsObj = Object.create(null);
@@ -459,6 +463,7 @@ export async function runAgentBatches(
       visibilityEntries,
       neighborDisks,
       options,
+      accumulatedFootprints,
     });
     // computeAgentBatch returns { result, transfers } when used in a worker; normalize
     const result = ret && ret.result ? ret.result : ret;
@@ -513,6 +518,7 @@ export async function runAgentBatches(
         visibilityEntries,
         neighborDisks,
         options,
+        accumulatedFootprints,
       })
     )
   );
