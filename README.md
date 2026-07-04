@@ -83,7 +83,7 @@ Click **"Reset Grid"** to clear all nodes, flows, and cached state. Start a new 
 | `H3_STRIDE_RESOLUTION` | 15 | H3 resolution for simulation grid (~0.88m spacing) |
 | `MAX_SIM_TICKS` | 5000 | Maximum steps per agent journey (distance-capped via `gridDistance × 8 + 32`) |
 | `SIM_TICK_BUFFER` | 8 | Distance multiplier buffer above shortest path |
-| `YIELD_EVERY_AGENTS` | 5 | Agents before yielding to main thread |
+| `YIELD_EVERY_AGENTS` | 50 | Agents before yielding to main thread (time guard is primary throttle) |
 | `SIM_YIELD_MS` | 45 | Milliseconds before cooperative yield (below long-task threshold) |
 | `AGENTS_PER_DESTINATION` | 25 | Base agents spawned per origin-destination pair (scaled by node weight) |
 | `TEMPERATURE` | 0.5 | Controls randomness in agent decision-making (softmax sampling) |
