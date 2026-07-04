@@ -338,33 +338,6 @@ export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } =
   }
 }
 
-// Cache gridDisk results to avoid redundant H3 neighbor lookups in blur computation
-const BLUR_NEIGHBOR_CACHE_MAX = 2048;
-const _blurNeighborCache = Object.create(null);
-const _blurNeighborCacheOrder = [];
-
-function getBlurNeighbors(cell, radius) {
-  const key = `${cell}:${radius}`;
-  let cached = _blurNeighborCache[key];
-  if (cached) return cached;
-
-  // gridDisk returns center + neighbors; skip index 0 (center) for blur
-  try {
-    cached = gridDisk(cell, radius);
-  } catch (_error) {
-    cached = [];
-  }
-
-  _blurNeighborCache[key] = cached;
-  _blurNeighborCacheOrder.push(key);
-  if (_blurNeighborCacheOrder.length > BLUR_NEIGHBOR_CACHE_MAX) {
-    const old = _blurNeighborCacheOrder.shift();
-    delete _blurNeighborCache[old];
-  }
-
-  return cached;
-}
-
 export function computeImpassableBlurSnapshot({
   frictionEntries,
   radius = IMPASSABLE_BLUR_RADIUS,
@@ -372,14 +345,13 @@ export function computeImpassableBlurSnapshot({
   addFactor = IMPASSABLE_BLUR_FRICTION_ADD,
 }) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
-  const impassables = [];
 
+  // Collect impassable sources
+  const impassables = [];
   for (const cell in frictionLookup) {
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) impassables.push(cell);
   }
-
-  const blurWeights = Object.create(null);
-  if (impassables.length === 0) return { blurWeights, updates: [] };
+  if (impassables.length === 0 || radius < 1) return { blurWeights: Object.create(null), updates: [] };
 
   // Pre-compute gaussian weights per distance to avoid repeated Math.exp calls
   const gaussianWeights = new Array(radius + 1);
@@ -387,54 +359,63 @@ export function computeImpassableBlurSnapshot({
     gaussianWeights[d] = Math.exp(-0.5 * Math.pow(d / sigma, 2));
   }
 
-  // Use gridDisk instead of gridRing: returns center+neighbors in one H3 call vs. ring-only
-  // Cache results since nearby impassables share many neighbors
-  const totalImp = impassables.length;
-  const emitEveryImp = Math.max(1, Math.floor(totalImp / 20));
-  for (let i = 0; i < totalImp; i++) {
-    const cell = impassables[i];
-    const neighbors = getBlurNeighbors(cell, radius);
-
-    for (let n = 1; n < neighbors.length; n++) {
-      // skip center (index 0)
-      const neighborCell = neighbors[n];
-      const friction = frictionLookup[neighborCell];
-      if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
-
-      // Compute distance from impassable to this neighbor for correct gaussian weight
-      // For radius=1, all immediate neighbors are at distance 1
-      let dist = 1;
-      if (radius > 1) {
-        // Determine actual ring distance by checking which ring contains this cell
-        try {
-          const prevRing = getBlurNeighbors(cell, radius - 1);
-          for (let p = 0; p < prevRing.length; p++) {
-            if (prevRing[p] === neighborCell) {
-              dist = radius - 1;
-              break;
-            }
-          }
-        } catch (_e) {}
+  // Multi-source BFS: all impassables start at distance 0.
+  // Each cell is visited once — its distance equals the nearest impassable.
+  const blurWeights = Object.create(null);
+  const visited = new Set(impassables);
+  let queue = [];
+  for (let i = 0; i < impassables.length; i++) {
+    try {
+      const neighbors = gridDisk(impassables[i], 1);
+      for (let n = 0; n < neighbors.length; n++) {
+        const nc = neighbors[n];
+        if (!visited.has(nc)) {
+          visited.add(nc);
+          queue.push([nc, 1]);
+        }
       }
-
-      const weight = gaussianWeights[dist];
-      blurWeights[neighborCell] = (blurWeights[neighborCell] ?? 0) + weight;
-    }
-
-    if (i % emitEveryImp === 0) emitProgress('impassable-blur', i + 1, totalImp);
+    } catch (_e) {}
   }
-  if (totalImp > 0) emitProgress('impassable-blur', totalImp, totalImp);
 
+  // Expand BFS ring-by-ring until radius limit or exhaustion
+  let currentDist = 1;
+  while (currentDist < radius && queue.length > 0) {
+    const nextQueue = [];
+    for (let i = 0; i < queue.length; i++) {
+      const cell = queue[i][0];
+      try {
+        const neighbors = gridDisk(cell, 1);
+        for (let n = 0; n < neighbors.length; n++) {
+          const nc = neighbors[n];
+          if (!visited.has(nc)) {
+            visited.add(nc);
+            nextQueue.push([nc, currentDist + 1]);
+          }
+        }
+      } catch (_e) {}
+    }
+    queue = nextQueue;
+    currentDist++;
+  }
+
+  // Accumulate gaussian weights — only for cells with valid (non-impassable) friction
+  for (let i = 0; i < queue.length; i++) {
+    const cell = queue[i][0];
+    const dist = queue[i][1];
+    if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
+    blurWeights[cell] = (blurWeights[cell] ?? 0) + gaussianWeights[dist];
+  }
+
+  // Build friction updates capped at impassable limit
   const updates = [];
   const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
-  const blurWeightKeys = Object.keys(blurWeights);
-  for (let k = 0; k < blurWeightKeys.length; k++) {
-    const cell = blurWeightKeys[k];
-    const nextFriction = Math.min(
-      impassableLimit,
-      (frictionLookup[cell] ?? 0) + blurWeights[cell] * addFactor
-    );
-    updates.push([cell, nextFriction]);
+  const keys = Object.keys(blurWeights);
+  for (let k = 0; k < keys.length; k++) {
+    const cell = keys[k];
+    updates.push([
+      cell,
+      Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + blurWeights[cell] * addFactor),
+    ]);
   }
 
   return { blurWeights, updates };
