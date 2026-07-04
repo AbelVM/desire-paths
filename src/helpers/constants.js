@@ -232,280 +232,111 @@ function isRailway(cls, subclass) {
   return cls === 'railway' || rails.includes(subclass);
 }
 
-// Friction classification lookup: pre-compute all possible surface type combinations
-// Key format: "layerId|cls|subclass|brunnel|foot|access|indoor" → {cost, layer}
-const _surfaceCache = Object.create(null);
+// Lazy-populated friction classification cache (on-demand fills)
+const _surfaceCache = new Map();
+const MAX_SURFACE_CACHE = 256;
 
-function _surfaceKey(layerId, cls, subclass, brunnel, foot, access, indoor) {
-  return `${layerId}|${cls}|${subclass}|${brunnel}|${foot}|${access}|${indoor}`;
+/**
+ * Build a normalized cache key from feature properties.
+ */
+function _makeSurfaceKey(layerId, cls, subclass, brunnel, foot, access, indoor) {
+  return `${layerId}|${cls ?? ''}|${subclass ?? ''}|${brunnel ?? ''}|${foot ?? ''}|${access ?? ''}|${indoor ?? ''}`;
 }
 
 /**
- * Pre-computed friction classification lookup table.
- * Replaces the if/else chain in getSurface with O(1) hash map access.
+ * Classify a feature's surface cost using on-demand logic with lazy cache fills.
  */
-function _buildSurfaceCache() {
-  // Transportation layer — iterate all possible cls/subclass/brunnel combinations
-  const transportClasses = [
-    'motorway',
-    'trunk',
-    'primary',
-    'secondary',
-    'tertiary',
-    'minor',
-    'service',
-    'path',
-    'pedestrian',
-    'footway',
-    'corridor',
-    'platform',
-    'cycleway',
-    'steps',
-    'bridleway',
-    'track',
-    'railway',
-    'rail',
-    'narrow_gauge',
-    'preserved',
-    'funicular',
-    'subway',
-    'light_rail',
-    'monorail',
-    'tram',
-  ];
-  const transportSubclasses = [
-    'pedestrian',
-    'footway',
-    'corridor',
-    'platform',
-    'path',
-    'bridleway',
-    'cycleway',
-    'steps',
-  ];
-
-  for (const cls of transportClasses) {
-    for (const brunnel of ['bridge', 'tunnel', null, undefined]) {
-      const verticalLayer = brunnel === 'bridge' ? '1' : brunnel === 'tunnel' ? '-1' : '0';
-
-      // Foot restricted variants → IMPASSABLE
-      for (const foot of ['no', 'private', null, undefined]) {
-        if (foot === 'no' || foot === 'private') {
-          const key = _surfaceKey('transportation', cls, '', brunnel, String(foot), '', '');
-          _surfaceCache[key] = { cost: 'IMPASSABLE', layer: verticalLayer };
-          continue;
-        }
-        // Indoor → IMPASSABLE
-        for (const indoor of ['true', 1, true, null, undefined]) {
-          if (indoor === 'true' || indoor === 1 || indoor === true) {
-            const k = _surfaceKey(
-              'transportation',
-              cls,
-              '',
-              brunnel,
-              String(foot),
-              '',
-              String(indoor)
-            );
-            _surfaceCache[k] = { cost: 'IMPASSABLE', layer: verticalLayer };
-          } else {
-            // Under construction → IMPASSABLE
-            if (cls.includes('_construction')) {
-              const k = _surfaceKey('transportation', cls, '', brunnel, String(foot), '', '');
-              _surfaceCache[k] = { cost: 'IMPASSABLE', layer: verticalLayer };
-            } else {
-              // Normal classification
-              let cost;
-              if (cls === 'path' || cls === 'pedestrian') {
-                cost = classifyPathSubclass(cls === 'path' ? '' : '');
-              } else if (brunnel === 'ford') {
-                cost = 'HEAVY_GRASS';
-              } else {
-                cost = classifyRoadHierarchy(cls);
-              }
-              const k = _surfaceKey('transportation', cls, '', brunnel, String(foot), '', '');
-              _surfaceCache[k] = cost ? { cost, layer: verticalLayer } : null;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Landcover and landuse layers — simpler classification
-  const landcoverClasses = [
-    'ice',
-    'rock',
-    'wetland',
-    'forest',
-    'wood',
-    'scrub',
-    'shrubbery',
-    'heath',
-    'sand',
-    'beach',
-    'dune',
-    'fell',
-    'grass',
-    'grassland',
-    'meadow',
-    'park',
-    'garden',
-    'village_green',
-    'recreation_ground',
-    'flowerbed',
-    'wet_meadow',
-    'farm',
-    'farmland',
-    'allotments',
-    'orchard',
-    'vineyard',
-    'plant_nursery',
-  ];
-  for (const cls of landcoverClasses) {
-    const key = _surfaceKey('landcover', cls, '', null, '', '', '');
-    const result = classifyLandcover(cls, '');
-    if (result) _surfaceCache[key] = { cost: result, layer: '0' };
-  }
-
-  const landuseClasses = [
-    'military',
-    'industrial',
-    'quarry',
-    'dam',
-    'railway',
-    'residential',
-    'commercial',
-    'retail',
-    'school',
-    'university',
-    'kindergarten',
-    'college',
-    'library',
-    'hospital',
-    'bus_station',
-    'stadium',
-    'pitch',
-    'playground',
-    'track',
-    'theme_park',
-    'zoo',
-    'cemetery',
-    'suburb',
-    'quarter',
-    'neighbourhood',
-    'garages',
-  ];
-  for (const cls of landuseClasses) {
-    const key = _surfaceKey('landuse', cls, '', null, '', '', '');
-    const result = classifyLanduse(cls);
-    if (result) _surfaceCache[key] = { cost: result, layer: '0' };
-  }
-
-  // Building and water → always IMPASSABLE
-  for (const layerId of ['building', 'water']) {
-    const key = _surfaceKey(layerId, '', '', null, '', '', '');
-    _surfaceCache[key] = { cost: 'IMPASSABLE', layer: '0' };
-  }
-
-  // Default → PAVEMENT
-  _surfaceCache['default'] = { cost: 'PAVEMENT', layer: '0' };
-}
-_buildSurfaceCache();
-
-/**
- * Fast friction classification using pre-computed lookup table.
- * Falls back to the if/else chain for uncached combinations.
- */
-export function getSurface(feature) {
+function _classifySurface(feature) {
   const layerId = feature.sourceLayer || '';
-  const { layer, class: cls, subclass, brunnel } = feature.properties;
-  const safeCls = cls == null ? '' : String(cls);
-  const safeSubclass = subclass == null ? '' : String(subclass);
+  const props = feature.properties;
+  const { layer, class: clsRaw, subclass, brunnel } = props;
+  const cls = clsRaw == null ? '' : String(clsRaw);
+  const sub = subclass == null ? '' : String(subclass);
 
-  // Check pre-computed cache first (covers the vast majority of cases)
-  let foot = feature.properties.foot || '';
-  let access = feature.properties.access || '';
-  let indoor = feature.properties.indoor || '';
-  const cachedKey = _surfaceKey(
-    layerId,
-    safeCls,
-    safeSubclass,
-    brunnel,
-    String(foot),
-    String(access),
-    String(indoor)
-  );
-  const cached = _surfaceCache[cachedKey];
-  if (cached) {
-    // For transportation layer, resolve vertical layer at runtime
-    if (layerId === 'transportation') {
-      return { cost: cached.cost, layer: parseLayerValue(layer) };
-    }
-    return { cost: cached.cost, layer: cached.layer };
-  }
-
-  // Fallback to original if/else chain for uncached combinations
-  const result = _getSurfaceFallback(feature);
-  if (result && !result.cost) return null;
-  return result;
-}
-
-function _getSurfaceFallback(feature) {
-  const layerId = feature.sourceLayer || '';
-  const { layer, class: cls, subclass, brunnel } = feature.properties;
-  const safeCls = cls == null ? '' : String(cls);
-  const safeSubclass = subclass == null ? '' : String(subclass);
-
-  // 1. GLOBAL FILTER: Ignore sub-surface and interior
-  if (isIndoorIndoors(feature.properties)) {
+  // Global filter: indoor/interior → impassable
+  if (isIndoorIndoors(props)) {
     return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
   }
 
-  // 2. LAYER: TRANSPORTATION
+  // Transportation layer
   if (layerId === 'transportation') {
-    const verticalLayer = resolveVerticalLayer(layer, brunnel);
+    const vLayer = resolveVerticalLayer(layer, brunnel);
 
-    if (isFootRestricted(feature.properties)) {
-      return { cost: 'IMPASSABLE', layer: verticalLayer };
-    }
-    if (isUnderConstruction(safeCls)) {
-      return { cost: 'IMPASSABLE', layer: verticalLayer };
-    }
-    if (safeCls === 'path') {
-      return { cost: classifyPathSubclass(safeSubclass), layer: verticalLayer };
-    }
-    if (brunnel === 'ford') {
-      return { cost: 'HEAVY_GRASS', layer: verticalLayer };
-    }
+    if (isFootRestricted(props)) return { cost: 'IMPASSABLE', layer: vLayer };
+    if (cls.includes('_construction')) return { cost: 'IMPASSABLE', layer: vLayer };
 
-    const roadResult = classifyRoadHierarchy(safeCls);
-    if (roadResult !== null) return { cost: roadResult, layer: verticalLayer };
-    if (safeCls === 'track') return { cost: 'LIGHT_PARK', layer: verticalLayer };
-    if (isRailway(safeCls, safeSubclass)) return { cost: 'IMPASSABLE', layer: verticalLayer };
+    if (cls === 'path') return { cost: classifyPathSubclass(sub), layer: vLayer };
+    if (brunnel === 'ford') return { cost: 'HEAVY_GRASS', layer: vLayer };
 
-    return { cost: 'PAVEMENT', layer: verticalLayer };
+    const roadResult = classifyRoadHierarchy(cls);
+    if (roadResult !== null) return { cost: roadResult, layer: vLayer };
+    if (cls === 'track') return { cost: 'LIGHT_PARK', layer: vLayer };
+    if (isRailway(cls, sub)) return { cost: 'IMPASSABLE', layer: vLayer };
+
+    return { cost: 'PAVEMENT', layer: vLayer };
   }
 
-  // 3. LAYER: LANDCOVER
+  // Landcover
   if (layerId === 'landcover') {
-    const result = classifyLandcover(safeCls, safeSubclass);
+    const result = classifyLandcover(cls, sub);
     if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
 
-  // 4. LAYER: LANDUSE
+  // Landuse
   if (layerId === 'landuse') {
-    const result = classifyLanduse(safeCls);
+    const result = classifyLanduse(cls);
     if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
 
-  // 5. LAYER: BUILDING or WATER (Physical Barrier)
+  // Building / water → impassable
   if (layerId === 'building' || layerId === 'water') {
     return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
   }
 
-  // 6. Default assumption for unclassified features
+  // Default
   return { cost: 'PAVEMENT', layer: parseLayerValue(layer) };
+}
+
+/**
+ * Fast friction classification using lazy-populated cache.
+ * First hit computes and caches; subsequent hits are O(1).
+ */
+export function getSurface(feature) {
+  const layerId = feature.sourceLayer || '';
+  const props = feature.properties;
+  const cls = props.class == null ? '' : String(props.class);
+  const sub = props.subclass == null ? '' : String(props.subclass);
+
+  const key = _makeSurfaceKey(
+    layerId,
+    cls,
+    sub,
+    props.brunnel ?? '',
+    props.foot ?? '',
+    props.access ?? '',
+    props.indoor ?? ''
+  );
+
+  let entry = _surfaceCache.get(key);
+  if (entry) return entry;
+
+  // On-demand classification + cache fill
+  const result = _classifySurface(feature);
+  if (!_resultHasCost(result)) {
+    _surfaceCache.set(key, null);
+    return null;
+  }
+  if (_surfaceCache.size >= MAX_SURFACE_CACHE) {
+    // Evict oldest entry (Map iteration order = insertion order)
+    const firstKey = _surfaceCache.keys().next().value;
+    _surfaceCache.delete(firstKey);
+  }
+  _surfaceCache.set(key, result);
+  return result;
+}
+
+function _resultHasCost(r) {
+  return r && typeof r.cost === 'string';
 }
 
 // Cache size limit for cell lat/lng cache (used in visibility checks)
