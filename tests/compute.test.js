@@ -17,6 +17,7 @@ import {
   addDestination,
   updateDestinationWeight,
   removeDestination,
+  computeDesirePaths,
 } from '../src/helpers/compute.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 import { buildSimulationGeoJSON } from '../src/helpers/map.js';
@@ -1006,5 +1007,115 @@ describe('getGradientDirection', () => {
     expect(typeof bearing).toBe('number');
     expect(bearing).toBeGreaterThanOrEqual(0);
     expect(bearing).toBeLessThan(360);
+  });
+});
+
+describe('unreachable destination warning', () => {
+  it('should detect unreachable destination with empty gradient', async () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      cellFrictionMap: new Map([[h3, 1]]),
+      simulationNodes: {
+        [h3]: { type: 'destination', weight: 1 },
+      },
+      _gradientCacheObj: {
+        [h3]: Object.create(null), // Empty gradient = unreachable
+      },
+      _frictionObj: { [h3]: 1 },
+      _affordanceObj: { [h3]: 0.1 },
+      _cellState: Object.create(null),
+      pathDesireScores: Object.create(null),
+      globalPeakFlow: 1,
+      _mappingGeneration: 1,
+      _frictionSnapshotGen: 1,
+      _multiFrictionSnapshotGen: 1,
+      _cellStateMappingGen: 1,
+      _gradientCacheGen: 1,
+      _visibilityCacheGen: 1,
+      _precomputedVisibility: { gen: 1, data: Object.create(null) },
+      _precomputedBearings: { gen: 1, data: Object.create(null) },
+      _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
+      showAlertCard: (msg, opts) => {
+        map._alertMsg = msg;
+        map._alertOpts = opts;
+      },
+      updateLayers: () => {},
+    };
+    await computeDesirePaths(map, map);
+    expect(map._alertMsg).toContain('unreachable');
+  });
+
+  it('should detect unreachable destination with only self in gradient', async () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const map = {
+      cellFrictionMap: new Map([[h3, 1]]),
+      simulationNodes: {
+        [h3]: { type: 'destination', weight: 1 },
+      },
+      _gradientCacheObj: {
+        [h3]: { [h3]: 0 }, // Only self = unreachable
+      },
+      _frictionObj: { [h3]: 1 },
+      _affordanceObj: { [h3]: 0.1 },
+      _cellState: Object.create(null),
+      pathDesireScores: Object.create(null),
+      globalPeakFlow: 1,
+      _mappingGeneration: 1,
+      _frictionSnapshotGen: 1,
+      _multiFrictionSnapshotGen: 1,
+      _cellStateMappingGen: 1,
+      _gradientCacheGen: 1,
+      _visibilityCacheGen: 1,
+      _precomputedVisibility: { gen: 1, data: Object.create(null) },
+      _precomputedBearings: { gen: 1, data: Object.create(null) },
+      _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
+      showAlertCard: (msg, opts) => {
+        map._alertMsg = msg;
+        map._alertOpts = opts;
+      },
+      updateLayers: () => {},
+    };
+    await computeDesirePaths(map, map);
+    expect(map._alertMsg).toContain('unreachable');
+  });
+
+  it('should not warn when all destinations are reachable', async () => {
+    const h3 = latLngToCell(40.4169, -3.7035, 15);
+    const neighbors = gridDisk(h3, 1).filter((c) => c !== h3);
+    const neighborCell = neighbors[0];
+    const map = {
+      cellFrictionMap: new Map([
+        [h3, 1],
+        [neighborCell, 1],
+      ]),
+      simulationNodes: {
+        [h3]: { type: 'destination', weight: 1 },
+        [neighborCell]: { type: 'origin', weight: 1 },
+      },
+      _gradientCacheObj: {
+        [h3]: { [h3]: 0, [neighborCell]: 1 }, // Reachable
+      },
+      _frictionObj: { [h3]: 1, [neighborCell]: 1 },
+      _affordanceObj: { [h3]: 0.1, [neighborCell]: 0.1 },
+      _cellState: Object.create(null),
+      pathDesireScores: Object.create(null),
+      globalPeakFlow: 1,
+      _mappingGeneration: 1,
+      _frictionSnapshotGen: 1,
+      _multiFrictionSnapshotGen: 1,
+      _cellStateMappingGen: 1,
+      _gradientCacheGen: 1,
+      _visibilityCacheGen: 1,
+      _precomputedVisibility: { gen: 1, data: Object.create(null) },
+      _precomputedBearings: { gen: 1, data: Object.create(null) },
+      _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
+      showAlertCard: (msg, opts) => {
+        map._alertMsg = msg;
+        map._alertOpts = opts;
+      },
+      updateLayers: () => {},
+    };
+    await computeDesirePaths(map, map);
+    expect(map._alertMsg).toBeUndefined();
   });
 });

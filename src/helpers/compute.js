@@ -874,6 +874,27 @@ export async function computeDesirePaths(state, mapInstance) {
     goalGradients.set(d, state._gradientCacheObj[d]);
   }
 
+  // Check for unreachable destinations (surrounded by impassable terrain)
+  // A gradient with only the destination cell itself means no other cells can reach it
+  const unreachableDests = [];
+  for (const d of destinations) {
+    const grad = state._gradientCacheObj[d];
+    const gradKeys = grad ? Object.keys(grad) : [];
+    // If gradient only contains the destination itself (or is empty), it's unreachable
+    if (gradKeys.length <= 1) {
+      unreachableDests.push(d);
+    }
+  }
+  if (unreachableDests.length > 0) {
+    const count = unreachableDests.length;
+    const msg = `${count} destination${count > 1 ? 's' : ''} unreachable — surrounded by impassable terrain`;
+    if (mapInstance?.showAlertCard) {
+      try {
+        mapInstance.showAlertCard(msg, { title: 'Unreachable destination', tone: 'warning' });
+      } catch (_e) { }
+    }
+  }
+
   // Plain object is faster than Map for string-key → integer-value accumulation.
   const pathDesireDeltas = Object.create(null);
   // True ABM: shared footprint accumulator — all agents in this simulation
@@ -1758,6 +1779,18 @@ export function addDestination(ctx, targetCell, weight = 1) {
 
   if (!ctx._gradientCacheObj) ctx._gradientCacheObj = Object.create(null);
   if (!ctx._gradientCacheObj[targetCell]) computeAndCacheGradient(ctx, targetCell);
+
+  // Check if the newly added destination is unreachable (surrounded by impassable terrain)
+  const grad = ctx._gradientCacheObj[targetCell];
+  const gradKeys = grad ? Object.keys(grad) : [];
+  if (gradKeys.length <= 1) {
+    const msg = '1 destination unreachable — surrounded by impassable terrain';
+    if (ctx.showAlertCard) {
+      try {
+        ctx.showAlertCard(msg, { title: 'Unreachable destination', tone: 'warning' });
+      } catch (_e) { }
+    }
+  }
 
   const newAssigned = _computeAssignedCounts(ctx);
   const oldAssigned = ctx._assignedCounts || Object.create(null);
