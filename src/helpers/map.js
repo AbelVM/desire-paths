@@ -2,6 +2,14 @@ import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 
+// Classify cell type from friction value
+function getCellType(friction) {
+  if (friction >= FRICTION_COSTS.IMPASSABLE) return 'impassable';
+  if (friction < 1.5) return 'pavement';
+  if (friction < 3.25) return 'light_park';
+  return 'heavy_grass';
+}
+
 // Flow hover handler — updates tooltip with hex data.
 // Uses info.dataIndex to look up from source array instead of relying on info.object,
 // which may be stale when updateTriggers cause re-renders that change object identity.
@@ -14,7 +22,12 @@ export function handleFlowHover(info, flowData) {
     tooltip.hidden = false;
     const score = Math.round(entry.s);
     const friction = entry.f;
-    tooltip.innerHTML = `<strong>Flow:</strong> ${score} paths · <strong>Friction:</strong> ${friction}`;
+    const affordance = entry.a;
+    const cellType = getCellType(friction);
+    const typeLabel = cellType === 'pavement' ? 'Pavement' :
+      cellType === 'light_park' ? 'Light park' :
+      cellType === 'heavy_grass' ? 'Heavy grass' : 'Impassable';
+    tooltip.innerHTML = `<strong>Flow:</strong> ${score} paths<br><strong>Affordance:</strong> ${affordance.toFixed(2)}<br><strong>Type:</strong> ${typeLabel}<br><strong>Friction:</strong> ${friction}`;
     tooltip.style.left = `${info.x}px`;
     tooltip.style.top = `${info.y}px`;
   } else {
@@ -205,6 +218,14 @@ export function updateLayers(state, mapInstance) {
     }
   }
 
+  // Build affordance lookup
+  const affordanceObj = Object.create(null);
+  if (state.affordanceMap && typeof state.affordanceMap.entries === 'function') {
+    for (const [k, v] of state.affordanceMap.entries()) affordanceObj[k] = v;
+  } else if (state._affordanceObj) {
+    for (const k in state._affordanceObj) affordanceObj[k] = state._affordanceObj[k];
+  }
+
   const logMax = Math.log1p(state.globalPeakFlow ?? 1);
   const invLogMax = logMax > 0 ? 1 / logMax : 0;
 
@@ -220,7 +241,7 @@ export function updateLayers(state, mapInstance) {
     state._flowPool = [];
   }
   while (state._flatPool.length < len) {
-    state._flatPool.push({ hex: '', f: 0, s: 0 });
+    state._flatPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
   }
 
   let flatCount = 0;
@@ -233,9 +254,10 @@ export function updateLayers(state, mapInstance) {
     entry.hex = h;
     entry.f = frictionObj[h] ?? 0;
     entry.s = s;
+    entry.a = affordanceObj[h] ?? 0.1;
     if (s > 0) {
       while (state._flowPool.length < flowCount + 1) {
-        state._flowPool.push({ hex: '', f: 0, s: 0 });
+        state._flowPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
       }
       state._flowPool[flowCount++] = entry;
     }
