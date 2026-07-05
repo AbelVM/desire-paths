@@ -4,9 +4,9 @@ import {
   AFFORDANCE,
   H3_STRIDE_RESOLUTION,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
-  VISUAL_DEPTH,
   PATH_CACHE_MAX,
-  POLY_CACHE_MAX
+  POLY_CACHE_MAX,
+  SIMULATION_PARAMS,
 } from './constants.js';
 import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
 import {
@@ -221,17 +221,24 @@ export async function triggerFastScan(state, mapInstance) {
     state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
   }
 
-// Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
-  const neighborDisks = precomputeNeighborDisks(viewHexes, VISUAL_DEPTH);
+  const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+
+  // Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
+  const neighborDisks = precomputeNeighborDisks(viewHexes, visionDepth);
   state._precomputedNeighborDisks = { gen: state._mappingGeneration, data: neighborDisks };
 
   // Precompute visibility sets using shared neighbor disks (avoids redundant gridDisk calls)
-  const visibilityData = precomputeVisibilitySets(state._frictionObj, viewHexes, VISUAL_DEPTH, neighborDisks);
+  const visibilityData = precomputeVisibilitySets(
+    state._frictionObj,
+    viewHexes,
+    visionDepth,
+    neighborDisks
+  );
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
 
   // Precompute bearings between all cell pairs within VISUAL_DEPTH to eliminate per-tick trig calls
   // OPTIMIZATION: Pass neighborDisks to avoid redundant gridDisk calls
-  const bearingMap = precomputeBearingMap(viewHexes, VISUAL_DEPTH, neighborDisks);
+  const bearingMap = precomputeBearingMap(viewHexes, visionDepth, neighborDisks);
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();

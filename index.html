@@ -5,7 +5,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Primary meta -->
   <title>Desire Paths — Interactive Agent-Based Flow Simulator</title>
   <meta name="description"
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
@@ -13,7 +12,6 @@
     content="desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS, Dijkstra, walkability analysis" />
   <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
 
-  <!-- Theme & mobile -->
   <meta name="theme-color" content="#0a0e17" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -22,7 +20,6 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
-  <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
   <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
@@ -30,13 +27,11 @@
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
   <meta property="og:site_name" content="Desire Paths" />
 
-  <!-- Twitter -->
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
   <meta name="twitter:description"
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
 
-  <!-- JSON-LD Structured Data -->
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -56,10 +51,10 @@
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
-        "name": "Abel Vargas"
+        "name": "Abel Vázquez Montoro"
       }
     }
-    </script>
+  </script>
 
   <link href="src/style/main.css" rel="stylesheet" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -103,90 +98,232 @@
           <div class="panel-orb" aria-hidden="true"></div>
         </div>
 
-        <div class="panel-text">
-          <p>
-            A desire path, or social trail, is an unplanned route created by the erosion of consistent pedestrian or
-            animal traffic, typically representing a more direct, efficient path than designed alternatives. These trails
-            serve as physical indicators of human behavior, allowing urban planners to identify, analyze, and sometimes
-            incorporate these natural pathways into official infrastructure designs<br><br>
-          </p>
-          <p>Read more at <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank"
-              rel="noopener noreferrer">Wikipedia</a><br><br></p>
+        <div class="panel-tabs" role="tablist" aria-label="Panel sections">
+          <button id="tab-intro" class="panel-tab-btn is-active" type="button" role="tab" aria-selected="true"
+            aria-controls="panel-intro" data-tab-target="panel-intro">
+            <i data-lucide="sparkles" aria-hidden="true"></i>
+            <span>Intro</span>
+          </button>
+          <button id="tab-simulation" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
+            aria-controls="panel-simulation" data-tab-target="panel-simulation" tabindex="-1">
+            <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+            <span>Simulation</span>
+          </button>
+          <button id="tab-more-info" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
+            aria-controls="panel-more-info" data-tab-target="panel-more-info" tabindex="-1">
+            <i data-lucide="book-open-text" aria-hidden="true"></i>
+            <span>More info</span>
+          </button>
         </div>
 
-        <div class="panel-meta">
-          <div id="mode-status" class="mode-indicator mode-origin">
-            Placement: Origin nodes · 0 placed
-          </div>
-          <div id="node-count-chip" class="count-chip">
-            <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
-              class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <div class="section-label">Placement</div>
-          <div class="placement-mode-group" role="group" aria-label="Placement mode">
-            <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin"
-              aria-pressed="true">Origin</button>
-            <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination"
-              aria-pressed="false">Destination</button>
-            <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
-              aria-pressed="false">Dual</button>
-          </div>
-          <div class="weight-control">
-            <div class="weight-control-head">
-              <span>Node weight</span>
-              <output id="node-weight-readout" for="node-weight">1</output>
+        <div class="panel-tab-content">
+          <section id="panel-intro" class="panel-tab-panel is-active" role="tabpanel" aria-labelledby="tab-intro" tabindex="0">
+            <div class="panel-text">
+              <p>
+                A desire path, or social trail, is an unplanned route created by repeated pedestrian movement,
+                usually revealing a route that users perceive as shorter, clearer, or more convenient than the
+                official path.
+              </p>
+              <p>
+                Use this simulator to place origins and destinations on real map data, then observe emergent flow
+                corridors shaped by terrain resistance and collective movement.
+              </p>
+              <p>
+                Read more at <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
+              </p>
             </div>
-            <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
-            <div class="weight-scale" aria-hidden="true">
-              <span>1</span>
-              <span>10</span>
+            <div class="onboarding-card intro-card">
+              <div class="onboarding-step active" data-step="1">
+                <span class="step-number">1</span>
+                <span class="step-text">Choose Origin, Destination, or Dual mode, then click on the map to place nodes with your selected weight.</span>
+              </div>
+              <div class="onboarding-step active" data-step="2">
+                <span class="step-number">2</span>
+                <span class="step-text">Tune simulation parameters to explore different behavioral assumptions for route selection and path emergence.</span>
+              </div>
+              <div class="onboarding-step active" data-step="3">
+                <span class="step-number">3</span>
+                <span class="step-text">Run Simulate Flows, inspect the resulting network, and export as GeoJSON for further urban analysis.</span>
+              </div>
             </div>
-            <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change
-              weight, type, or remove them</div>
-          </div>
-        </div>
+          </section>
 
-        <div class="panel-section">
-          <div class="section-label">Simulation</div>
-          <div class="btn-group">
-            <button class="btn btn-accent" id="btn-compute" type="button">Simulate Flows</button>
-            <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
-            <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
-          </div>
-        </div>
-
-        <div class="panel-footer">
-          <div id="scan-loader">Sampling walkable surfaces...</div>
-          <div class="simulation-progress-wrap">
-            <div id="simulation-progress" class="simulation-progress" role="progressbar" aria-label="Simulation progress"
-              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-              <span id="simulation-progress-bar"></span>
+          <section id="panel-simulation" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-simulation" tabindex="0" hidden>
+            <div class="panel-meta">
+              <div id="mode-status" class="mode-indicator mode-origin">
+                Placement: Origin nodes · 0 placed
+              </div>
+              <div id="node-count-chip" class="count-chip">
+                <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
+              </div>
             </div>
-            <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
-          </div>
-          <div id="max-flow-readout" class="density-readout">
-            Peak flow intensity: 0
-          </div>
-        </div>
-      </div><!-- /.panel -->
-    </div><!-- /.panel-inner -->
 
-    <button id="btn-panel-toggle" type="button" class="panel-toggle-btn"
-      aria-label="Show panel" aria-pressed="false">
+            <div class="panel-section">
+              <div class="section-label">Placement</div>
+              <div class="placement-mode-group" role="group" aria-label="Placement mode">
+                <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin" aria-pressed="true">Origin</button>
+                <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination" aria-pressed="false">Destination</button>
+                <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual" aria-pressed="false">Dual</button>
+              </div>
+              <div class="weight-control">
+                <div class="weight-control-head">
+                  <span class="weight-label">
+                    Node weight
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Node weight help"
+                      data-tooltip="Adjust new node weight with the slider. Right-click placed nodes to change weight, type, or remove them.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <output id="node-weight-readout" for="node-weight">1</output>
+                </div>
+                <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
+                <div class="weight-scale" aria-hidden="true">
+                  <span>1</span>
+                  <span>10</span>
+                </div>
+              </div>
+            </div>
+
+            <details class="panel-section panel-disclosure" id="simulation-params-disclosure">
+              <summary class="panel-disclosure-summary">
+                <span class="section-label">Simulation parameters</span>
+                <span class="panel-disclosure-meta">Advanced tuning</span>
+              </summary>
+              <div class="param-list panel-disclosure-body">
+                <label class="param-item" for="sim-param-wa">
+                  <span class="param-item-head">Affordance weight
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Affordance weight help"
+                      data-tooltip="Higher values bias agents toward worn or comfortable surfaces.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-wa-value">1</span>
+                  <input id="sim-param-wa" type="range" min="1" max="8" step="1" value="1" />
+                </label>
+
+                <label class="param-item" for="sim-param-wd">
+                  <span class="param-item-head">Distance penalty
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Distance penalty help"
+                      data-tooltip="Higher values prioritize shorter routes over high-affordance detours.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-wd-value">4</span>
+                  <input id="sim-param-wd" type="range" min="1" max="8" step="1" value="4" />
+                </label>
+
+                <label class="param-item" for="sim-param-vision-depth">
+                  <span class="param-item-head">Vision depth
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Vision depth help"
+                      data-tooltip="How far ahead each agent evaluates candidate cells.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-vision-depth-value">15</span>
+                  <input id="sim-param-vision-depth" type="range" min="5" max="30" step="5" value="15" />
+                </label>
+
+                <label class="param-item" for="sim-param-fov">
+                  <span class="param-item-head">Field of view
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Field of view help"
+                      data-tooltip="Agent angular perception cone in degrees.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-fov-value">120°</span>
+                  <input id="sim-param-fov" type="range" min="30" max="360" step="30" value="120" />
+                </label>
+
+                <label class="param-item" for="sim-param-agents-per-weight">
+                  <span class="param-item-head">Agents per weight unit
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Agents per weight unit help"
+                      data-tooltip="Scales how many agents are spawned for each origin weight level.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-agents-per-weight-value">25</span>
+                  <input id="sim-param-agents-per-weight" type="range" min="5" max="100" step="5" value="25" />
+                </label>
+
+                <label class="param-item" for="sim-param-temperature">
+                  <span class="param-item-head">Temperature
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Temperature help"
+                      data-tooltip="Higher values add stochasticity to route choice.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-temperature-value">0.50</span>
+                  <input id="sim-param-temperature" type="range" min="0" max="2" step="0.25" value="0.5" />
+                </label>
+
+                <label class="param-toggle" for="sim-param-emergent-wear">
+                  <input id="sim-param-emergent-wear" type="checkbox" checked />
+                  <span>Emergent wear</span>
+                  <span class="help-tip" tabindex="0" role="button" aria-label="Emergent wear help"
+                    data-tooltip="When enabled, traversed cells become more attractive during and after simulation.">
+                    <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                  </span>
+                </label>
+              </div>
+            </details>
+
+            <div class="panel-section">
+              <div class="section-label">Simulation</div>
+              <div class="btn-group">
+                <button class="btn btn-accent" id="btn-compute" type="button">Simulate Flows</button>
+                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
+                <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
+              </div>
+            </div>
+
+            <div class="panel-footer">
+              <div id="scan-loader">Sampling walkable surfaces...</div>
+              <div class="simulation-progress-wrap">
+                <div id="simulation-progress" class="simulation-progress" role="progressbar" aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+                  <span id="simulation-progress-bar"></span>
+                </div>
+                <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
+              </div>
+              <div id="max-flow-readout" class="density-readout">Peak flow intensity: 0</div>
+            </div>
+          </section>
+
+          <section id="panel-more-info" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-more-info" tabindex="0" hidden>
+            <article class="info-content">
+              <h3>What are desire paths?</h3>
+              <p>Desire paths are informal routes created when people repeatedly choose a path that better matches convenience, comfort, or directness than planned infrastructure.</p>
+
+              <h3>How this simulator works</h3>
+              <p>The simulator uses an agent-based model over an H3 grid. Agents move from origins to destinations while balancing terrain resistance, route efficiency, and perceived affordance, producing emergent flow corridors.</p>
+
+              <h3>Method reference</h3>
+              <p>Inspired by Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning</em>.</p>
+
+              <h3>Parameters explained</h3>
+              <p><strong>Affordance weight</strong> and <strong>distance penalty</strong> define the preference ratio. <strong>Vision depth</strong> and <strong>field of view</strong> control local perception. <strong>Agents per weight unit</strong> controls sample size. <strong>Temperature</strong> controls stochastic behavior. <strong>Emergent wear</strong> toggles reinforcement effects on traversed cells.</p>
+
+              <h3>Repository</h3>
+              <p><a href="https://github.com/abelvm/desire-paths" target="_blank" rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
+
+              <h3>Author</h3>
+              <p>Abel Vázquez Montoro · <a href="https://www.linkedin.com/in/abelvazquez/" target="_blank" rel="noopener noreferrer">LinkedIn profile</a></p>
+            </article>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <button id="btn-panel-toggle" type="button" class="panel-toggle-btn" aria-label="Show panel" aria-pressed="false">
       <span class="toggle-icon" aria-hidden="true">
         <span></span><span></span><span></span>
       </span>
     </button>
-  </div><!-- /.panel-container -->
+  </div>
 
   <div class="legend">
     <div class="legend-title-row">
       <div class="legend-title">Friction resistance map</div>
-      <button id="btn-toggle-friction" class="legend-icon-button legend-toggle-btn" type="button"
-        aria-label="Hide friction legend" aria-pressed="true">
+      <button id="btn-toggle-friction" class="legend-icon-button legend-toggle-btn" type="button" aria-label="Hide friction legend" aria-pressed="true">
         <span class="toggle-icon">−</span>
       </button>
     </div>
@@ -217,31 +354,6 @@
     </div>
   </div>
 
-  <!-- Empty-state onboarding overlay -->
-  <div id="onboarding-overlay" class="onboarding-overlay" hidden>
-    <div class="onboarding-card">
-      <button id="onboarding-dismiss" type="button" class="onboarding-close" aria-label="Dismiss guide">
-        &times;
-      </button>
-      <div class="onboarding-step active" data-step="1">
-        <span class="step-number">1</span>
-        <span class="step-text">Choose Origin, Destination, or Dual mode, then click the map to place your first node.
-          Use the slider below to set its weight before placing more nodes.</span>
-      </div>
-      <div class="onboarding-step" data-step="2">
-        <span class="step-number">2</span>
-        <span class="step-text">Switch to Destination mode and click anywhere on the map to add your second node. You
-          can adjust weight with ↑↓ arrows or right-click any placed node for more options.</span>
-      </div>
-      <div class="onboarding-step" data-step="3">
-        <span class="step-number">3</span>
-        <span class="step-text">Hit Simulate Flows to run the agent simulation and watch desire paths emerge from the
-          friction field. Drag any placed node to reposition it, or right-click for weight and type controls.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Hex hover tooltip -->
   <div id="hex-tooltip" class="hex-tooltip" hidden></div>
 
   <div id="map"></div>

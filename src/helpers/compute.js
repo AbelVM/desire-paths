@@ -2,15 +2,11 @@ import { gridPathCells, gridDisk, gridRing, cellToLatLng, gridDistance } from 'h
 import {
   FRICTION_COSTS,
   WEIGHTS,
-  VISUAL_DEPTH,
-  VISUAL_ANGLE,
   AFFORDANCE,
   DECAY_RATE,
   UPDATE_RATE,
-  AGENTS_PER_DESTINATION,
   MAX_EXPECTED_VOLUME,
   SOFT_CAP,
-  TEMPERATURE,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
   YIELD_EVERY_AGENTS,
@@ -20,6 +16,7 @@ import {
   COMPUTE_VISIBILITY_CACHE_MAX,
   CELL_LATLNG_CACHE_MAX,
   GRADIENT_CACHE_MAX_ENTRIES,
+  SIMULATION_PARAMS,
 } from './constants.js';
 import {
   runGradientBatches,
@@ -174,7 +171,8 @@ function _getCachedPathCells(ctx, a, b) {
 
 function _getCachedDisk(ctx, center, r) {
   // Use precomputed neighbor disk when available and fresh (VISUAL_DEPTH only)
-  if (r === VISUAL_DEPTH) {
+  const visualDepth = ctx?.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+  if (r === visualDepth) {
     const precomputed = ctx._precomputedNeighborDisks;
     const currentGen = ctx._mappingGeneration ?? 0;
     if (precomputed && precomputed.gen === currentGen) {
@@ -655,6 +653,8 @@ function allocateDestinationCounts(destCandidates, destWeightSum, totalVolume) {
 }
 
 function buildSimulationPlan(ctx, origins, destinations, goalGradients) {
+  const agentsPerWeightUnit =
+    ctx.simulationParams?.agentsPerWeightUnit ?? SIMULATION_PARAMS.agentsPerWeightUnit;
   const plan = [];
   const assignedCounts = Object.create(null);
   let totalAgents = 0;
@@ -663,7 +663,7 @@ function buildSimulationPlan(ctx, origins, destinations, goalGradients) {
     const originCell = origins[o];
     const totalVolume = Math.max(
       1,
-      Math.round((ctx.simulationNodes[originCell]?.weight || 1) * AGENTS_PER_DESTINATION)
+      Math.round((ctx.simulationNodes[originCell]?.weight || 1) * agentsPerWeightUnit)
     );
     const { destCandidates, destWeightSum } = getReachableDestinations(
       ctx,
@@ -702,6 +702,9 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
 export async function computeDesirePaths(state, mapInstance) {
+  state.simulationParams = { ...SIMULATION_PARAMS };
+  const simParams = state.simulationParams;
+
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.
   state.pathDesireScores = Object.create(null);
@@ -983,7 +986,13 @@ export async function computeDesirePaths(state, mapInstance) {
       goalGradients,
       state._affordanceObj || state.affordanceMap,
       hexes,
-      { visibilityEntries: state._precomputedVisibility?.data || null, accumulatedFootprints, originDestDistances: odDistances, bearingMap: state._precomputedBearings?.data || null }
+      {
+        visibilityEntries: state._precomputedVisibility?.data || null,
+        accumulatedFootprints,
+        originDestDistances: odDistances,
+        bearingMap: state._precomputedBearings?.data || null,
+        simulationParams: simParams,
+      }
     );
 
     // Merge returned path desire into plain object
@@ -994,9 +1003,11 @@ export async function computeDesirePaths(state, mapInstance) {
     }
 
     // Apply aggregated affordance wear on main thread
-    for (const cell in pathDesireDeltas) {
-      const v = pathDesireDeltas[cell];
-      if (v && typeof v === 'number') updateAffordance(state, cell, v);
+    if (simParams.emergentWear) {
+      for (const cell in pathDesireDeltas) {
+        const v = pathDesireDeltas[cell];
+        if (v && typeof v === 'number') updateAffordance(state, cell, v);
+      }
     }
 
     perTargetContribs = agentResults.perTargetContribs || Object.create(null);
@@ -1037,10 +1048,15 @@ export async function computeDesirePaths(state, mapInstance) {
   * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
   */
 function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', accumulatedFootprints = null, bearingMap = null) {
+  const simParams = ctx.simulationParams || SIMULATION_PARAMS;
   const affordanceLookup = ctx._affordanceObj;
-  const weights = WEIGHTS;
+  const weights = {
+    w_a: simParams.affordanceWeight,
+    w_d: simParams.distancePenalty,
+    w_theta: WEIGHTS.w_theta,
+  };
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
-  const visualAngleHalf = VISUAL_ANGLE / 2;
+  const visualAngleHalf = simParams.fieldOfView / 2;
 
   const cellState = ctx._cellState || null;
   const stateEnabled = !!cellState;
@@ -1054,7 +1070,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
     ctx._frictionObj = frictionLookup;
   }
 
-  const disk = _getCachedDisk(ctx, curr, VISUAL_DEPTH);
+  const disk = _getCachedDisk(ctx, curr, simParams.visionDepth);
   const sLatLng = _getCachedLatLng(curr);
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
@@ -1225,7 +1241,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
   }
 
   const hasValidScores = useGradient && scores?.length > 0 && typeof scores[0] === 'number';
-  if (hasValidScores && typeof TEMPERATURE === 'number' && TEMPERATURE > 0) {
+  if (hasValidScores && typeof simParams.temperature === 'number' && simParams.temperature > 0) {
     const seed = _strHash(agentId + ':' + curr);
     const rng = _lcg(seed);
     let maxS = -Infinity;
@@ -1237,7 +1253,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
     const weightsArr = new Array(scores.length);
     let sum = 0;
     for (let i = 0; i < scores.length; i++) {
-      const w = Math.exp((scores[i] - maxS) / TEMPERATURE);
+      const w = Math.exp((scores[i] - maxS) / simParams.temperature);
       weightsArr[i] = w;
       sum += w;
     }
@@ -1550,6 +1566,8 @@ export function clearGradientCache(ctx) {
 
 // --- Incremental assignment & contribution helpers ---
 function _computeAssignedCounts(ctx) {
+  const agentsPerWeightUnit =
+    ctx.simulationParams?.agentsPerWeightUnit ?? SIMULATION_PARAMS.agentsPerWeightUnit;
   const destinations = Object.keys(ctx.simulationNodes).filter((k) =>
     ['destination', 'dual'].includes(ctx.simulationNodes[k].type)
   );
@@ -1568,7 +1586,7 @@ function _computeAssignedCounts(ctx) {
     assigned[o] = Object.create(null);
     const totalVolume = Math.max(
       1,
-      Math.round((ctx.simulationNodes[o]?.weight || 1) * AGENTS_PER_DESTINATION)
+      Math.round((ctx.simulationNodes[o]?.weight || 1) * agentsPerWeightUnit)
     );
 
     const destCandidates = [];

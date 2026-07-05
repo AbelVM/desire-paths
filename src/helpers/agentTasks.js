@@ -4,11 +4,10 @@ import {
   FRICTION_COSTS,
   WEIGHTS,
   VISUAL_DEPTH,
-  VISUAL_ANGLE,
-  TEMPERATURE,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
   CELL_LATLNG_CACHE_MAX,
+  SIMULATION_PARAMS,
 } from './constants.js';
 
 // Deterministic seeded RNG (LCG)
@@ -195,6 +194,7 @@ function getBestNextStep(
   gradient,
   currentDirection,
   agentId,
+  simulationParams,
   frictionLookup,
   affordanceLookup,
   cellState,
@@ -204,11 +204,15 @@ function getBestNextStep(
   bearingMap
 ) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
-  const weights = WEIGHTS;
+  const weights = {
+    w_a: simulationParams.affordanceWeight,
+    w_d: simulationParams.distancePenalty,
+    w_theta: WEIGHTS.w_theta,
+  };
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
-  const visualAngleHalf = VISUAL_ANGLE / 2;
+  const visualAngleHalf = simulationParams.fieldOfView / 2;
 
-  const disk = _getCachedDisk(curr, VISUAL_DEPTH, neighborDisks);
+  const disk = _getCachedDisk(curr, simulationParams.visionDepth, neighborDisks);
   const sLatLng = _getCachedLatLng(curr);
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
@@ -341,7 +345,11 @@ function getBestNextStep(
   }
 
   const hasValidScores = useGradient && scores?.length > 0 && typeof scores[0] === 'number';
-  if (hasValidScores && typeof TEMPERATURE === 'number' && TEMPERATURE > 0) {
+  if (
+    hasValidScores &&
+    typeof simulationParams.temperature === 'number' &&
+    simulationParams.temperature > 0
+  ) {
     const seed = _strHash(agentId + ':' + curr);
     const rng = _lcg(seed);
     let maxS = -Infinity;
@@ -353,7 +361,7 @@ function getBestNextStep(
     const weightsArr = new Array(scores.length);
     let sum = 0;
     for (let i = 0; i < scores.length; i++) {
-      const w = Math.exp((scores[i] - maxS) / TEMPERATURE);
+      const w = Math.exp((scores[i] - maxS) / simulationParams.temperature);
       weightsArr[i] = w;
       sum += w;
     }
@@ -437,8 +445,10 @@ function runAgentPath(
   neighborDisks,
   accumulatedFootprints,
   bearingMap,
-  originDestDistances
+  originDestDistances,
+  simulationParams
 ) {
+  const params = simulationParams || SIMULATION_PARAMS;
   let simCurrent = originCell;
   const simTarget = destCell;
 
@@ -473,6 +483,7 @@ function runAgentPath(
       destGradientObj,
       simDirection,
       simAgentId,
+      params,
       frictionLookup,
       affordanceLookup,
       cellState,
@@ -528,6 +539,11 @@ export function computeAgentBatch({
   originDestDistances = null,
   bearingMap = null,
 } = {}) {
+  const simulationParams = {
+    ...SIMULATION_PARAMS,
+    ...(options?.simulationParams || {}),
+  };
+
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
   const visibilityMap = visibilityEntries || null;
@@ -604,7 +620,8 @@ export function computeAgentBatch({
           neighborDisks,
           abmFootprints,
           bearingMap,
-          originDestDistances
+          originDestDistances,
+          simulationParams
         );
 
         for (let k = 0; k < simPath.length; k++) {

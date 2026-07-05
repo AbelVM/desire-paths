@@ -55,6 +55,74 @@ export const MAX_EXPECTED_VOLUME = 100; // A scaling factor for how much "wear" 
 
 export const TEMPERATURE = 0.5; // Controls randomness in agent decision-making: 0 = completely deterministic, higher values increase randomness (tuned based on testing)
 
+export const SIMULATION_PARAM_LIMITS = Object.freeze({
+  affordanceWeight: { min: 1, max: 8, step: 1 },
+  distancePenalty: { min: 1, max: 8, step: 1 },
+  visionDepth: { min: 5, max: 30, step: 5 },
+  fieldOfView: { min: 30, max: 360, step: 30 },
+  agentsPerWeightUnit: { min: 5, max: 100, step: 5 },
+  temperature: { min: 0, max: 2, step: 0.25 },
+});
+
+export const DEFAULT_SIMULATION_PARAMS = Object.freeze({
+  affordanceWeight: WEIGHTS.w_a,
+  distancePenalty: WEIGHTS.w_d,
+  visionDepth: VISUAL_DEPTH,
+  fieldOfView: VISUAL_ANGLE,
+  agentsPerWeightUnit: AGENTS_PER_DESTINATION,
+  temperature: TEMPERATURE,
+  emergentWear: true,
+});
+
+export const SIMULATION_PARAMS = {
+  ...DEFAULT_SIMULATION_PARAMS,
+};
+
+function roundToStep(value, step) {
+  const base = Math.round(value / step) * step;
+  return Number(step >= 1 ? String(base) : base.toFixed(2));
+}
+
+function clampParam(name, value) {
+  const limit = SIMULATION_PARAM_LIMITS[name];
+  if (!limit) return value;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return SIMULATION_PARAMS[name];
+  const stepped = roundToStep(numeric, limit.step);
+  return Math.min(limit.max, Math.max(limit.min, stepped));
+}
+
+export function updateSimulationParams(next = {}) {
+  if (!next || typeof next !== 'object') return SIMULATION_PARAMS;
+
+  if (Object.prototype.hasOwnProperty.call(next, 'affordanceWeight')) {
+    SIMULATION_PARAMS.affordanceWeight = clampParam('affordanceWeight', next.affordanceWeight);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'distancePenalty')) {
+    SIMULATION_PARAMS.distancePenalty = clampParam('distancePenalty', next.distancePenalty);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'visionDepth')) {
+    SIMULATION_PARAMS.visionDepth = clampParam('visionDepth', next.visionDepth);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'fieldOfView')) {
+    SIMULATION_PARAMS.fieldOfView = clampParam('fieldOfView', next.fieldOfView);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'agentsPerWeightUnit')) {
+    SIMULATION_PARAMS.agentsPerWeightUnit = clampParam(
+      'agentsPerWeightUnit',
+      next.agentsPerWeightUnit
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'temperature')) {
+    SIMULATION_PARAMS.temperature = clampParam('temperature', next.temperature);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'emergentWear')) {
+    SIMULATION_PARAMS.emergentWear = Boolean(next.emergentWear);
+  }
+
+  return SIMULATION_PARAMS;
+}
+
 // Simulation tick budget: cap steps per agent journey to keep UI responsive
 export const MAX_SIM_TICKS = 5000;
 export const SIM_TICK_BUFFER = 8; // multiplier on H3 grid distance between origin and destination

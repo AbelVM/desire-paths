@@ -1,7 +1,9 @@
 import { clearComputeCaches, clearLatLngCache } from './compute.js';
 import { latLngToCell } from 'h3-js';
 import { H3_STRIDE_RESOLUTION } from './constants.js';
+import { SIMULATION_PARAMS, updateSimulationParams } from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
+import { createIcons, icons } from 'lucide';
 
 function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
@@ -152,6 +154,22 @@ function createUIState(map) {
     onboardingDismissBtn: null,
     mapContainer: null,
     toastContainer: null,
+    tabButtons: [],
+    tabPanels: [],
+
+    simParamWa: null,
+    simParamWaValue: null,
+    simParamWd: null,
+    simParamWdValue: null,
+    simParamVisionDepth: null,
+    simParamVisionDepthValue: null,
+    simParamFov: null,
+    simParamFovValue: null,
+    simParamAgentsPerWeight: null,
+    simParamAgentsPerWeightValue: null,
+    simParamTemperature: null,
+    simParamTemperatureValue: null,
+    simParamEmergentWear: null,
 
     // Context menu (created dynamically at runtime)
     contextMenu: null,
@@ -161,8 +179,6 @@ function createUIState(map) {
     contextRemoveNodeBtn: null,
 
     // UI state variables
-    onboardingStep: 1,
-    totalOnboardingSteps: 3,
     onboardingDismissed: false,
     activeContextMenuItem: null,
     activeContextMenuItemCell: null,
@@ -200,6 +216,20 @@ function createUIState(map) {
     onboardingDismissBtn: 'onboarding-dismiss',
     mapContainer: 'map',
     panelToggleBtn: 'btn-panel-toggle',
+
+    simParamWa: 'sim-param-wa',
+    simParamWaValue: 'sim-param-wa-value',
+    simParamWd: 'sim-param-wd',
+    simParamWdValue: 'sim-param-wd-value',
+    simParamVisionDepth: 'sim-param-vision-depth',
+    simParamVisionDepthValue: 'sim-param-vision-depth-value',
+    simParamFov: 'sim-param-fov',
+    simParamFovValue: 'sim-param-fov-value',
+    simParamAgentsPerWeight: 'sim-param-agents-per-weight',
+    simParamAgentsPerWeightValue: 'sim-param-agents-per-weight-value',
+    simParamTemperature: 'sim-param-temperature',
+    simParamTemperatureValue: 'sim-param-temperature-value',
+    simParamEmergentWear: 'sim-param-emergent-wear',
   };
 
   for (const [prop, id] of Object.entries(idMap)) {
@@ -210,6 +240,8 @@ function createUIState(map) {
   if (panelEl) state.panel = panelEl;
 
   state.modeButtons = Array.from(document.querySelectorAll('[data-placement-mode]'));
+  state.tabButtons = Array.from(document.querySelectorAll('[data-tab-target]'));
+  state.tabPanels = Array.from(document.querySelectorAll('.panel-tab-panel'));
 
   // Toast container — create if missing
   const toastContainer =
@@ -230,6 +262,18 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const uiState = createUIState(map);
   let alertTimer;
+
+  map.simulationParams = { ...SIMULATION_PARAMS };
+  try {
+    createIcons({
+      icons,
+      attrs: {
+        'stroke-width': 1.8,
+      },
+    });
+  } catch {
+    // Safe fallback for tests/environments without full icon runtime.
+  }
 
   // ──────────────────────────────────────────────
   // Toast Notification System
@@ -283,52 +327,66 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   // ──────────────────────────────────────────────
-  // Onboarding Helpers
+  // Tabs + Runtime Simulation Parameters
   // ──────────────────────────────────────────────
+  const activateTab = (tabTarget) => {
+    for (const button of uiState.tabButtons) {
+      const active = button.dataset.tabTarget === tabTarget;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    }
+
+    for (const panel of uiState.tabPanels) {
+      const active = panel.id === tabTarget;
+      panel.classList.toggle('is-active', active);
+      panel.hidden = !active;
+    }
+  };
+
+  const syncSimulationParamUI = () => {
+    const p = SIMULATION_PARAMS;
+    if (uiState.simParamWa) uiState.simParamWa.value = String(p.affordanceWeight);
+    if (uiState.simParamWaValue) uiState.simParamWaValue.textContent = String(p.affordanceWeight);
+
+    if (uiState.simParamWd) uiState.simParamWd.value = String(p.distancePenalty);
+    if (uiState.simParamWdValue) uiState.simParamWdValue.textContent = String(p.distancePenalty);
+
+    if (uiState.simParamVisionDepth) uiState.simParamVisionDepth.value = String(p.visionDepth);
+    if (uiState.simParamVisionDepthValue)
+      uiState.simParamVisionDepthValue.textContent = String(p.visionDepth);
+
+    if (uiState.simParamFov) uiState.simParamFov.value = String(p.fieldOfView);
+    if (uiState.simParamFovValue) uiState.simParamFovValue.textContent = `${p.fieldOfView}°`;
+
+    if (uiState.simParamAgentsPerWeight)
+      uiState.simParamAgentsPerWeight.value = String(p.agentsPerWeightUnit);
+    if (uiState.simParamAgentsPerWeightValue)
+      uiState.simParamAgentsPerWeightValue.textContent = String(p.agentsPerWeightUnit);
+
+    if (uiState.simParamTemperature) uiState.simParamTemperature.value = String(p.temperature);
+    if (uiState.simParamTemperatureValue)
+      uiState.simParamTemperatureValue.textContent = Number(p.temperature).toFixed(2);
+
+    if (uiState.simParamEmergentWear)
+      uiState.simParamEmergentWear.checked = Boolean(p.emergentWear);
+  };
+
+  const applySimulationParamPatch = (patch, { requiresRemap = false } = {}) => {
+    updateSimulationParams(patch);
+    map.simulationParams = { ...SIMULATION_PARAMS };
+    map.flowsReady = false;
+    if (requiresRemap) {
+      map.mappingReady = false;
+      clearComputeCaches(map);
+    }
+    syncSimulationParamUI();
+    syncSimulationUI();
+  };
+
   const dismissOnboarding = () => {
     uiState.onboardingDismissed = true;
     if (uiState.onboardingOverlay) uiState.onboardingOverlay.hidden = true;
-  };
-
-  const updateOnboardingStep = () => {
-    if (!uiState.onboardingOverlay) return;
-
-    // Don't auto-show if user has dismissed it
-    if (uiState.onboardingDismissed) {
-      uiState.onboardingOverlay.hidden = true;
-      return;
-    }
-
-    const nodes = Object.values(map.simulationNodes ?? {});
-    const activeNodes = nodes.filter((n) => n.weight > 0);
-    const hasOrigins = activeNodes.some((n) => n.type === 'origin' || n.type === 'dual');
-    const hasDestinations = activeNodes.some((n) => n.type === 'destination' || n.type === 'dual');
-
-    if (hasOrigins && !hasDestinations) {
-      uiState.onboardingStep = 2;
-    } else if (hasOrigins && hasDestinations) {
-      uiState.onboardingStep = 3;
-    } else {
-      uiState.onboardingStep = 1;
-    }
-
-    // Show overlay only during onboarding (up to step 3, before simulation runs)
-    const shouldShow = activeNodes.length > 0 && !map.flowsReady;
-    if (shouldShow) {
-      uiState.onboardingOverlay.hidden = false;
-    } else if (!hasOrigins && !hasDestinations) {
-      // Show overlay when there are no nodes at all
-      uiState.onboardingOverlay.hidden = false;
-    } else {
-      uiState.onboardingOverlay.hidden = true;
-    }
-
-    // Highlight active step
-    const steps = uiState.onboardingOverlay.querySelectorAll('.onboarding-step');
-    for (const step of steps) {
-      const stepNum = parseInt(step.dataset.step, 10);
-      step.classList.toggle('active', stepNum === uiState.onboardingStep);
-    }
   };
 
   // ──────────────────────────────────────────────
@@ -647,8 +705,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (destsEl) destsEl.textContent = String(destCount);
     }
 
-    // Update onboarding step visibility
-    updateOnboardingStep();
+    if (uiState.onboardingDismissed && uiState.onboardingOverlay) {
+      uiState.onboardingOverlay.hidden = true;
+    }
+
   };
 
   const syncWeightUI = () => {
@@ -822,9 +882,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map.clearLayers();
     syncFlowReadout();
     syncSimulationUI();
-    // Reset onboarding to step 1
-    uiState.onboardingStep = 1;
-    uiState.onboardingDismissed = false;
   };
 
   // ──────────────────────────────────────────────
@@ -835,6 +892,69 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     button.addEventListener('click', () => {
       map.placementMode = button.dataset.placementMode || 'origin';
       syncModeUI();
+    });
+  }
+
+  for (const button of uiState.tabButtons) {
+    addUIListener(button, 'click', () => {
+      const target = button.dataset.tabTarget;
+      if (target) activateTab(target);
+    });
+
+    addUIListener(button, 'keydown', (e) => {
+      const current = uiState.tabButtons.indexOf(button);
+      if (current < 0) return;
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      const next =
+        e.key === 'ArrowRight'
+          ? (current + 1) % uiState.tabButtons.length
+          : (current - 1 + uiState.tabButtons.length) % uiState.tabButtons.length;
+      const nextBtn = uiState.tabButtons[next];
+      nextBtn?.focus();
+      const target = nextBtn?.dataset?.tabTarget;
+      if (target) activateTab(target);
+    });
+  }
+
+  if (uiState.simParamWa) {
+    addUIListener(uiState.simParamWa, 'input', () => {
+      applySimulationParamPatch({ affordanceWeight: Number(uiState.simParamWa.value) });
+    });
+  }
+  if (uiState.simParamWd) {
+    addUIListener(uiState.simParamWd, 'input', () => {
+      applySimulationParamPatch({ distancePenalty: Number(uiState.simParamWd.value) });
+    });
+  }
+  if (uiState.simParamVisionDepth) {
+    addUIListener(uiState.simParamVisionDepth, 'input', () => {
+      applySimulationParamPatch(
+        { visionDepth: Number(uiState.simParamVisionDepth.value) },
+        { requiresRemap: true }
+      );
+    });
+  }
+  if (uiState.simParamFov) {
+    addUIListener(uiState.simParamFov, 'input', () => {
+      applySimulationParamPatch({ fieldOfView: Number(uiState.simParamFov.value) });
+    });
+  }
+  if (uiState.simParamAgentsPerWeight) {
+    addUIListener(uiState.simParamAgentsPerWeight, 'input', () => {
+      applySimulationParamPatch({
+        agentsPerWeightUnit: Number(uiState.simParamAgentsPerWeight.value),
+      });
+    });
+  }
+  if (uiState.simParamTemperature) {
+    addUIListener(uiState.simParamTemperature, 'input', () => {
+      applySimulationParamPatch({ temperature: Number(uiState.simParamTemperature.value) });
+    });
+  }
+  if (uiState.simParamEmergentWear) {
+    addUIListener(uiState.simParamEmergentWear, 'change', () => {
+      applySimulationParamPatch({ emergentWear: uiState.simParamEmergentWear.checked });
     });
   }
 
@@ -1316,18 +1436,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     addUIListener(uiState.alertDismiss, 'click', hideAlertCard);
   }
 
-  // Onboarding dismiss button + backdrop click-to-dismiss
   if (uiState.onboardingDismissBtn) {
-    addUIListener(uiState.onboardingDismissBtn, 'click', () => {
-      dismissOnboarding();
-    });
+    addUIListener(uiState.onboardingDismissBtn, 'click', dismissOnboarding);
   }
-  // Click outside card dismisses overlay
   if (uiState.onboardingOverlay) {
     addUIListener(uiState.onboardingOverlay, 'click', (e) => {
-      if (!e.target.closest('.onboarding-card')) {
-        dismissOnboarding();
-      }
+      if (!e.target.closest('.onboarding-card')) dismissOnboarding();
     });
   }
 
@@ -1374,6 +1488,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   map.uiState = uiState;
 
   map.placementWeight = clampWeight(map.placementWeight || 1);
+  activateTab('panel-intro');
+  syncSimulationParamUI();
   syncModeUI();
   syncWeightUI();
   syncFrictionUI();

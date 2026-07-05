@@ -11,6 +11,7 @@ import {
   H3_STRIDE_RESOLUTION,
   FRICTION_COSTS,
   getSurface,
+  SIMULATION_PARAMS,
 } from './helpers/constants.js';
 import { getHexes, triggerFastScan, mapPolygonCells, mapLineCells } from './helpers/grid.js';
 import {
@@ -80,6 +81,7 @@ class DesireMap {
       '_cellStateMappingGen',
       '_precomputedVisibility',
       '_precomputedNeighborDisks',
+      'simulationParams',
     ]);
 
     // Initialize state bag from provided map instance (snapshot at construction)
@@ -267,6 +269,7 @@ const init = () => {
   desireMap.aoi = undefined;
   desireMap.readyToCompute = false;
   desireMap.dragOccurred = false;
+  desireMap.simulationParams = { ...SIMULATION_PARAMS };
 
   // Add geocoder control with Nominatim service
   // Geocoder query cache + debounce for Nominatim rate limiting
