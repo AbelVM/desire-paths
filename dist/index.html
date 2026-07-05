@@ -66,13 +66,13 @@
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <script type="module" crossorigin src="./assets/index-hZ50wUCi.js"></script>
+  <script type="module" crossorigin src="./assets/index-D3J9yuYP.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DdACKOZr.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-Uo15bBoF.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-D5xWExjc.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-p8hMTjlW.js">
   <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
-  <link rel="stylesheet" crossorigin href="./assets/index-BLaogncz.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-BtAeOeLo.css">
 </head>
 
 <body>
@@ -99,84 +99,93 @@
   </div>
 
   <div class="panel-container">
-    <div class="panel">
-      <div class="panel-header">
-        <div>
-          <div class="panel-kicker">Cartographic flow lab</div>
-          <h2>Desire Paths</h2>
-        </div>
-        <div class="panel-orb" aria-hidden="true"></div>
-      </div>
-
-      <div class="panel-text">
-        <p>
-          A desire path, or social trail, is an unplanned route created by the erosion of consistent pedestrian or
-          animal traffic, typically representing a more direct, efficient path than designed alternatives. These trails
-          serve as physical indicators of human behavior, allowing urban planners to identify, analyze, and sometimes
-          incorporate these natural pathways into official infrastructure designs<br><br>
-        </p>
-        <p>Read more at <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank"
-            rel="noopener noreferrer">Wikipedia</a><br><br></p>
-      </div>
-
-      <div class="panel-meta">
-        <div id="mode-status" class="mode-indicator mode-origin">
-          Placement: Origin nodes · 0 placed
-        </div>
-        <div id="node-count-chip" class="count-chip">
-          <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
-            class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
-        </div>
-      </div>
-
-      <div class="panel-section">
-        <div class="section-label">Placement</div>
-        <div class="placement-mode-group" role="group" aria-label="Placement mode">
-          <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin"
-            aria-pressed="true">Origin</button>
-          <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination"
-            aria-pressed="false">Destination</button>
-          <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
-            aria-pressed="false">Dual</button>
-        </div>
-        <div class="weight-control">
-          <div class="weight-control-head">
-            <span>Node weight</span>
-            <output id="node-weight-readout" for="node-weight">1</output>
+    <div class="panel-inner">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-kicker">Cartographic flow lab</div>
+            <h2>Desire Paths</h2>
           </div>
-          <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
-          <div class="weight-scale" aria-hidden="true">
-            <span>1</span>
-            <span>10</span>
-          </div>
-          <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change
-            weight, type, or remove them</div>
+          <div class="panel-orb" aria-hidden="true"></div>
         </div>
-      </div>
 
-      <div class="panel-section">
-        <div class="section-label">Simulation</div>
-        <div class="btn-group">
-          <button class="btn btn-accent" id="btn-compute" type="button">Simulate Flows</button>
-          <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
-          <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
+        <div class="panel-text">
+          <p>
+            A desire path, or social trail, is an unplanned route created by the erosion of consistent pedestrian or
+            animal traffic, typically representing a more direct, efficient path than designed alternatives. These trails
+            serve as physical indicators of human behavior, allowing urban planners to identify, analyze, and sometimes
+            incorporate these natural pathways into official infrastructure designs<br><br>
+          </p>
+          <p>Read more at <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank"
+              rel="noopener noreferrer">Wikipedia</a><br><br></p>
         </div>
-      </div>
 
-      <div class="panel-footer">
-        <div id="scan-loader">Sampling walkable surfaces...</div>
-        <div class="simulation-progress-wrap">
-          <div id="simulation-progress" class="simulation-progress" role="progressbar" aria-label="Simulation progress"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-            <span id="simulation-progress-bar"></span>
+        <div class="panel-meta">
+          <div id="mode-status" class="mode-indicator mode-origin">
+            Placement: Origin nodes · 0 placed
           </div>
-          <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
+          <div id="node-count-chip" class="count-chip">
+            <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
+              class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
+          </div>
         </div>
-        <div id="max-flow-readout" class="density-readout">
-          Peak flow intensity: 0
+
+        <div class="panel-section">
+          <div class="section-label">Placement</div>
+          <div class="placement-mode-group" role="group" aria-label="Placement mode">
+            <button class="btn btn-segment is-active" id="btn-mode-origin" type="button" data-placement-mode="origin"
+              aria-pressed="true">Origin</button>
+            <button class="btn btn-segment" id="btn-mode-destination" type="button" data-placement-mode="destination"
+              aria-pressed="false">Destination</button>
+            <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
+              aria-pressed="false">Dual</button>
+          </div>
+          <div class="weight-control">
+            <div class="weight-control-head">
+              <span>Node weight</span>
+              <output id="node-weight-readout" for="node-weight">1</output>
+            </div>
+            <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
+            <div class="weight-scale" aria-hidden="true">
+              <span>1</span>
+              <span>10</span>
+            </div>
+            <div class="weight-hint">Adjust new node weight with the slider below · Right-click placed nodes to change
+              weight, type, or remove them</div>
+          </div>
         </div>
-      </div>
-    </div><!-- /.panel -->
+
+        <div class="panel-section">
+          <div class="section-label">Simulation</div>
+          <div class="btn-group">
+            <button class="btn btn-accent" id="btn-compute" type="button">Simulate Flows</button>
+            <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
+            <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <div id="scan-loader">Sampling walkable surfaces...</div>
+          <div class="simulation-progress-wrap">
+            <div id="simulation-progress" class="simulation-progress" role="progressbar" aria-label="Simulation progress"
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+              <span id="simulation-progress-bar"></span>
+            </div>
+            <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
+          </div>
+          <div id="max-flow-readout" class="density-readout">
+            Peak flow intensity: 0
+          </div>
+        </div>
+      </div><!-- /.panel -->
+    </div><!-- /.panel-inner -->
+
+    <button id="btn-panel-toggle" type="button" class="panel-toggle-btn"
+      aria-label="Show panel" aria-pressed="false">
+      <span class="toggle-icon" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+    </button>
   </div><!-- /.panel-container -->
 
   <div class="legend">

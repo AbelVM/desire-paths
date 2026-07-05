@@ -336,7 +336,7 @@ const init = () => {
           });
         },
       },
-      { maplibregl }
+      { maplibregl , collapsed: true}
     )
   );
   setMapCursor(desireMap, 'crosshair');

@@ -199,6 +199,7 @@ function createUIState(map) {
     onboardingOverlay: 'onboarding-overlay',
     onboardingDismissBtn: 'onboarding-dismiss',
     mapContainer: 'map',
+    panelToggleBtn: 'btn-panel-toggle',
   };
 
   for (const [prop, id] of Object.entries(idMap)) {
@@ -950,6 +951,184 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   }
   addUIListener(window, 'mouseup', handleDragEnd, { passive: true });
 
+  // ──────────────────────────────────────────────
+  // Touch Drag — mirrors mouse drag for mobile
+  // ──────────────────────────────────────────────
+
+  const touchDragState = {
+    active: false,
+    startCell: null,
+    moved: false,
+    lastPoint: [0, 0],
+  };
+
+  const handleTouchStart = (e) => {
+    if (!isFiniteLngLat(e.lngLat)) return;
+    if (map.isComputing || touchDragState.active) return;
+
+    const containerRect = uiState.mapContainer?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    // Get the first changed touch point
+    const touch = e.originalEvent?.changedTouches?.[0];
+    if (!touch) return;
+
+    // Convert viewport coordinates to map-unprojectable pixel coords
+    const px = [touch.clientX - containerRect.left, touch.clientY - containerRect.top];
+    const lngLat = map.unproject?.(px);
+    if (!isFiniteLngLat(lngLat)) return;
+
+    const cell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    const node = map.simulationNodes?.[cell];
+
+    // Only prevent default (blocking pan) when touching an active node
+    if (node && isActiveNode(node)) {
+      e.preventDefault?.();
+      touchDragState.active = true;
+      map.isDragging = true;
+      touchDragState.startCell = cell;
+      touchDragState.moved = false;
+      touchDragState.lastPoint = px;
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (!touchDragState.active || !touchDragState.startCell) return;
+
+    e.preventDefault?.();
+
+    const containerRect = uiState.mapContainer?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    const touch = e.originalEvent?.changedTouches?.[0];
+    if (!touch) return;
+
+    // Track displacement to distinguish drag from map pan
+    const px = [touch.clientX - containerRect.left, touch.clientY - containerRect.top];
+    const dx = Math.abs(px[0] - touchDragState.lastPoint[0]);
+    const dy = Math.abs(px[1] - touchDragState.lastPoint[1]);
+
+    if (dx + dy > 5) {
+      // Finger moved enough to count as a drag — cancel any pending long-press
+      clearLongPress();
+      touchDragState.moved = true;
+    }
+
+    const lngLat = map.unproject?.(px);
+    if (!isFiniteLngLat(lngLat)) return;
+
+    // Snap to nearest H3 cell
+    const newCell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    if (newCell !== touchDragState.startCell && map.simulationNodes[newCell]) {
+      touchDragState.active = false;
+      map.isDragging = false;
+      return;
+    }
+
+    const node = map.simulationNodes[touchDragState.startCell];
+    if (node) {
+      delete map.simulationNodes[touchDragState.startCell];
+      map.simulationNodes[newCell] = { ...node, cell: newCell };
+      touchDragState.startCell = newCell;
+      touchDragState.lastPoint = px;
+      map.renderInterfacePins?.();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchDragState.active) return;
+
+    clearLongPress();
+    touchDragState.active = false;
+    touchDragState.startCell = null;
+    map.isDragging = false;
+    map.mappingReady = false;
+    map.flowsReady = false;
+    map.dragOccurred = touchDragState.moved;
+  };
+
+  if (map.on) {
+    addUIListener(map, 'touchstart', handleTouchStart);
+    addUIListener(map, 'touchmove', handleTouchMove);
+  }
+  addUIListener(window, 'touchend', handleTouchEnd, { passive: true });
+
+  // ──────────────────────────────────────────────
+  // Long-Press Context Menu — replaces contextmenu on touch devices
+  // ──────────────────────────────────────────────
+
+  let longPressTimer = null;
+  let longPressNodeCell = null;
+  const LONG_PRESS_DURATION = 500; // ms
+
+  const clearLongPress = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  const startLongPress = (touch, cell) => {
+    clearLongPress();
+    longPressNodeCell = cell;
+
+    // Use the touch event's coordinates to position the menu later
+    longPressTimer = setTimeout(() => {
+      if (!longPressNodeCell || !map.simulationNodes[longPressNodeCell]) return;
+
+      const node = map.simulationNodes[longPressNodeCell];
+      if (!isActiveNode(node)) {
+        clearLongPress();
+        longPressNodeCell = null;
+        return;
+      }
+
+      // Build a synthetic event-like object with the touch coordinates
+      const syntheticEvent = {
+        originalEvent: { clientX: touch.clientX, clientY: touch.clientY },
+        point: [touch.clientX, touch.clientY],
+        lngLat: map.unproject?.([touch.clientX - (uiState.mapContainer?.getBoundingClientRect().left ?? 0), touch.clientY - (uiState.mapContainer?.getBoundingClientRect().top ?? 0)]),
+      };
+
+      showContextMenu(syntheticEvent, node, longPressNodeCell);
+      clearLongPress();
+    }, LONG_PRESS_DURATION);
+  };
+
+  // Attach long-press listeners on the map container for touch events
+  const handleMapTouchStart = (e) => {
+    if (map.isComputing) return;
+
+    const containerRect = uiState.mapContainer?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    const touch = e.originalEvent?.changedTouches?.[0];
+    if (!touch) return;
+
+    // Get pixel coords on the map canvas, then convert to lat/lng and H3 cell
+    const px = [touch.clientX - containerRect.left, touch.clientY - containerRect.top];
+    const lngLat = map.unproject?.(px);
+    if (!isFiniteLngLat(lngLat)) return;
+
+    longPressNodeCell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    const node = map.simulationNodes?.[longPressNodeCell];
+
+    if (node && isActiveNode(node)) {
+      e.preventDefault?.();
+      startLongPress(touch, longPressNodeCell);
+    } else {
+      clearLongPress();
+    }
+  };
+
+  const handleMapTouchMove = () => {
+    // Cancel long-press if finger moves significantly
+    clearLongPress();
+  };
+
+  addUIListener(uiState.mapContainer, 'touchstart', handleMapTouchStart);
+  addUIListener(uiState.mapContainer, 'touchmove', handleMapTouchMove, { passive: true });
+
   // Right-click on map shows context menu for nodes at cursor position
   const handleContextMenu = (e) => {
     if (!uiState.mapContainer) return;
@@ -1151,6 +1330,40 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       }
     });
   }
+
+  // ──────────────────────────────────────────────
+  // Mobile Panel Collapse Toggle
+  // ──────────────────────────────────────────────
+
+  let panelCollapsed = window.innerWidth < 600;
+
+  const setPanelCollapsed = (collapsed) => {
+    panelCollapsed = collapsed;
+    const container = document.querySelector('.panel-container');
+    if (!container) return;
+    container.classList.toggle('collapsed', collapsed);
+    uiState.panelToggleBtn?.setAttribute('aria-pressed', String(!collapsed));
+  };
+
+  if (uiState.panelToggleBtn) {
+    addUIListener(uiState.panelToggleBtn, 'click', () => {
+      setPanelCollapsed(!panelCollapsed);
+    });
+  }
+
+  // Reset collapse state when viewport widens beyond mobile threshold
+  let resizeTimeout;
+  addUIListener(window, 'resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      if (window.innerWidth >= 600 && panelCollapsed) {
+        setPanelCollapsed(false);
+      }
+    }, 150);
+  });
+
+  // Initialize collapse state on load
+  setPanelCollapsed(panelCollapsed);
 
   map._showAlertCard = showAlertCard;
   map._syncSimulationUI = syncSimulationUI;
