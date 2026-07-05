@@ -14,7 +14,8 @@ import { gridDisk } from 'h3-js';
  */
 export function computeDijkstra(targetCell, frictionLookup, getNeighbors) {
   const distances = Object.create(null);
-  const visited = new Set();
+  // Plain object is faster than Set for string-keyed H3 cell IDs (no hashing overhead)
+  const visited = Object.create(null);
   const heap = new MinHeap();
 
   const resolveFriction =
@@ -28,8 +29,8 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors) {
 
   while (heap.size() > 0) {
     const current = heap.extractMin();
-    if (visited.has(current)) continue;
-    visited.add(current);
+    if (visited[current]) continue;
+    visited[current] = true;
 
     const currentDistance = distances[current];
     const neighbors = resolveNeighbors(current);

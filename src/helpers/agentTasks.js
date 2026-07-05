@@ -393,7 +393,10 @@ function getBestNextStep(
         if (candidateCost < currentBestCost) {
           bestIndex = i;
         } else if (candidateCost === currentBestCost) {
-          if (gridDistance(curr, cellsArr[i]) < gridDistance(curr, cellsArr[bestIndex])) {
+          // Compute grid distance once per candidate instead of twice.
+          const dCandidate = gridDistance(curr, cellsArr[i]);
+          const dBest = gridDistance(curr, cellsArr[bestIndex]);
+          if (dCandidate < dBest) {
             bestIndex = i;
           }
         }
@@ -412,7 +415,12 @@ function estimateMaxTicks(origin, dest, hexCount) {
 }
 
 function recordTraversal(map, cell) {
-  map.set(cell, (map.get(cell) || 0) + 1);
+  // Support both plain objects and Map for backward compatibility with tests.
+  if (typeof map.set === 'function') {
+    map.set(cell, (map.get(cell) || 0) + 1);
+  } else {
+    map[cell] = (map[cell] || 0) + 1;
+  }
 }
 
 function runAgentPath(
@@ -537,7 +545,8 @@ export function computeAgentBatch({
   } catch (_e) {}
 
   const emitEvery = Math.max(1, Math.floor(totalAgents / 20));
-  const pathDesireMap = new Map();
+  // Plain object is faster than Map for string-key → integer-value accumulation.
+  const pathDesireMap = Object.create(null);
   const perTargetContribs = Object.create(null);
   let processed = 0;
 
@@ -626,10 +635,10 @@ export function computeAgentBatch({
     }
   }
 
-  // Flatten pathDesireMap
-  const pdKeys = Array.from(pathDesireMap.keys());
+  // Flatten pathDesireMap (plain object → flat arrays for transfer)
+  const pdKeys = Object.keys(pathDesireMap);
   const pdValsArr = new Uint32Array(pdKeys.length);
-  for (let i = 0; i < pdKeys.length; i++) pdValsArr[i] = pathDesireMap.get(pdKeys[i]) || 0;
+  for (let i = 0; i < pdKeys.length; i++) pdValsArr[i] = pathDesireMap[pdKeys[i]] || 0;
 
   const perTargetFlat = Object.create(null);
   const transfers = [];
