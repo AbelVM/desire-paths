@@ -1560,7 +1560,10 @@ function decayAffordance(ctx, cell) {
 
   const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
   const current = cs?.affordance ?? ctx._affordanceObj?.[cell] ?? 0.1;
-  const newVal = Math.max(0.1, current - DECAY_RATE * recoveryFactor);
+  // Exponential decay: vegetation recovers quickly at first, then slows as
+  // roots reestablish — producing a realistic non-linear persistence curve.
+  // Heavy grass (recoveryFactor 0.5) decays slower than light park (1.5).
+  const newVal = Math.max(0.1, current * Math.exp(-DECAY_RATE * recoveryFactor));
 
   if (cs) cs.affordance = newVal;
   if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
