@@ -25,25 +25,10 @@ import {
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
 import { computeDijkstra } from './dijkstra.js';
+import { createLCG, strHash } from './rng.js';
 
-// --- Deterministic seeded RNG (LCG) ---
-function _lcg(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
-
-// --- String hash (FNV-1a variant) ---
-function _strHash(s) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h >>> 0;
-}
+// Re-export for backward compatibility with existing code references
+export { createLCG as _lcg, strHash as _strHash };
 
 // Module-level lat/lng cache (FIFO object-based cache to avoid Map hotspots)
 const _cellLatLngCacheObj = Object.create(null);
@@ -289,11 +274,12 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
 }
 
 // Precompute bearings between all AOI cell pairs within VISUAL_DEPTH radius.
-// Returns a flat string-keyed map: "center::neighbor" → bearing (degrees).
-// This eliminates billions of _bearingFromLatLngs trig calls during simulation.
+// Returns a Map with string keys "center::neighbor" → bearing (degrees).
+// Uses Map instead of plain object to avoid V8 "too many properties to enumerate"
+// error when the bearing cache is transferred to Web Workers via postMessage.
 // OPTIMIZATION: Reuses precomputed neighbor disks to avoid redundant gridDisk calls.
 function precomputeBearingMap(cells, visualDepth, precomputedDisks) {
-  const result = Object.create(null);
+  const result = new Map();
   const disks = precomputedDisks || (cells.length > 0 ? precomputeNeighborDisks(cells, visualDepth) : null);
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
@@ -304,7 +290,7 @@ function precomputeBearingMap(cells, visualDepth, precomputedDisks) {
       const n = disk[j];
       if (n === cell) continue;
       const eLatLng = _getCachedLatLng(n);
-      result[cell + '::' + n] = _bearingFromLatLngs(sLatLng, eLatLng);
+      result.set(cell + '::' + n, _bearingFromLatLngs(sLatLng, eLatLng));
     }
   }
   return result;
@@ -384,6 +370,18 @@ function _getCachedVisibility(ctx, a, b, frictionLookup) {
 
 /** Drop path/disk/visibility caches and gradient fields after friction topology changes. */
 export function clearComputeCaches(ctx) {
+  // Clear accumulated desire scores and per-cell desire values so they don't carry over
+  // between simulation runs when the friction topology changes but _mappingGeneration does not.
+  if (ctx.pathDesireScores) {
+    for (const k in ctx.pathDesireScores) delete ctx.pathDesireScores[k];
+  }
+  if (ctx._cellState) {
+    for (const cell in ctx._cellState) {
+      const cs = ctx._cellState[cell];
+      if (cs && typeof cs.desire === 'number') cs.desire = 0;
+    }
+  }
+
   // Drop per-compute data structures
   ctx._gradientCacheObj = null;
   ctx._cellState = null;
@@ -412,18 +410,6 @@ export function clearComputeCaches(ctx) {
   ctx._visibilityCacheGen = undefined;
 
   ctx._cellStateMappingGen = undefined;
-
-  // Clear accumulated desire scores and per-cell desire values so they don't carry over
-  // between simulation runs when the friction topology changes but _mappingGeneration does not.
-  if (ctx.pathDesireScores) {
-    for (const k in ctx.pathDesireScores) delete ctx.pathDesireScores[k];
-  }
-  if (ctx._cellState) {
-    for (const cell in ctx._cellState) {
-      const cs = ctx._cellState[cell];
-      if (cs && typeof cs.desire === 'number') cs.desire = 0;
-    }
-  }
 
   // Clear gradient cache and module-level lat/lng cache
   clearGradientCache(ctx);
@@ -556,7 +542,16 @@ function runSingleAgentPath(
   const cellState = ctx._cellState;
 
   for (let tick = 0; tick < maxTicks; tick++) {
-    // Use precomputed distance when available — eliminates gridDistance H3 call per tick
+    // Update dynamic distance to target — the precomputed origin-to-destination
+    // distance becomes stale if the agent takes a detour around obstacles.
+    if (originDestDistances) {
+      const currentDist = originDestDistances[simCurrent + '::' + destCell];
+      if (typeof currentDist === 'number') distToTarget = currentDist;
+    } else {
+      distToTarget = gridDistance(simCurrent, simTarget);
+    }
+
+    // Use dynamic distance check — eliminates stale precomputed distance bug
     if (distToTarget <= 1) {
       if (simTarget !== simCurrent) {
         simPath.push(simTarget);
@@ -569,8 +564,13 @@ function runSingleAgentPath(
     const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId, accumulatedFootprints, bearingMap);
     if (!nextStep || nextStep === simCurrent) break;
 
-    const line = _getCachedPathCells(ctx, simCurrent, nextStep);
+    // Walk toward nextStep. Prefer the straight H3 line, but if it is blocked
+    // by an impassable cell or would cut a building corner, route a local
+    // detour around the obstacle so the agent walks *around* the corner
+    // instead of jumping over it or stalling against the building.
+    const line = _resolveStepLine(ctx, simCurrent, nextStep, frictionLookup, cellState);
     let hitTarget = false;
+    let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
       const stepState = cellState && cellState[stepCell];
@@ -579,6 +579,7 @@ function runSingleAgentPath(
       simPath.push(stepCell);
       if (pathDesireDeltas) recordTraversal(pathDesireDeltas, stepCell);
       if (applyWear) updateAffordance(ctx, stepCell, 1);
+      lastReached = stepCell;
       if (stepCell === simTarget) {
         hitTarget = true;
         break;
@@ -589,7 +590,7 @@ function runSingleAgentPath(
 
     // Use precomputed bearing map — eliminates trig call per direction update
     simDirection = getBearingFast(ctx, simCurrent, nextStep, bearingMap);
-    simCurrent = nextStep;
+    simCurrent = lastReached;
     if (simCurrent === simTarget) break;
   }
 
@@ -761,26 +762,24 @@ export async function computeDesirePaths(state, mapInstance) {
   }
 
   // Consolidated per-cell state object for hot-path reads/writes.
-  // Only rebuild when friction actually changed to avoid object churn.
-  // Affordance is updated in-place during simulation, so no separate tracking needed.
-  const lastCellStateMappingGen = state._cellStateMappingGen ?? -1;
-  if (!state._cellState || lastCellStateMappingGen !== mappingGen) {
-    const existingState = state._cellState;
-    state._cellState = Object.create(null);
-    const frictionObj = state._frictionObj;
-    const affordanceObj = state._affordanceObj;
-    const desireScores = state.pathDesireScores;
-    const multiFrictionObj = state._multiFrictionObj;
+  // Always rebuild to ensure affordance/desire are fresh for this run.
+  // The affordance decay step below updates values in-place, so we must start
+  // from the current affordanceMap rather than reusing a stale _cellState.
+  const existingState = state._cellState;
+  state._cellState = Object.create(null);
+  const frictionObj = state._frictionObj;
+  const affordanceObj = state._affordanceObj;
+  const desireScores = state.pathDesireScores;
+  const multiFrictionObj = state._multiFrictionObj;
 
-    for (const k in frictionObj) {
-      const fr = frictionObj[k];
-      const aff = affordanceObj?.[k] ?? 0.1;
-      const desire = desireScores?.[k] ?? 0;
-      const multi = multiFrictionObj?.[k] ?? null;
-      state._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
-    }
-    state._cellStateMappingGen = mappingGen;
+  for (const k in frictionObj) {
+    const fr = frictionObj[k];
+    const aff = affordanceObj?.[k] ?? 0.1;
+    const desire = desireScores?.[k] ?? 0;
+    const multi = multiFrictionObj?.[k] ?? null;
+    state._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
   }
+  state._cellStateMappingGen = mappingGen;
 
   // Grass recovery between user-triggered simulation runs (not after wear in the same pass)
   if (state._cellState) {
@@ -1107,7 +1106,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
     // Use precomputed bearing map — eliminates trig call per neighbor
     let ang;
     if (bearingMap) {
-      const bng = bearingMap[curr + '::' + n];
+      const bng = bearingMap.get?.(curr + '::' + n);
       if (typeof bng === 'number') {
         ang = angleDiff(bng, currentDirection);
       } else {
@@ -1209,7 +1208,7 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
         const eLatLng = _getCachedLatLng(n);
         let ang;
         if (bearingMap) {
-          const bng = bearingMap[curr + '::' + n];
+          const bng = bearingMap.get?.(curr + '::' + n);
           if (typeof bng === 'number') {
             ang = angleDiff(bng, currentDirection);
           } else {
@@ -1242,8 +1241,8 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
 
   const hasValidScores = useGradient && scores?.length > 0 && typeof scores[0] === 'number';
   if (hasValidScores && typeof simParams.temperature === 'number' && simParams.temperature > 0) {
-    const seed = _strHash(agentId + ':' + curr);
-    const rng = _lcg(seed);
+    const seed = strHash(agentId + ':' + curr);
+    const rng = createLCG(seed);
     let maxS = -Infinity;
     for (let i = 0; i < scores.length; i++) {
       const v = scores[i];
@@ -1256,6 +1255,20 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
       const w = Math.exp((scores[i] - maxS) / simParams.temperature);
       weightsArr[i] = w;
       sum += w;
+    }
+
+    // Guard against non-finite sum (temperature too small → overflow to Infinity)
+    if (!isFinite(sum) || sum === 0) {
+      // Fallback: return the cell with the highest score
+      let bestIdx = 0;
+      let bestVal = scores[0];
+      for (let i = 1; i < scores.length; i++) {
+        if (scores[i] > bestVal) {
+          bestVal = scores[i];
+          bestIdx = i;
+        }
+      }
+      return cellsArr[bestIdx];
     }
 
     const r = rng() * sum;
@@ -1369,6 +1382,100 @@ function isVisible(ctx, start, end) {
   return _getCachedVisibility(ctx, start, end, frictionLookup);
 }
 
+// Resolve the actual cell-by-cell line the agent walks from `curr` to
+// `nextStep`. Returns the straight H3 line when it is clear of impassable
+// cells and does not cut a building corner. Otherwise performs a bounded BFS
+// detour over the local neighborhood so the agent walks *around* the obstacle
+// instead of jumping over it or stalling against the building.
+function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
+  const straight = _getCachedPathCells(ctx, curr, nextStep);
+  let clear = true;
+  for (let i = 1; i < straight.length; i++) {
+    const c = straight[i];
+    const s = cellState && cellState[c];
+    const f = s ? s.friction : frictionLookup[c];
+    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
+      clear = false;
+      break;
+    }
+    // Detect a diagonal transition that would cut an impassable corner.
+    if (i > 1 && gridDistance(straight[i - 1], c) > 1) {
+      if (_cornersImpassable(ctx, straight[i - 1], c, frictionLookup, cellState)) {
+        clear = false;
+        break;
+      }
+    }
+  }
+  if (clear) return straight;
+
+  // BFS detour within the local disk (bounded by visionDepth for cost).
+  const radius = ctx.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+  const frontier = _getCachedDisk(ctx, curr, radius);
+  const prev = Object.create(null);
+  const seen = Object.create(null);
+  const queue = [curr];
+  seen[curr] = true;
+  let found = false;
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === nextStep) {
+      found = true;
+      break;
+    }
+    const nb = _getCachedDisk(ctx, node, 1);
+    for (let i = 0; i < nb.length; i++) {
+      const m = nb[i];
+      if (m === node || seen[m]) continue;
+      const ms = cellState && cellState[m];
+      const mf = ms ? ms.friction : frictionLookup[m];
+      if (typeof mf === 'undefined' || mf >= FRICTION_COSTS.IMPASSABLE) continue;
+      seen[m] = true;
+      prev[m] = node;
+      queue.push(m);
+    }
+  }
+  if (!found) return straight; // fall back; movement loop will stop safely
+
+  // Reconstruct path curr -> ... -> nextStep
+  const path = [];
+  let node = nextStep;
+  while (node !== curr) {
+    path.push(node);
+    node = prev[node];
+    if (node === undefined) return straight; // safety
+  }
+  path.reverse();
+  return [curr, ...path];
+}
+
+// Returns true if stepping diagonally from cell `a` to cell `b` (gridDistance 2)
+// would cut across an impassable cell at their shared corner. Two diagonal H3
+// cells share exactly one common neighbor; if that neighbor is impassable the
+// agent must walk around the corner rather than cutting across it.
+function _cornersImpassable(ctx, a, b, frictionLookup, cellState) {
+  const neighborsA = _getCachedDisk(ctx, a, 1);
+  const neighborsB = _getCachedDisk(ctx, b, 1);
+  for (let i = 0; i < neighborsA.length; i++) {
+    const c = neighborsA[i];
+    if (c === a || c === b) continue;
+    let isNeighbor = false;
+    for (let j = 0; j < neighborsB.length; j++) {
+      if (neighborsB[j] === c) {
+        isNeighbor = true;
+        break;
+      }
+    }
+    if (!isNeighbor) continue;
+    const stepState = cellState && cellState[c];
+    const f = stepState ? stepState.friction : frictionLookup[c];
+    if (typeof f !== 'undefined' && f >= FRICTION_COSTS.IMPASSABLE) return true;
+  }
+  return false;
+}
+
+// Returns true if the straight H3 line from `curr` to `n` would cut across an
+// impassable cell at any diagonal transition. Used to reject `nextStep`
+// candidates the agent cannot actually reach without jumping a building corner.
 function getBearing(start, end) {
   const s = _getCachedLatLng(start);
   const e = _getCachedLatLng(end);
@@ -1379,7 +1486,7 @@ function getBearing(start, end) {
 // falls back to trig-based calculation otherwise.
 function getBearingFast(ctx, a, b, bearingMap) {
   if (bearingMap) {
-    const bng = bearingMap[a + '::' + b];
+    const bng = bearingMap.get?.(a + '::' + b);
     if (typeof bng === 'number') return bng;
   }
   // Fallback: compute via lat/lng (expensive, called rarely for uncached pairs)

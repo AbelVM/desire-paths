@@ -1010,6 +1010,21 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     });
   }
 
+  if (uiState.resetSimParamsBtn) {
+    addUIListener(uiState.resetSimParamsBtn, 'click', () => {
+      applySimulationParamPatch({
+        affordanceWeight: DEFAULT_SIMULATION_PARAMS.affordanceWeight,
+        distancePenalty: DEFAULT_SIMULATION_PARAMS.distancePenalty,
+        visionDepth: DEFAULT_SIMULATION_PARAMS.visionDepth,
+        fieldOfView: DEFAULT_SIMULATION_PARAMS.fieldOfView,
+        agentsPerWeightUnit: DEFAULT_SIMULATION_PARAMS.agentsPerWeightUnit,
+        temperature: DEFAULT_SIMULATION_PARAMS.temperature,
+        emergentWear: DEFAULT_SIMULATION_PARAMS.emergentWear,
+      });
+      showToastNotification('Simulation parameters reset to defaults', 'success');
+    });
+  }
+
   // --- Keyboard Shortcuts ---
   addUIListener(document, 'keydown', (e) => {
     if (

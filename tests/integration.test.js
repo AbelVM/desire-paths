@@ -2153,7 +2153,7 @@ describe('main.js', () => {
         queryRenderedFeatures: () => [],
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      const result = isAccessible(mapInstance, clickEvent);
+      const result = await isAccessible(mapInstance, clickEvent);
       expect(result).toBe(true);
     });
 
@@ -2163,7 +2163,7 @@ describe('main.js', () => {
         queryRenderedFeatures: () => [{ properties: {}, geometry: null }],
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      const result = isAccessible(mapInstance, clickEvent);
+      const result = await isAccessible(mapInstance, clickEvent);
       expect(result).toBe(true); // no valid features → allow placement
     });
 
@@ -2177,7 +2177,7 @@ describe('main.js', () => {
         ],
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      const result = isAccessible(mapInstance, clickEvent);
+      const result = await isAccessible(mapInstance, clickEvent);
       expect(result).toBe(false); // building/water are impassable, no walkable ground
     });
 
@@ -2194,7 +2194,7 @@ describe('main.js', () => {
         ],
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      const result = isAccessible(mapInstance, clickEvent);
+      const result = await isAccessible(mapInstance, clickEvent);
       expect(result).toBe(false);
     });
 
@@ -2210,7 +2210,7 @@ describe('main.js', () => {
         ],
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      const result = isAccessible(mapInstance, clickEvent);
+      const result = await isAccessible(mapInstance, clickEvent);
       expect(result).toBe(true);
     });
 
@@ -2220,7 +2220,7 @@ describe('main.js', () => {
         queryRenderedFeatures: undefined,
       };
       const clickEvent = { point: { x: 100, y: 100 } };
-      expect(() => isAccessible(mapInstance, clickEvent)).toThrow();
+      await expect(isAccessible(mapInstance, clickEvent)).rejects.toThrow();
     });
   });
 

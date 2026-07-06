@@ -282,9 +282,15 @@ const init = () => {
     forwardGeocode: async (config) => {
       const features = [];
       try {
+        // Prune expired entries before checking cache
+        const now = Date.now();
+        for (const [key, val] of geocoderCache) {
+          if (now - val.timestamp >= CACHE_MAX_AGE_MS) geocoderCache.delete(key);
+        }
+
         // Return cached result if available and not expired
         const cached = geocoderCache.get(config.query);
-        if (cached && Date.now() - cached.timestamp < CACHE_MAX_AGE_MS) {
+        if (cached && now - cached.timestamp < CACHE_MAX_AGE_MS) {
           return { features: cached.features };
         }
 
@@ -385,7 +391,7 @@ const init = () => {
   // desireMap.on('moveend', e => { e.target.triggerFastScan(); });
 
   // Click handler — place new nodes only (weight managed via context menu)
-  desireMap.on('click', (e) => {
+  desireMap.on('click', async (e) => {
     if (!document.getElementById('map')) return;
 
     // Ignore clicks while context menu is open or during drag
@@ -402,7 +408,7 @@ const init = () => {
 
     const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
 
-    if (!isAccessible(desireMap, e)) {
+    if (!(await isAccessible(desireMap, e))) {
       const msg = sourcesLoading(desireMap)
         ? 'Map tiles are still loading. Wait a moment and try again.'
         : 'This spot is blocked. Pick a walkable location instead.';
@@ -451,7 +457,7 @@ const sourcesLoading = (mapInstance) => {
 };
 
 // Check if the added node is accessible by foot, and if not, alert the user and remove it
-const isAccessible = (mapInstance, clickEvent) => {
+const isAccessible = async (mapInstance, clickEvent) => {
   const bbox = [
     [clickEvent.point.x - 5, clickEvent.point.y - 5],
     [clickEvent.point.x + 5, clickEvent.point.y + 5],
@@ -475,7 +481,32 @@ const isAccessible = (mapInstance, clickEvent) => {
     // No features found — defer placement if tiles are still loading.
     // When tiles haven't loaded for a region, queryRenderedFeatures returns empty;
     // treating that as "walkable" allows placement on water/buildings that aren't rendered yet.
-    return !sourcesLoading(mapInstance);
+    if (sourcesLoading(mapInstance)) {
+      // Wait for tiles to load, then re-query once to avoid race condition
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const retryFeatures = mapInstance.queryRenderedFeatures(bbox) ?? [];
+      const retryFiltered = retryFeatures.filter((f) =>
+        ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer)
+      );
+      const retryLayerCosts = Object.create(null);
+      for (const feat of retryFiltered) {
+        if (!feat?.geometry) continue;
+        const surface = getSurface(feat);
+        const c = FRICTION_COSTS[surface.cost];
+        const layer = surface.layer;
+        if (retryLayerCosts[layer] === undefined || c > retryLayerCosts[layer]) {
+          retryLayerCosts[layer] = c;
+        }
+      }
+      const retryCosts = Object.values(retryLayerCosts);
+      if (retryCosts.length > 0) {
+        const groundCost = typeof retryLayerCosts['0'] === 'number' ? retryLayerCosts['0'] : Math.min(...retryCosts);
+        return groundCost < FRICTION_COSTS.IMPASSABLE;
+      }
+      // Still no features after retry — allow placement
+      return true;
+    }
+    return true;
   }
   const groundCost = typeof layerCosts['0'] === 'number' ? layerCosts['0'] : Math.min(...costs);
   return groundCost < FRICTION_COSTS.IMPASSABLE;

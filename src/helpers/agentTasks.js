@@ -415,6 +415,106 @@ function getBestNextStep(
   return bestIndex >= 0 ? cellsArr[bestIndex] : null;
 }
 
+// Resolve the actual cell-by-cell line the agent walks from `curr` to
+// `nextStep`. Returns the straight H3 line when it is clear of impassable
+// cells and does not cut a building corner. Otherwise performs a bounded BFS
+// detour over the local neighborhood so the agent walks *around* the obstacle
+// instead of jumping over it or stalling against the building.
+function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDisks) {
+  const straight = _getCachedPathCells(curr, nextStep);
+  let clear = true;
+  for (let i = 1; i < straight.length; i++) {
+    const c = straight[i];
+    const f = cellState && cellState[c] ? cellState[c].friction : frictionLookup[c];
+    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
+      clear = false;
+      break;
+    }
+    // Detect a diagonal transition that would cut an impassable corner.
+    if (i > 1 && gridDistance(straight[i - 1], c) > 1) {
+      if (_cornersImpassable(curr, straight[i - 1], c, frictionLookup, cellState)) {
+        clear = false;
+        break;
+      }
+    }
+  }
+  if (clear) return straight;
+
+  // BFS detour within the local disk (bounded by VISUAL_DEPTH for cost).
+  const frontier = _getCachedDisk(curr, VISUAL_DEPTH, neighborDisks);
+  const prev = Object.create(null);
+  const seen = Object.create(null);
+  const queue = [curr];
+  seen[curr] = true;
+  let found = false;
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === nextStep) {
+      found = true;
+      break;
+    }
+    const nb = _getCachedDisk(node, 1, neighborDisks);
+    for (let i = 0; i < nb.length; i++) {
+      const m = nb[i];
+      if (m === node || seen[m]) continue;
+      const mf = cellState && cellState[m] ? cellState[m].friction : frictionLookup[m];
+      if (typeof mf === 'undefined' || mf >= FRICTION_COSTS.IMPASSABLE) continue;
+      seen[m] = true;
+      prev[m] = node;
+      queue.push(m);
+    }
+  }
+  if (!found) return straight; // fall back; movement loop will stop safely
+
+  // Reconstruct path curr -> ... -> nextStep
+  const path = [];
+  let node = nextStep;
+  while (node !== curr) {
+    path.push(node);
+    node = prev[node];
+    if (node === undefined) return straight; // safety
+  }
+  path.reverse();
+  return [curr, ...path];
+}
+
+// Returns true if stepping diagonally from cell `a` to cell `b` (gridDistance 2)
+// would cut across an impassable cell at their shared corner. Two diagonal H3
+// cells share exactly one common neighbor; if that neighbor is impassable the
+// agent must walk around the corner rather than cutting across it.
+function _cornersImpassable(_curr, a, b, frictionLookup, cellState) {
+  const neighborsA = _getCachedDisk(a, 1, null);
+  const neighborsB = _getCachedDisk(b, 1, null);
+  for (let i = 0; i < neighborsA.length; i++) {
+    const c = neighborsA[i];
+    if (c === a || c === b) continue;
+    let isNeighbor = false;
+    for (let j = 0; j < neighborsB.length; j++) {
+      if (neighborsB[j] === c) {
+        isNeighbor = true;
+        break;
+      }
+    }
+    if (!isNeighbor) continue;
+    const f = cellState && cellState[c] ? cellState[c].friction : frictionLookup[c];
+    if (typeof f !== 'undefined' && f >= FRICTION_COSTS.IMPASSABLE) return true;
+  }
+  return false;
+}
+
+// Returns true if the straight H3 line from `curr` to `n` would cut across an
+// impassable cell at any diagonal transition. Used to reject `nextStep`
+// candidates the agent cannot actually reach without jumping a building corner.
+function _lineCornerCuts(curr, n, frictionLookup, cellState, neighborDisks) {
+  const line = _getCachedPathCells(curr, n);
+  for (let i = 1; i < line.length; i++) {
+    if (gridDistance(line[i - 1], line[i]) > 1) {
+      if (_cornersImpassable(curr, line[i - 1], line[i], frictionLookup, cellState)) return true;
+    }
+  }
+  return false;
+}
+
 function estimateMaxTicks(origin, dest, hexCount) {
   const dist = gridDistance(origin, dest);
   const pathBudget = Math.max(64, dist * SIM_TICK_BUFFER + 32);
@@ -500,8 +600,13 @@ function runAgentPath(
 
     stuckCount = 0;
 
-    const line = _getCachedPathCells(simCurrent, nextStep);
+    // Walk toward nextStep. Prefer the straight H3 line, but if it is blocked
+    // by an impassable cell or would cut a building corner, route a local
+    // detour around the obstacle so the agent walks *around* the corner
+    // instead of jumping over it or stalling against the building.
+    const line = _resolveStepLine(simCurrent, nextStep, frictionLookup, cellState, neighborDisks);
     let hitTarget = false;
+    let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
       const stepF =
@@ -509,6 +614,7 @@ function runAgentPath(
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);
+      lastReached = stepCell;
       if (stepCell === simTarget) {
         hitTarget = true;
         break;
@@ -519,7 +625,7 @@ function runAgentPath(
 
     // Use precomputed bearing map — eliminates trig call per direction update
     simDirection = getBearingFast(simCurrent, nextStep, bearingMap);
-    simCurrent = nextStep;
+    simCurrent = lastReached;
     if (simCurrent === simTarget) break;
   }
 

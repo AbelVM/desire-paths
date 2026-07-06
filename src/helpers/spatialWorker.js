@@ -34,6 +34,7 @@ export function getMaxAgentWorkers() {
 }
 
 const WORKER_TASK_TIMEOUT = 600_000; // 10m timeout per worker task
+const WORKER_IDLE_TIMEOUT = 300_000; // 5m — retire workers idle longer than this
 
 // Pools keyed by task kind (e.g. 'agent-batch' -> agent workers)
 const workerPoolByKind = new Map();
@@ -49,6 +50,48 @@ export function clearSpatialWorkerProgressHandler() {
   _progressHandler = null;
 }
 
+// Track last-used timestamp per worker slot for idle timeout cleanup
+const _workerLastUsed = new WeakMap();
+
+function _touchWorker(slot) {
+  _workerLastUsed.set(slot.worker, Date.now());
+}
+
+// Periodic cleanup of idle workers — runs every 60s
+let _idleCleanupInterval = null;
+function _startIdleCleanup() {
+  if (_idleCleanupInterval) return;
+  _idleCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [kind, idle] of idleWorkersByKind) {
+      const stillIdle = [];
+      for (let i = 0; i < idle.length; i++) {
+        const slot = idle[i];
+        const lastUsed = _workerLastUsed.get(slot.worker);
+        if (lastUsed && now - lastUsed > WORKER_IDLE_TIMEOUT) {
+          try {
+            slot.worker.terminate();
+          } catch {
+            // ignore termination errors
+          }
+          // Remove from pool as well
+          const pool = workerPoolByKind.get(kind) || [];
+          const poolIdx = pool.indexOf(slot);
+          if (poolIdx !== -1) pool.splice(poolIdx, 1);
+          workerPoolByKind.set(kind, pool);
+        } else {
+          stillIdle.push(slot);
+        }
+      }
+      if (stillIdle.length === 0) {
+        idleWorkersByKind.delete(kind);
+      } else {
+        idleWorkersByKind.set(kind, stillIdle);
+      }
+    }
+  }, 60_000);
+}
+
 function createWorkerSlot(kind = 'spatial') {
   const script =
     kind === 'agent-batch' ? '../workers/agent.worker.js' : '../workers/spatial.worker.js';
@@ -58,7 +101,10 @@ function createWorkerSlot(kind = 'spatial') {
       console.debug &&
         console.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
     } catch (_e) {}
-    return { worker, kind };
+    const slot = { worker, kind };
+    _touchWorker(slot);
+    _startIdleCleanup();
+    return slot;
   } catch (err) {
     try {
       console.error &&
@@ -80,11 +126,13 @@ function releaseWorkerSlot(slot) {
       console.debug &&
         console.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
     } catch (_e) {}
+    _touchWorker(slot);
     next(slot);
   } else {
     const idle = idleWorkersByKind.get(kind) || [];
     idle.push(slot);
     idleWorkersByKind.set(kind, idle);
+    _touchWorker(slot);
     try {
       console.debug &&
         console.debug(
@@ -104,6 +152,7 @@ function acquireWorkerSlot(kind = 'spatial') {
     try {
       console.debug && console.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
     } catch (_e) {}
+    _touchWorker(idle);
     return Promise.resolve(idle);
   }
 
