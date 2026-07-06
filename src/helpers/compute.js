@@ -95,6 +95,13 @@ function _getCachedLatLng(cell) {
   const c = _cellLatLngCacheObj[cell];
   if (c) {
     _cellLatLngCacheHits++;
+    // LRU: move the accessed cell to the most-recently-used end so
+    // frequently requested cells survive eviction when the AOI pans.
+    const idx = _cellLatLngCacheOrder.indexOf(cell);
+    if (idx !== -1 && idx !== _cellLatLngCacheOrder.length - 1) {
+      _cellLatLngCacheOrder.splice(idx, 1);
+      _cellLatLngCacheOrder.push(cell);
+    }
     return c;
   }
   const v = cellToLatLng(cell);
@@ -107,15 +114,11 @@ function _getCachedLatLng(cell) {
   _cellLatLngCacheObj[cell] = stored;
   _cellLatLngCacheMisses++;
   _cellLatLngCacheOrder.push(cell);
+  // LRU eviction: drop the least-recently-used entry once over the cap.
+  // No periodic full reset, so useful entries are retained across AOI pans.
   if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX) {
     const old = _cellLatLngCacheOrder.shift();
     delete _cellLatLngCacheObj[old];
-  }
-  // Periodic full GC: when the order array grows 1.5× past the limit,
-  // dead entries have accumulated from repeated miss/evict cycles;
-  // a full reset is cheaper than incremental drift.
-  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX * 1.5) {
-    clearLatLngCache();
   }
   return stored;
 }
