@@ -542,13 +542,7 @@ function runAgentPath(
   let simCurrent = originCell;
   const simTarget = destCell;
 
-  // Precomputed distance check — eliminates per-tick gridDistance H3 call
   let distToTarget = 0;
-  if (originDestDistances) {
-    const d = originDestDistances[originCell + '::' + destCell];
-    if (typeof d === 'number') distToTarget = d;
-  }
-
   let simDirection =
     getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks, bearingMap) ??
     getBearingFast(simCurrent, simTarget, bearingMap);
@@ -559,7 +553,16 @@ function runAgentPath(
   const STUCK_THRESHOLD = 3;
 
   for (let tick = 0; tick < maxTicks; tick++) {
-    // Use precomputed distance when available — eliminates gridDistance H3 call per tick
+    // Update dynamic distance to target — the precomputed origin-to-destination
+    // distance becomes stale if the agent takes a detour around obstacles.
+    if (originDestDistances) {
+      const currentDist = originDestDistances[simCurrent + '::' + destCell];
+      if (typeof currentDist === 'number') distToTarget = currentDist;
+    } else {
+      distToTarget = gridDistance(simCurrent, simTarget);
+    }
+
+    // Use dynamic distance check — eliminates stale precomputed distance bug
     if (distToTarget <= 1) {
       if (simTarget !== simCurrent) {
         simPath.push(simTarget);

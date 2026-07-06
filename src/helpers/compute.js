@@ -217,8 +217,8 @@ function precomputeNeighborDisks(cells, visualDepth) {
 // For each cell, stores a plain-object map of visible neighbor -> true.
 // This eliminates O(N^2) gridPathCells lookups during simulation.
 // Keyed by mapping generation so it invalidates on remap.
-// OPTIMIZATION: Accepts precomputed neighbor disks to avoid redundant gridDisk calls.
-// OPTIMIZATION: Uses flood-fill with gridDisk(1) for proper ring-by-ring expansion.
+// OPTIMIZATION: Precomputes distance-1 neighbor disks to eliminate redundant gridDisk calls.
+// OPTIMIZATION: Reuses visited object with generation counter to reduce GC pressure.
 function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDisks) {
   const result = Object.create(null);
   const impassable = FRICTION_COSTS.IMPASSABLE;
@@ -230,32 +230,44 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
     isPassable[cell] = (frictionLookup[cell] ?? 0) < impassable;
   }
 
+  // Precompute distance-1 neighbor disks for all cells to avoid redundant gridDisk calls.
+  // This eliminates O(n * d^2) temporary array allocations from repeated gridDisk(current, 1).
+  const neighborDisks = Object.create(null);
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    neighborDisks[cell] = gridDisk(cell, 1);
+  }
+
+  // Reuse visited object with generation counter to reduce GC pressure.
+  // Instead of creating a new visited object per BFS, we mark cells with a generation ID.
+  const visited = Object.create(null);
+  let gen = 0;
+
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
     if (!isPassable[cell]) continue; // origin must be passable
 
+    gen++;
     const visible = Object.create(null);
-    const visited = Object.create(null); // flood-fill visited set
     const queue = [cell]; // BFS queue
-    visited[cell] = true;
+    visited[cell] = gen;
 
-    // Flood-fill from origin using gridDisk(1) for proper ring-by-ring expansion.
+    // Flood-fill from origin using precomputed distance-1 disks for proper ring-by-ring expansion.
     // This marks all cells reachable without crossing impassable terrain.
-    // Each cell is visited once, and we use gridDisk(1) to get immediate neighbors.
     let currentDist = 0;
     while (currentDist < maxDepth && queue.length > 0) {
       const nextQueue = [];
       for (let q = 0; q < queue.length; q++) {
         const current = queue[q];
-        // Get immediate neighbors (distance 1)
-        const neighbors = gridDisk(current, 1);
+        // Get immediate neighbors from precomputed disk
+        const neighbors = neighborDisks[current];
         for (let n = 0; n < neighbors.length; n++) {
           const neighbor = neighbors[n];
           if (neighbor === current) continue;
-          if (visited[neighbor]) continue;
+          if (visited[neighbor] === gen) continue;
           if (!isPassable[neighbor]) continue;
 
-          visited[neighbor] = true;
+          visited[neighbor] = gen;
           visible[neighbor] = true;
           nextQueue.push(neighbor);
         }
