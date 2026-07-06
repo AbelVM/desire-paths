@@ -11,6 +11,7 @@
   <meta name="keywords"
     content="desire paths FAQ, what are desire paths, agent-based modeling, pedestrian simulation, urban planning tools, H3 grid, affordance theory, Bossowski CEUS 2025, Dijkstra pathfinding, walkability analysis" />
   <link rel="canonical" href="https://abelvm.github.io/desire-paths/docs/faq.html" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
   <meta name="language" content="English" />
@@ -210,16 +211,25 @@
   </script>
 
   <link rel="stylesheet" href="/docs/docs.css" />
+
+  <!-- Lucide icons (static pages) -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 
 <body>
   <div class="container">
 
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="/">Home</a> &rsaquo; FAQ &amp; Research Guide
+    </nav>
+
     <!-- Header -->
     <header class="page-header">
-      <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/">Home</a> &rsaquo; FAQ &amp; Research Guide
-      </nav>
+      <span class="eyebrow">
+        <i data-lucide="book-open-text" aria-hidden="true"></i>
+        Research Guide
+      </span>
       <h1>Desire Paths: FAQ &amp; Research Guide</h1>
       <p class="subtitle">Everything you need to know about desire paths, agent-based pedestrian simulation methods, and how this interactive simulator works.</p>
     </header>
@@ -228,20 +238,24 @@
     <section aria-label="Quick links">
       <div class="links-grid">
         <a class="link-card" href="/">
-          <strong>&#127958; Try the Simulator</strong>
-          <span>Run desire path simulations on real-world maps</span>
+          <span class="link-icon"><i data-lucide="compass" aria-hidden="true"></i></span>
+          <span class="link-card-title">Try the Simulator</span>
+          <span class="link-card-desc">Run desire path simulations on real-world maps</span>
         </a>
         <a class="link-card" href="/docs/paper.md">
-          <strong>&#128214; Research Paper</strong>
-          <span>Bossowski et al. (CEUS 2025) full text</span>
+          <span class="link-icon"><i data-lucide="file-text" aria-hidden="true"></i></span>
+          <span class="link-card-title">Research Paper</span>
+          <span class="link-card-desc">Bossowski et al. (CEUS 2025) full text</span>
         </a>
         <a class="link-card" href="/docs/research.html">
-          <strong>&#128300; Research Summary</strong>
-          <span>Model comparison, metrics &amp; key findings</span>
+          <span class="link-icon"><i data-lucide="book-open" aria-hidden="true"></i></span>
+          <span class="link-card-title">Research Summary</span>
+          <span class="link-card-desc">Model comparison, metrics &amp; key findings</span>
         </a>
         <a class="link-card" href="https://github.com/abelvm/desire-paths">
-          <strong>&#128736; Source Code</strong>
-          <span>Open-source on GitHub (MIT License)</span>
+          <span class="link-icon"><i data-lucide="code" aria-hidden="true"></i></span>
+          <span class="link-card-title">Source Code</span>
+          <span class="link-card-desc">Open-source on GitHub (MIT License)</span>
         </a>
       </div>
     </section>
@@ -277,76 +291,72 @@
       </li>
     </ol>
 
-    <!-- Key Factors -->
     <h3>Key factors influencing desire path formation</h3>
-    <ul style="color: #94a3b8; padding-left: 1.5rem; margin-bottom: 1rem;">
-      <li><strong style="color:#cbd5e1">Terrain slope:</strong> Steeper shortcuts are strongly preferred, even if longer</li>
-      <li><strong style="color:#cbd5e1">Infrastructure quality:</strong> Poor sidewalks and broken paths create more desire alternatives</li>
-      <li><strong style="color:#cbd5e1">Destination proximity:</strong> Direct routes between high-traffic points (bus stops, entrances)</li>
-      <li><strong style="color:#cbd5e1">Surface resistance:</strong> Grass, gravel, and dirt surfaces are more easily worn than pavement</li>
+    <ul class="contributions-list">
+      <li><strong>Terrain slope:</strong> Steeper shortcuts are strongly preferred, even if longer</li>
+      <li><strong>Infrastructure quality:</strong> Poor sidewalks and broken paths create more desire alternatives</li>
+      <li><strong>Destination proximity:</strong> Direct routes between high-traffic points (bus stops, entrances)</li>
+      <li><strong>Surface resistance:</strong> Grass, gravel, and dirt surfaces are more easily worn than pavement</li>
     </ul>
-
-    <!-- Agent-Based Modeling -->
-    <h2>Agent-based modeling for pedestrian simulation</h2>
 
     <p><strong>Agent-based modeling (ABM)</strong> is a computational approach that simulates the actions and interactions of autonomous individual agents to assess their effects on the system as a whole. In the context of desire path research:</p>
 
-    <ul style="color: #94a3b8; padding-left: 1.5rem; margin-bottom: 1rem;">
-      <li><strong style="color:#cbd5e1">Each agent</strong> represents a virtual pedestrian making route decisions based on simple rules</li>
-      <li><strong style="color:#cbd5e1">Terrain resistance</strong> varies by surface type (pavement = low cost, grass = higher cost)</li>
-      <li><strong style="color:#cbd5e1">Route efficiency</strong> is balanced against comfort through weighted preference parameters</li>
-      <li><strong style="color:#cbd5e1">Emergent wear</strong> means traversed cells become more attractive over time — mirroring real path formation</li>
+    <ul class="contributions-list">
+      <li><strong>Each agent</strong> represents a virtual pedestrian making route decisions based on simple rules</li>
+      <li><strong>Terrain resistance</strong> varies by surface type (pavement = low cost, grass = higher cost)</li>
+      <li><strong>Route efficiency</strong> is balanced against comfort through weighted preference parameters</li>
+      <li><strong>Emergent wear</strong> means traversed cells become more attractive over time — mirroring real path formation</li>
     </ul>
 
     <p>The key insight of ABM is that complex, realistic desire path networks emerge from simple individual rules — no top-down design required. This mirrors how actual desire paths form in the real world.</p>
 
     <!-- Technical Details -->
-    <h2>Technical details</h2>
+    <h2><i data-lucide="cpu" aria-hidden="true"></i> Technical details</h2>
 
     <h3>H3 Hex Grid System</h3>
     <p>The simulator uses Uber's <a href="https://uber.github.io/h3/" target="_blank" rel="noopener noreferrer">H3 hexagonal hierarchical spatial indexing system</a> at resolution 15, providing approximately 0.88-meter spacing between cell centers. This creates a fine-grained grid suitable for detailed pedestrian flow simulation over real-world terrain data.</p>
 
     <h3>Friction Cost Model</h3>
-    <table style="width:100%; border-collapse:collapse; margin-top:0.5rem; margin-bottom:1rem;">
+    <table class="model-table">
       <thead>
-        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-          <th style="text-align:left; padding:0.5rem; color:#94a3b8; font-weight:600;">Surface Type</th>
-          <th style="text-align:left; padding:0.5rem; color:#94a3b8; font-weight:600;">Cost</th>
+        <tr>
+          <th>Surface Type</th>
+          <th>Cost</th>
         </tr>
       </thead>
       <tbody>
-        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
-          <td style="padding:0.5rem;">Hard structure (buildings, water)</td>
-          <td style="padding:0.5rem; color:#ef4444;">&#8734; (impassable)</td>
-        </tr>
-        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
-          <td style="padding:0.5rem;">Dense vegetation</td>
-          <td style="padding:0.5rem; color:#60a5fa;">4.0</td>
-        </tr>
-        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
-          <td style="padding:0.5rem;">Permeable greenspace</td>
-          <td style="padding:0.5rem; color:#60a5fa;">2.5</td>
+        <tr>
+          <td>Hard structure (buildings, water)</td>
+          <td style="color: var(--danger);">&#8734; (impassable)</td>
         </tr>
         <tr>
-          <td style="padding:0.5rem;">Walkable baseline (pavement, paths)</td>
-          <td style="padding:0.5rem; color:#60a5fa;">1.0</td>
+          <td>Dense vegetation</td>
+          <td>4.0</td>
+        </tr>
+        <tr>
+          <td>Permeable greenspace</td>
+          <td>2.5</td>
+        </tr>
+        <tr>
+          <td>Walkable baseline (pavement, paths)</td>
+          <td>1.0</td>
         </tr>
       </tbody>
     </table>
 
     <!-- Research -->
-    <h2>Research &amp; citations</h2>
+    <h2><i data-lucide="book-open" aria-hidden="true"></i> Research &amp; citations</h2>
 
     <p>This simulator extends the framework described in:</p>
 
-    <blockquote style="border-left: 3px solid #60a5fa; padding-left: 1rem; margin: 1rem 0; color: #94a3b8; font-style: italic;">
+    <blockquote class="citation-block">
       Bossowski, J., Szandała, T., &amp; Mazurkiewicz, J. (2025). Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning. <em>Computer Environment and Urban Systems (CEUS)</em>.
     </blockquote>
 
     <p>The work builds on Ma et al.'s agent-based model, adding weighted preferences for route length versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system.</p>
 
     <!-- FAQ Section -->
-    <h2>Frequently asked questions</h2>
+    <h2><i data-lucide="message-circle-question" aria-hidden="true"></i> Frequently asked questions</h2>
 
     <div class="faq-list">
       <details class="faq-item">
@@ -416,6 +426,10 @@
     </footer>
 
   </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
 </body>
 
 </html>

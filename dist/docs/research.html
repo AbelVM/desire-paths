@@ -11,6 +11,7 @@
   <meta name="keywords"
     content="desire paths, agent-based modeling, CEUS 2025, Bossowski, Szandała, Mazurkiewicz, pedestrian simulation, urban planning research, weighted preference model, Dijkstra gradient" />
   <link rel="canonical" href="https://abelvm.github.io/desire-paths/docs/research.html" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
   <meta name="language" content="English" />
@@ -140,18 +141,27 @@
   </script>
 
   <link rel="stylesheet" href="/docs/docs.css" />
+
+  <!-- Lucide icons (static pages) -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 
 <body>
   <div class="container">
 
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="/">Home</a> &rsaquo; Research
+    </nav>
+
     <!-- Header -->
     <header class="page-header">
-      <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/">Home</a> &rsaquo; Research
-      </nav>
+      <span class="eyebrow">
+        <i data-lucide="compass" aria-hidden="true"></i>
+        Published in CEUS 2025
+      </span>
       <h1>Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning</h1>
-      <p class="journal-info">Computer Environment and Urban Systems (CEUS), 2025</p>
+      <p class="subtitle">Computer Environment and Urban Systems (CEUS), 2025 — Bossowski, Szandała &amp; Mazurkiewicz</p>
 
       <!-- Authors -->
       <div class="authors">
@@ -165,22 +175,22 @@
 
       <!-- Abstract -->
       <div class="abstract-box">
-        <h3>Abstract</h3>
+        <h3><i data-lucide="file-text" aria-hidden="true"></i> Abstract</h3>
         <p>This study addresses how informal "desire paths" emerge when urban infrastructure does not align with pedestrian preferences, focusing on small, local neighbourhoods. It introduces an agent-based modelling framework that builds on path optimisation, affordance theory, and two novel models: a weighted preferences model that accounts for varied pedestrian priorities beyond route length and an obstacle avoidance model that achieves 60% accuracy in replicating real-world desire paths.</p>
       </div>
     </header>
 
     <!-- Key Contributions -->
-    <h2>Key contributions</h2>
+    <h2><i data-lucide="lightbulb" aria-hidden="true"></i> Key contributions</h2>
     <ul class="contributions-list">
-      <li><strong style="color:#e2e8f0;">Weighted preferences model</strong> — accounts for varied pedestrian priorities beyond simple shortest-path routing, balancing affordance against distance</li>
-      <li><strong style="color:#e2e8f0;">Obstacle avoidance model</strong> — uses Dijkstra gradients to enable strategic navigation around static obstacles (buildings, barriers)</li>
-      <li><strong style="color:#e2e8f0;">Affordance-based path formation</strong> — tracks surface wear and positive feedback loops that create emergent desire paths</li>
-      <li><strong style="color:#e2e8f0;">Empirical validation</strong> — tested against real-world desire paths in a Wrocław housing estate with 60% accuracy</li>
+      <li><strong>Weighted preferences model</strong> — accounts for varied pedestrian priorities beyond simple shortest-path routing, balancing affordance against distance</li>
+      <li><strong>Obstacle avoidance model</strong> — uses Dijkstra gradients to enable strategic navigation around static obstacles (buildings, barriers)</li>
+      <li><strong>Affordance-based path formation</strong> — tracks surface wear and positive feedback loops that create emergent desire paths</li>
+      <li><strong>Empirical validation</strong> — tested against real-world desire paths in a Wrocław housing estate with 60% accuracy</li>
     </ul>
 
     <!-- Simulation Models -->
-    <h2>Simulation models compared</h2>
+    <h2><i data-lucide="git-branch" aria-hidden="true"></i> Simulation models compared</h2>
     <table class="model-table">
       <thead>
         <tr>
@@ -192,25 +202,25 @@
       </thead>
       <tbody>
         <tr>
-          <td style="color:#e2e8f0;">Basic model</td>
+          <td>Basic model</td>
           <td>Selects highest-affordance visible field, moves toward goal</td>
           <td>22.9 (19.6%)</td>
           <td>—</td>
         </tr>
         <tr>
-          <td style="color:#e2e8f0;">Path minimisation</td>
+          <td>Path minimisation</td>
           <td>Ties broken by shortest total distance to goal</td>
           <td>23.2 (19.5%)</td>
           <td>—</td>
         </tr>
         <tr>
-          <td style="color:#e2e8f0;">Weighted preferences</td>
+          <td>Weighted preferences</td>
           <td>S = w<sub>a</sub> × affordance − w<sub>d</sub> × Δdistance</td>
           <td>15.8–25.5 (varies by weight)</td>
           <td>—</td>
         </tr>
         <tr>
-          <td style="color:#e2e8f0;">Obstacle avoidance</td>
+          <td>Obstacle avoidance</td>
           <td>Dijkstra gradient + nearest-field selection with obstacle ray-casting</td>
           <td>26.6 (real-world)</td>
           <td>~60%</td>
@@ -219,30 +229,34 @@
     </table>
 
     <!-- Metrics -->
-    <h2>Evaluation metrics</h2>
+    <h2><i data-lucide="activity" aria-hidden="true"></i> Evaluation metrics</h2>
     <ul class="contributions-list">
-      <li><strong style="color:#e2e8f0;">Mean Distance Difference (MDD)</strong> — average extra distance walked when taking a desire path vs. the shortest possible route</li>
-      <li><strong style="color:#e2e8f0;">Sum of Paths (SP)</strong> — total area where footprints exceed a wear threshold, indicating path system extent</li>
-      <li><strong style="color:#e2e8f0;">Accuracy (A<sub>i</sub>)</strong> — percentage of simulated steps within radius i fields from observed real-world paths</li>
+      <li><strong>Mean Distance Difference (MDD)</strong> — average extra distance walked when taking a desire path vs. the shortest possible route</li>
+      <li><strong>Sum of Paths (SP)</strong> — total area where footprints exceed a wear threshold, indicating path system extent</li>
+      <li><strong>Accuracy (A<sub>i</sub>)</strong> — percentage of simulated steps within radius i fields from observed real-world paths</li>
     </ul>
 
-    <!-- Links -->
+    <!-- Action Links -->
     <div class="links-grid">
       <a class="link-card" href="/">
-        <strong>&#127958; Try the Simulator</strong>
-        <span>Run simulations on real-world maps</span>
+        <span class="link-icon"><i data-lucide="compass" aria-hidden="true"></i></span>
+        <span class="link-card-title">Try the Simulator</span>
+        <span class="link-card-desc">Run simulations on real-world maps</span>
       </a>
       <a class="link-card" href="/docs/paper.md">
-        <strong>&#128214; Full Paper (MD)</strong>
-        <span>Complete research paper text</span>
+        <span class="link-icon"><i data-lucide="file-text" aria-hidden="true"></i></span>
+        <span class="link-card-title">Full Paper (MD)</span>
+        <span class="link-card-desc">Complete research paper text</span>
       </a>
       <a class="link-card" href="/docs/faq.html">
-        <strong>&#10067;&#65039; FAQ &amp; Guide</strong>
-        <span>Everything about desire paths &amp; simulation methods</span>
+        <span class="link-icon"><i data-lucide="book-open-text" aria-hidden="true"></i></span>
+        <span class="link-card-title">FAQ &amp; Guide</span>
+        <span class="link-card-desc">Everything about desire paths &amp; simulation methods</span>
       </a>
       <a class="link-card" href="https://github.com/abelvm/desire-paths">
-        <strong>&#128736; Source Code</strong>
-        <span>Open-source on GitHub (MIT)</span>
+        <span class="link-icon"><i data-lucide="code" aria-hidden="true"></i></span>
+        <span class="link-card-title">Source Code</span>
+        <span class="link-card-desc">Open-source on GitHub (MIT)</span>
       </a>
     </div>
 
@@ -252,6 +266,10 @@
     </footer>
 
   </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
 </body>
 
 </html>

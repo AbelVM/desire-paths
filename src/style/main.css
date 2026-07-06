@@ -1428,6 +1428,33 @@ html {
   transform: translate(-50%, 0);
 }
 
+/* ── Button tooltips (placement mode buttons) ─────────────── */
+
+.button-tooltip {
+  position: fixed;
+  z-index: 1001;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.98);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.button-tooltip:not([hidden]) {
+  opacity: 1;
+}
+
+.button-tooltip[hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .param-toggle input[type='checkbox'] {
   width: 16px;
   height: 16px;

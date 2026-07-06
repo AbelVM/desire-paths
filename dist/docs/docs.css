@@ -4,17 +4,37 @@
 
 :root {
   color-scheme: dark;
+
+  /* ── Palette aligned with src/style/main.css ─────────── */
   --bg: #0a0e17;
   --primary: #14b8a6;
   --primary-rgb: 20, 184, 166;
   --sky: #38bdf8;
   --sky-rgb: 56, 189, 248;
+
+  /* Typography — matches main.css values */
   --text-strong: #f1f5f9;
   --text: #c8d6e5;
   --muted: #94a3b8;
   --muted-dim: #64748b;
+
+  /* Accent — links and interactive elements */
+  --link: #f20084;
+  --link-rgb: 242, 0, 132;
+
+  /* Borders / surfaces */
   --border: rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.06);
   --surface-rgb: 17, 21, 26;
+
+  /* Accent tints — derived from --link (aligned with main.css --accent) */
+  --link-soft: rgb(from var(--link-rgb) r g b / 0.12);
+  --link-stronger: rgb(from var(--link-rgb) r g b / 0.2);
+  --link-border: rgb(from var(--link-rgb) r g b / 0.3);
+  --link-border-hover: rgb(from var(--link-rgb) r g b / 0.5);
+
+  /* Danger — for impassable table cells */
+  --danger: #ef4444;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -22,8 +42,8 @@
 body {
   font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(20, 184, 166, 0.12), transparent 35%),
-    radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.06), transparent 28%),
+    radial-gradient(circle at top left, rgb(from var(--primary) r g b / 0.12), transparent 35%),
+    radial-gradient(circle at bottom right, rgb(from var(--sky) r g b / 0.06), transparent 28%),
     var(--bg);
   color: var(--text);
   line-height: 1.7;
@@ -36,24 +56,38 @@ body {
   padding: 3rem 1.5rem 4rem;
 }
 
-a { color: #60a5fa; text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
-
-/* ── Header ───────────────────────────────────────────── */
-
-.page-header {
-  margin-bottom: 2.5rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
 .breadcrumb {
-  font-size: 0.85rem;
-  color: var(--muted-dim);
-  margin-bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.875rem;
 }
-.breadcrumb a { color: var(--muted-dim); }
-.breadcrumb a:hover { color: var(--muted); }
+
+.breadcrumb a { color: var(--muted); }
+.breadcrumb a:hover { color: var(--text-strong); text-decoration: none; }
+
+/* ── Eyebrow chip (omt-router style) ───────────────────── */
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.eyebrow [data-lucide] {
+  width: 14px;
+  height: 14px;
+  color: var(--link);
+}
 
 h1 {
   font-size: 2rem;
@@ -74,17 +108,25 @@ h1 {
 h2 {
   font-size: 1.35rem;
   font-weight: 700;
-  color: #e2e8f0;
+  color: var(--text-strong);
   margin-top: 2.5rem;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
+h2 [data-lucide] {
+  width: 18px;
+  height: 18px;
+  color: var(--link);
+  vertical-align: -3px;
+  margin-right: 0.4rem;
+}
+
 h3 {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text);
   margin-top: 2rem;
   margin-bottom: 0.75rem;
 }
@@ -103,13 +145,13 @@ p { margin-bottom: 1rem; }
 .authors {
   margin-bottom: 1.5rem;
   padding: 1rem 1.25rem;
-  background: rgba(96,165,250,0.06);
+  background: rgba(var(--primary-rgb), 0.06);
   border-radius: 8px;
-  border-left: 3px solid #60a5fa;
+  border-left: 3px solid var(--primary);
 }
 
 .authors strong {
-  color: #e2e8f0;
+  color: var(--text-strong);
   display: block; margin-bottom: 0.3rem; font-size: 0.9rem;
 }
 
@@ -130,10 +172,18 @@ p { margin-bottom: 1rem; }
 .abstract-box h3 {
   font-size: 1rem;
   font-weight: 700;
-  color: #60a5fa;
+  color: var(--primary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 0.75rem;
+}
+
+.abstract-box h3 [data-lucide] {
+  width: 14px;
+  height: 14px;
+  color: var(--link);
+  vertical-align: -2px;
+  margin-right: 0.3rem;
 }
 
 .abstract-box p {
@@ -154,9 +204,16 @@ p { margin-bottom: 1rem; }
   font-size: 0.95rem;
 }
 .contributions-list li::before {
-  content: "→";
-  position: absolute; left: 0;
-  color: #60a5fa; font-weight: 700;
+  content: "";
+  position: absolute; left: 0; top: 0.15em;
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--primary);
+  border-bottom: 2px solid var(--primary);
+  transform: rotate(-45deg) translateY(1px);
+}
+
+.contributions-list li strong {
+  color: var(--text-strong);
 }
 
 /* ── Model table (research.html) ─────────────────────── */
@@ -166,16 +223,33 @@ p { margin-bottom: 1rem; }
   margin-top: 0.5rem; margin-bottom: 1rem;
 }
 .model-table th {
-  text-align: left; padding: 0.6rem 0.75rem;
+  text-align: left; padding: 0.75rem 1rem;
   background: rgba(255,255,255,0.04);
   color: var(--muted); font-weight: 600; font-size: 0.85rem;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
+
 .model-table td {
-  padding: 0.6rem 0.75rem; color: var(--muted); font-size: 0.9rem;
+  padding: 0.75rem 1rem; color: var(--text); font-size: 0.9rem;
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .model-table tr:last-child td { border-bottom: none; }
+
+/* ── Citation blockquote ─────────────────────────────── */
+
+.citation-block {
+  border-left: 3px solid var(--primary);
+  padding-left: 1rem;
+  margin: 1.5rem 0;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.7;
+}
+
+.citation-block em {
+  color: var(--text-strong);
+  font-style: normal;
+}
 
 /* ── Links grid (faq.html quick links) ───────────────── */
 
@@ -186,19 +260,34 @@ p { margin-bottom: 1rem; }
 }
 
 .link-card {
+  display: flex;
+  flex-direction: column;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem 1.25rem;
   transition: background 0.2s ease, border-color 0.2s ease;
-}
-.link-card:hover {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(96,165,250,0.3);
   text-decoration: none;
 }
-.link-card strong { color: #e2e8f0; display: block; margin-bottom: 0.25rem; }
-.link-card span { font-size: 0.85rem; color: var(--muted-dim); }
+
+.link-icon {
+  margin-bottom: 0.5rem;
+}
+
+.link-icon [data-lucide] {
+  width: 24px;
+  height: 24px;
+  color: var(--link);
+}
+
+.link-card:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(242, 0, 132, 0.3);
+  text-decoration: none;
+}
+
+.link-card-title { color: var(--text-strong); display: block; margin-bottom: 0.2rem; }
+.link-card-desc { font-size: 0.85rem; color: var(--muted-dim); }
 
 /* ── FAQ accordion ───────────────────────────────────── */
 
@@ -212,13 +301,13 @@ p { margin-bottom: 1rem; }
 
 .faq-item summary {
   cursor: pointer; font-weight: 600; outline: none; user-select: none;
-  color: #e2e8f0; list-style: none;
+  color: var(--text-strong); list-style: none;
   display: flex; align-items: center; gap: 0.75rem; font-size: 1rem;
 }
 .faq-item summary::-webkit-details-marker { display: none; }
 
 .faq-item summary::before {
-  content: "+"; font-weight: 700; color: #60a5fa;
+  content: "+"; font-weight: 700; color: var(--link);
   font-size: 1.2rem; min-width: 1.4em; text-align: center;
   transition: transform 0.2s ease;
 }
@@ -240,12 +329,12 @@ p { margin-bottom: 1rem; }
   content: counter(step-counter);
   position: absolute; left: 0; top: 0;
   width: 2rem; height: 2rem;
-  background: rgba(96,165,250,0.12);
-  color: #60a5fa; border-radius: 50%;
+  background: rgba(242, 0, 132, 0.12);
+  color: var(--link); border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 0.9rem;
 }
-.step-item strong { color: #e2e8f0; display: block; margin-bottom: 0.3rem; }
+.step-item strong { color: var(--text-strong); display: block; margin-bottom: 0.3rem; }
 .step-item p { margin-bottom: 0; color: var(--muted); font-size: 0.95rem; }
 
 /* ── Footer ──────────────────────────────────────────── */
@@ -253,7 +342,7 @@ p { margin-bottom: 1rem; }
 .page-footer {
   margin-top: 3rem; padding-top: 1.5rem;
   border-top: 1px solid rgba(255,255,255,0.06);
-  text-align: center; font-size: 0.85rem; color: #475569;
+  text-align: center; font-size: 0.85rem; color: var(--muted-dim);
 }
 
 /* ── Responsive ──────────────────────────────────────── */

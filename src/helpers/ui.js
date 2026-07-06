@@ -243,6 +243,16 @@ function createUIState(map) {
   state.tabButtons = Array.from(document.querySelectorAll('[data-tab-target]'));
   state.tabPanels = Array.from(document.querySelectorAll('.panel-tab-panel'));
 
+  // Tooltip element for placement mode buttons — appended to body to escape panel clipping
+  const tooltipEl = document.getElementById('button-tooltip') || document.createElement('div');
+  tooltipEl.id = 'button-tooltip';
+  tooltipEl.className = 'button-tooltip';
+  tooltipEl.hidden = true;
+  if (!tooltipEl.parentNode) {
+    document.body.appendChild(tooltipEl);
+  }
+  state.buttonTooltip = tooltipEl;
+
   // Toast container — create if missing
   const toastContainer =
     document.getElementById('toast-container') || document.createElement('div');
@@ -907,6 +917,34 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       map.placementMode = button.dataset.placementMode || 'origin';
       syncModeUI();
     });
+
+    // Tooltip handlers
+    if (button.dataset.tooltip) {
+      addUIListener(button, 'mouseenter', (e) => {
+        const tooltip = uiState.buttonTooltip;
+        if (!tooltip) return;
+        tooltip.textContent = button.dataset.tooltip;
+        tooltip.hidden = false;
+        const rect = button.getBoundingClientRect();
+        tooltip.style.left = `${rect.left + rect.width / 2}px`;
+        tooltip.style.top = `${rect.bottom + 8}px`;
+      });
+      addUIListener(button, 'mouseleave', () => {
+        if (uiState.buttonTooltip) uiState.buttonTooltip.hidden = true;
+      });
+      addUIListener(button, 'focus', (e) => {
+        const tooltip = uiState.buttonTooltip;
+        if (!tooltip) return;
+        tooltip.textContent = button.dataset.tooltip;
+        tooltip.hidden = false;
+        const rect = button.getBoundingClientRect();
+        tooltip.style.left = `${rect.left + rect.width / 2}px`;
+        tooltip.style.top = `${rect.bottom + 8}px`;
+      });
+      addUIListener(button, 'blur', () => {
+        if (uiState.buttonTooltip) uiState.buttonTooltip.hidden = true;
+      });
+    }
   }
 
   for (const button of uiState.tabButtons) {
