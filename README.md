@@ -8,6 +8,9 @@ An interactive **agent-based simulation** that models how pedestrians naturally 
 
 Based on the research by [Bossowski et al. (CEUS 2025)](docs/paper.pdf), this tool visualizes how **agent-based modeling** can predict pedestrian routing behavior for urban planning, landscape architecture, and GIS analysis.
 
+> 📖 **[FAQ & Research Guide](https://abelvm.github.io/desire-paths/docs/faq.html)** — Comprehensive guide to desire paths, simulation methods, and research references
+> 🔬 **[Research Paper Summary](https://abelvm.github.io/desire-paths/docs/research.html)** — Model comparison, metrics, and key findings
+
 ## Live Demo
 
 Try it now at **[abelvm.github.io/desire-paths](https://abelvm.github.io/desire-paths/)** — no installation required. Works in any modern browser with WebGL 2.0 support.

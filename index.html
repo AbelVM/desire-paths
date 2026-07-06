@@ -33,14 +33,6 @@
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
 
   <!-- Open Graph / Facebook -->
-  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Desire Paths agent-based pedestrian flow simulator screenshot" />
-
-  <!-- Twitter -->
-  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
-  <meta name="twitter:image:alt" content="Desire Paths agent-based pedestrian flow simulator" />
 
   <!-- Additional SEO meta tags for GEO/AEO -->
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
@@ -447,39 +439,8 @@
           <section id="panel-more-info" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-more-info"
             tabindex="0" hidden>
             <article class="info-content">
-              <h3>What are desire paths?</h3>
-              <p>Desire paths are informal routes created when people repeatedly choose a path that better matches
-                convenience, comfort, or directness than planned infrastructure.</p>
-
-              <h3>How this simulator works</h3>
-              <p>The simulator uses an agent-based model over an H3 grid. Agents move from origins to destinations while
-                balancing terrain resistance, route efficiency, and perceived affordance, producing emergent flow
-                corridors.</p>
-
-              <h3>Method reference</h3>
-              <p>Inspired by Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for
-                  Neighbourhood Route Planning</em>.</p>
-
-              <h3>Parameters explained</h3>
-              <p><strong>Affordance weight</strong> and <strong>distance penalty</strong> define the preference ratio.
-                <strong>Vision depth</strong> and <strong>field of view</strong> control local perception.
-                <strong>Agents per weight unit</strong> controls sample size. <strong>Temperature</strong> controls
-                stochastic behavior. <strong>Emergent wear</strong> toggles reinforcement effects on traversed cells.
-              </p>
-
-              <h3>Repository</h3>
-              <p><a href="https://github.com/abelvm/desire-paths" target="_blank"
-                  rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
-
-              <h3>Author</h3>
-              <p>Abel Vázquez Montoro · <a href="https://www.linkedin.com/in/abelvazquez/" target="_blank"
-                  rel="noopener noreferrer">LinkedIn profile</a></p>
 
               <h3>Frequently asked questions</h3>
-              <p style="margin-bottom: 1rem; font-size: 0.925rem;">
-                For a comprehensive guide covering desire path formation, affordance theory, simulation parameters, and research references, see the full
-                <a href="/docs/faq.html" target="_blank" rel="noopener noreferrer">FAQ &amp; Research Guide</a>.
-              </p>
               <div class="faq-list" aria-label="Frequently asked questions about desire paths and the simulator">
                 <details class="faq-item">
                   <summary><strong>What are desire paths?</strong></summary>
@@ -546,8 +507,24 @@
                     (CEUS). It builds on Ma et al.'s agent-based model, adding weighted preferences for route length
                     versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system.</p>
                 </details>
+
+                <details class="faq-item">
+                  <summary><strong>How do simulation parameters affect results?</strong></summary>
+                  <p>Adjustable in the Simulation tab: <strong>Affordance weight</strong> biases agents toward worn surfaces;
+                    <strong>Distance penalty</strong> prioritizes shorter routes; <strong>Vision depth</strong> and
+                    <strong>Field of view</strong> control local perception range; <strong>Temperature</strong> adds
+                    randomness to route choice; <strong>Emergent wear</strong> enables positive feedback on traversed cells.</p>
+                </details>
               </div>
 
+              <h3>Research &amp; citations</h3>
+              <p>Based on Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning</em>. Read the full paper and model comparison at the <a href="/docs/research.html">Research page</a>.</p>
+
+              <h3>Repository</h3>
+              <p><a href="https://github.com/abelvm/desire-paths" target="_blank" rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
+
+              <h3>Author</h3>
+              <p>Abel Vázquez Montoro · <a href="https://www.linkedin.com/in/abelvazquez/" target="_blank" rel="noopener noreferrer">LinkedIn profile</a></p>
 
             </article>
           </section>

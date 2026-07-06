@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Research — Predicting Desire Paths | Agent-Based Simulation for Neighbourhood Route Planning</title>
+  <meta name="description"
+    content="Academic research on predicting desire paths using agent-based simulation. Bossowski et al. (CEUS 2025) — weighted preferences model and obstacle-aware pathfinding for pedestrian behavior prediction." />
+  <meta name="keywords"
+    content="desire paths, agent-based modeling, CEUS 2025, Bossowski, Szandała, Mazurkiewicz, pedestrian simulation, urban planning research, weighted preference model, Dijkstra gradient" />
+  <link rel="canonical" href="https://abelvm.github.io/desire-paths/docs/research.html" />
+
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
+  <meta name="language" content="English" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://abelvm.github.io/desire-paths/docs/research.html" />
+  <meta property="og:title" content="Research — Predicting Desire Paths (CEUS 2025)" />
+  <meta property="og:description"
+    content="Academic research on predicting desire paths using agent-based simulation with weighted preferences and obstacle-aware pathfinding." />
+  <meta property="og:site_name" content="Desire Paths" />
+  <meta property="article:modified_time" content="2026-07-05T00:00:00Z" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Research — Predicting Desire Paths (CEUS 2025)" />
+  <meta name="twitter:description"
+    content="Academic research on predicting desire paths using agent-based simulation with weighted preferences and obstacle-aware pathfinding." />
+
+  <!-- Breadcrumbs -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://abelvm.github.io/desire-paths/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Research",
+          "item": "https://abelvm.github.io/desire-paths/docs/research.html"
+        }
+      ]
+    }
+  </script>
+
+  <!-- ScholarlyArticle structured data — primary GEO signal for AI engine citations -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ScholarlyArticle",
+      "headline": "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning",
+      "description": "This study introduces an agent-based modelling framework that builds on path optimisation, affordance theory, and two novel models: a weighted preferences model that accounts for varied pedestrian priorities beyond route length and an obstacle avoidance model that achieves 60% accuracy in replicating real-world desire paths.",
+      "author": [
+        {
+          "@type": "Person",
+          "name": "Józef Bossowski",
+          "affiliation": {
+            "@type": "Organization",
+            "name": "Wroclaw University of Science and Technology"
+          }
+        },
+        {
+          "@type": "Person",
+          "name": "Tomasz Szandała",
+          "affiliation": {
+            "@type": "Organization",
+            "name": "Wroclaw University of Science and Technology"
+          },
+          "sameAs": null
+        },
+        {
+          "@type": "Person",
+          "name": "Jacek Mazurkiewicz",
+          "affiliation": {
+            "@type": "Organization",
+            "name": "Wroclaw University of Science and Technology"
+          }
+        }
+      ],
+      "publisher": {
+        "@type": "Organization",
+        "name": "Computer Environment and Urban Systems (CEUS)",
+        "brand": {
+          "@type": "Organization",
+          "name": "Elsevier"
+        }
+      },
+      "datePublished": "2025",
+      "about": [
+        { "@type": "Thing", "name": "Desire paths" },
+        { "@type": "Thing", "name": "Agent-based modeling" },
+        { "@type": "Thing", "name": "Urban route planning" },
+        { "@type": "Thing", "name": "Pedestrian behaviour modelling" },
+        { "@type": "Thing", "name": "Affordance theory" }
+      ],
+      "keywords": ["Agent-based simulation", "Desire paths", "Urban route planning", "Pedestrian behaviour modelling", "Obstacle avoidance model"],
+      "citation": "https://abelvm.github.io/desire-paths/docs/paper.md",
+      "workExample": {
+        "@type": "SoftwareSourceCode",
+        "name": "Desire Paths Simulator",
+        "url": "https://abelvm.github.io/desire-paths/",
+        "codeRepository": "https://github.com/abelvm/desire-paths"
+      }
+    }
+  </script>
+
+  <!-- CreativeWork for the simulator as a research tool -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CreativeWork",
+      "name": "Desire Paths — Agent-Based Pedestrian Flow Simulator",
+      "description": "Interactive web-based implementation of the desire path prediction model by Bossowski et al. (2025), using H3 hex grids and real-world map data.",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      },
+      "citation": {
+        "@type": "ScholarlyArticle",
+        "headline": "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning",
+        "author": [
+          {"@type": "Person", "name": "Józef Bossowski"},
+          {"@type": "Person", "name": "Tomasz Szandała"},
+          {"@type": "Person", "name": "Jacek Mazurkiewicz"}
+        ],
+        "publisher": { "@type": "Organization", "name": "Computer Environment and Urban Systems" },
+        "datePublished": "2025"
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="/docs/docs.css" />
+</head>
+
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <header class="page-header">
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="/">Home</a> &rsaquo; Research
+      </nav>
+      <h1>Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning</h1>
+      <p class="journal-info">Computer Environment and Urban Systems (CEUS), 2025</p>
+
+      <!-- Authors -->
+      <div class="authors">
+        <strong>Authors</strong>
+        <ul class="author-list">
+          <li>Józef Bossowski <span class="affiliation">— Wroclaw University of Science and Technology</span></li>
+          <li>Tomasz Szandała <span class="affiliation">— Wroclaw University of Science and Technology; SUPSI, Lugano</span></li>
+          <li>Jacek Mazurkiewicz <span class="affiliation">— Wroclaw University of Science and Technology</span></li>
+        </ul>
+      </div>
+
+      <!-- Abstract -->
+      <div class="abstract-box">
+        <h3>Abstract</h3>
+        <p>This study addresses how informal "desire paths" emerge when urban infrastructure does not align with pedestrian preferences, focusing on small, local neighbourhoods. It introduces an agent-based modelling framework that builds on path optimisation, affordance theory, and two novel models: a weighted preferences model that accounts for varied pedestrian priorities beyond route length and an obstacle avoidance model that achieves 60% accuracy in replicating real-world desire paths.</p>
+      </div>
+    </header>
+
+    <!-- Key Contributions -->
+    <h2>Key contributions</h2>
+    <ul class="contributions-list">
+      <li><strong style="color:#e2e8f0;">Weighted preferences model</strong> — accounts for varied pedestrian priorities beyond simple shortest-path routing, balancing affordance against distance</li>
+      <li><strong style="color:#e2e8f0;">Obstacle avoidance model</strong> — uses Dijkstra gradients to enable strategic navigation around static obstacles (buildings, barriers)</li>
+      <li><strong style="color:#e2e8f0;">Affordance-based path formation</strong> — tracks surface wear and positive feedback loops that create emergent desire paths</li>
+      <li><strong style="color:#e2e8f0;">Empirical validation</strong> — tested against real-world desire paths in a Wrocław housing estate with 60% accuracy</li>
+    </ul>
+
+    <!-- Simulation Models -->
+    <h2>Simulation models compared</h2>
+    <table class="model-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Description</th>
+          <th>MDD (fields)</th>
+          <th>Accuracy</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color:#e2e8f0;">Basic model</td>
+          <td>Selects highest-affordance visible field, moves toward goal</td>
+          <td>22.9 (19.6%)</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td style="color:#e2e8f0;">Path minimisation</td>
+          <td>Ties broken by shortest total distance to goal</td>
+          <td>23.2 (19.5%)</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td style="color:#e2e8f0;">Weighted preferences</td>
+          <td>S = w<sub>a</sub> × affordance − w<sub>d</sub> × Δdistance</td>
+          <td>15.8–25.5 (varies by weight)</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td style="color:#e2e8f0;">Obstacle avoidance</td>
+          <td>Dijkstra gradient + nearest-field selection with obstacle ray-casting</td>
+          <td>26.6 (real-world)</td>
+          <td>~60%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Metrics -->
+    <h2>Evaluation metrics</h2>
+    <ul class="contributions-list">
+      <li><strong style="color:#e2e8f0;">Mean Distance Difference (MDD)</strong> — average extra distance walked when taking a desire path vs. the shortest possible route</li>
+      <li><strong style="color:#e2e8f0;">Sum of Paths (SP)</strong> — total area where footprints exceed a wear threshold, indicating path system extent</li>
+      <li><strong style="color:#e2e8f0;">Accuracy (A<sub>i</sub>)</strong> — percentage of simulated steps within radius i fields from observed real-world paths</li>
+    </ul>
+
+    <!-- Links -->
+    <div class="links-grid">
+      <a class="link-card" href="/">
+        <strong>&#127958; Try the Simulator</strong>
+        <span>Run simulations on real-world maps</span>
+      </a>
+      <a class="link-card" href="/docs/paper.md">
+        <strong>&#128214; Full Paper (MD)</strong>
+        <span>Complete research paper text</span>
+      </a>
+      <a class="link-card" href="/docs/faq.html">
+        <strong>&#10067;&#65039; FAQ &amp; Guide</strong>
+        <span>Everything about desire paths &amp; simulation methods</span>
+      </a>
+      <a class="link-card" href="https://github.com/abelvm/desire-paths">
+        <strong>&#128736; Source Code</strong>
+        <span>Open-source on GitHub (MIT)</span>
+      </a>
+    </div>
+
+    <!-- Footer -->
+    <footer class="page-footer">
+      <p>Desire Paths Simulator &middot; MIT License &middot; Abel V&aacute;zquez Montoro</p>
+    </footer>
+
+  </div>
+</body>
+
+</html>

@@ -269,6 +269,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       icons,
       attrs: {
         'stroke-width': 1.8,
+        color: 'currentColor',
       },
     });
   } catch {
@@ -287,18 +288,31 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
 
-    let icon = 'ℹ️';
-    if (type === 'success') icon = '✅';
-    else if (type === 'warning') icon = '⚠️';
-    else if (type === 'error') icon = '❌';
+    let iconName = 'info';
+    if (type === 'success') iconName = 'check-circle';
+    else if (type === 'warning') iconName = 'alert-triangle';
+    else if (type === 'error') iconName = 'x-circle';
 
     toast.innerHTML = `
-      <span class="toast-icon">${icon}</span>
+      <span class="toast-icon"><i data-lucide="${iconName}" aria-hidden="true"></i></span>
       <div class="toast-message">${message}</div>
       <button class="toast-close" type="button" aria-label="Dismiss notification">×</button>
     `;
 
     uiState.toastContainer.appendChild(toast);
+
+    // Render Lucide icon inside the toast
+    try {
+      createIcons({
+        icons,
+        attrs: {
+          'stroke-width': 1.8,
+          color: 'currentColor',
+        },
+      });
+    } catch {
+      // Safe fallback for environments without full icon runtime.
+    }
 
     requestAnimationFrame(() => {
       toast.classList.add('show');

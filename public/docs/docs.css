@@ -1,0 +1,353 @@
+/* ── Documentation page styles (shared by faq.html + research.html) ───────── */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  color-scheme: dark;
+
+  /* ── Palette aligned with src/style/main.css ─────────── */
+  --bg: #0a0e17;
+  --primary: #14b8a6;
+  --primary-rgb: 20, 184, 166;
+  --sky: #38bdf8;
+  --sky-rgb: 56, 189, 248;
+
+  /* Typography — matches main.css values */
+  --text-strong: #f1f5f9;
+  --text: #c8d6e5;
+  --muted: #94a3b8;
+  --muted-dim: #64748b;
+
+  /* Accent — links and interactive elements */
+  --link: #f20084;
+  --link-rgb: 242, 0, 132;
+
+  /* Borders / surfaces */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --surface-rgb: 17, 21, 26;
+
+  /* Accent tints — derived from --link (aligned with main.css --accent) */
+  --link-soft: rgb(from var(--link-rgb) r g b / 0.12);
+  --link-stronger: rgb(from var(--link-rgb) r g b / 0.2);
+  --link-border: rgb(from var(--link-rgb) r g b / 0.3);
+  --link-border-hover: rgb(from var(--link-rgb) r g b / 0.5);
+
+  /* Danger — for impassable table cells */
+  --danger: #ef4444;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgb(from var(--primary) r g b / 0.12), transparent 35%),
+    radial-gradient(circle at bottom right, rgb(from var(--sky) r g b / 0.06), transparent 28%),
+    var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 4rem;
+}
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.breadcrumb a { color: var(--muted); }
+.breadcrumb a:hover { color: var(--text-strong); text-decoration: none; }
+
+/* ── Eyebrow chip (omt-router style) ───────────────────── */
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.eyebrow [data-lucide] {
+  width: 14px;
+  height: 14px;
+  color: var(--link);
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  line-height: 1.25;
+  margin-bottom: 0.75rem;
+}
+
+.subtitle {
+  font-size: 1.05rem;
+  color: var(--muted);
+  max-width: 640px;
+}
+
+/* ── Section headings ─────────────────────────────────── */
+
+h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+h2 [data-lucide] {
+  width: 18px;
+  height: 18px;
+  color: var(--link);
+  vertical-align: -3px;
+  margin-right: 0.4rem;
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+p { margin-bottom: 1rem; }
+
+/* ── Authors (research.html) ─────────────────────────── */
+
+.journal-info {
+  font-size: 0.925rem;
+  color: var(--muted-dim);
+  font-style: italic;
+  margin-bottom: 0.5rem;
+}
+
+.authors {
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: rgba(var(--primary-rgb), 0.06);
+  border-radius: 8px;
+  border-left: 3px solid var(--primary);
+}
+
+.authors strong {
+  color: var(--text-strong);
+  display: block; margin-bottom: 0.3rem; font-size: 0.9rem;
+}
+
+.author-list { list-style: none; padding-left: 0; }
+.author-list li { color: var(--muted); font-size: 0.925rem; margin-bottom: 0.2rem; }
+.author-list .affiliation { color: var(--muted-dim); font-size: 0.85rem; }
+
+/* ── Abstract (research.html) ────────────────────────── */
+
+.abstract-box {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.abstract-box h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+
+.abstract-box h3 [data-lucide] {
+  width: 14px;
+  height: 14px;
+  color: var(--link);
+  vertical-align: -2px;
+  margin-right: 0.3rem;
+}
+
+.abstract-box p {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.75;
+  margin-bottom: 0;
+}
+
+/* ── Contributions list (research.html) ──────────────── */
+
+.contributions-list { list-style: none; padding-left: 0; }
+.contributions-list li {
+  position: relative;
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.contributions-list li::before {
+  content: "";
+  position: absolute; left: 0; top: 0.15em;
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--primary);
+  border-bottom: 2px solid var(--primary);
+  transform: rotate(-45deg) translateY(1px);
+}
+
+.contributions-list li strong {
+  color: var(--text-strong);
+}
+
+/* ── Model table (research.html) ─────────────────────── */
+
+.model-table {
+  width: 100%; border-collapse: collapse;
+  margin-top: 0.5rem; margin-bottom: 1rem;
+}
+.model-table th {
+  text-align: left; padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.04);
+  color: var(--muted); font-weight: 600; font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.model-table td {
+  padding: 0.75rem 1rem; color: var(--text); font-size: 0.9rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.model-table tr:last-child td { border-bottom: none; }
+
+/* ── Citation blockquote ─────────────────────────────── */
+
+.citation-block {
+  border-left: 3px solid var(--primary);
+  padding-left: 1rem;
+  margin: 1.5rem 0;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.7;
+}
+
+.citation-block em {
+  color: var(--text-strong);
+  font-style: normal;
+}
+
+/* ── Links grid (faq.html quick links) ───────────────── */
+
+.links-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem; margin-top: 1rem;
+}
+
+.link-card {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  text-decoration: none;
+}
+
+.link-icon {
+  margin-bottom: 0.5rem;
+}
+
+.link-icon [data-lucide] {
+  width: 24px;
+  height: 24px;
+  color: var(--link);
+}
+
+.link-card:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(242, 0, 132, 0.3);
+  text-decoration: none;
+}
+
+.link-card-title { color: var(--text-strong); display: block; margin-bottom: 0.2rem; }
+.link-card-desc { font-size: 0.85rem; color: var(--muted-dim); }
+
+/* ── FAQ accordion ───────────────────────────────────── */
+
+.faq-list { margin-top: 1rem; }
+
+.faq-item {
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 1rem 0;
+}
+.faq-item:last-child { border-bottom: none; }
+
+.faq-item summary {
+  cursor: pointer; font-weight: 600; outline: none; user-select: none;
+  color: var(--text-strong); list-style: none;
+  display: flex; align-items: center; gap: 0.75rem; font-size: 1rem;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+
+.faq-item summary::before {
+  content: "+"; font-weight: 700; color: var(--link);
+  font-size: 1.2rem; min-width: 1.4em; text-align: center;
+  transition: transform 0.2s ease;
+}
+.faq-item[open] summary::before { content: "−"; }
+
+.faq-item p {
+  margin-top: 0.6rem; color: var(--muted);
+  line-height: 1.75; font-size: 0.95rem; padding-left: 2.1em;
+}
+
+/* ── How-to steps (faq.html) ─────────────────────────── */
+
+.step-list { list-style: none; counter-reset: step-counter; }
+.step-item {
+  position: relative; padding-left: 3rem; margin-bottom: 1.5rem;
+}
+.step-item::before {
+  counter-increment: step-counter;
+  content: counter(step-counter);
+  position: absolute; left: 0; top: 0;
+  width: 2rem; height: 2rem;
+  background: rgba(242, 0, 132, 0.12);
+  color: var(--link); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.9rem;
+}
+.step-item strong { color: var(--text-strong); display: block; margin-bottom: 0.3rem; }
+.step-item p { margin-bottom: 0; color: var(--muted); font-size: 0.95rem; }
+
+/* ── Footer ──────────────────────────────────────────── */
+
+.page-footer {
+  margin-top: 3rem; padding-top: 1.5rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center; font-size: 0.85rem; color: var(--muted-dim);
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  h1 { font-size: 1.5rem; }
+  .container { padding: 2rem 1rem 3rem; }
+}
