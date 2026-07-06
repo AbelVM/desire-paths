@@ -153,6 +153,14 @@ export async function triggerFastScan(state, mapInstance) {
 
   // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
   const blurWeights = build.blurWeights ?? Object.create(null);
+  const blurUpdates = build.blurUpdates ?? null;
+  // Index blur updates by cell for O(1) lookup in the per-cell loop.
+  const blurUpdateMap = blurUpdates ? Object.create(null) : null;
+  if (blurUpdateMap) {
+    for (let u = 0; u < blurUpdates.length; u++) {
+      blurUpdateMap[blurUpdates[u][0]] = blurUpdates[u][1];
+    }
+  }
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
   const pavement = AFFORDANCE.PAVEMENT;
   const lightPark = AFFORDANCE.LIGHT_PARK;
@@ -198,6 +206,15 @@ export async function triggerFastScan(state, mapInstance) {
     } else {
       // Fallback: look up from build result directly
       fr = build.cellFrictionEntries?.[cell] ?? 0;
+    }
+
+    // Apply the impassable blur: cells adjacent to buildings get extra friction
+    // so agents are nudged to route *around* the obstacle rather than hugging
+    // its edge. Without this, the blur only touched affordance (too weakly to
+    // affect routing) and the friction penalty was computed but never applied.
+    if (blurUpdateMap) {
+      const blurred = blurUpdateMap[cell];
+      if (blurred !== undefined) fr = blurred;
     }
 
     state._frictionObj[cell] = fr;

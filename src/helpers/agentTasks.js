@@ -505,16 +505,6 @@ function _cornersImpassable(_curr, a, b, frictionLookup, cellState) {
 // Returns true if the straight H3 line from `curr` to `n` would cut across an
 // impassable cell at any diagonal transition. Used to reject `nextStep`
 // candidates the agent cannot actually reach without jumping a building corner.
-function _lineCornerCuts(curr, n, frictionLookup, cellState, neighborDisks) {
-  const line = _getCachedPathCells(curr, n);
-  for (let i = 1; i < line.length; i++) {
-    if (gridDistance(line[i - 1], line[i]) > 1) {
-      if (_cornersImpassable(curr, line[i - 1], line[i], frictionLookup, cellState)) return true;
-    }
-  }
-  return false;
-}
-
 function estimateMaxTicks(origin, dest, hexCount) {
   const dist = gridDistance(origin, dest);
   const pathBudget = Math.max(64, dist * SIM_TICK_BUFFER + 32);
