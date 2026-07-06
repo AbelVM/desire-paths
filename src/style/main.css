@@ -772,33 +772,6 @@ html {
   margin-top: 10px;
 }
 
-.btn-segment:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-segment.is-active[data-placement-mode='origin'] {
-  background: var(--origin-soft);
-  color: var(--origin-text);
-  border-color: var(--origin-border);
-}
-
-.btn-segment.is-active[data-placement-mode='destination'] {
-  background: rgba(255, 124, 140, 0.12);
-  color: #ff7c8c;
-  border-color: rgba(255, 124, 140, 0.28);
-}
-
-.btn-segment.is-active[data-placement-mode='dual'] {
-  background: rgba(246, 200, 95, 0.18);
-  color: #ffe9b4;
-  border-color: rgba(246, 200, 95, 0.3);
-}
-
-.btn-wide {
-  width: 100%;
-  margin-top: 10px;
-}
-
 /* ── Weight control (mt-router landing style) ──────────── */
 
 .weight-control {

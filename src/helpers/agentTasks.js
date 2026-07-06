@@ -73,11 +73,13 @@ function getBearingFast(a, b, bearingMap) {
   return _bearingFromLatLngs(s, e);
 }
 
+// Bearing between two cells, given their precomputed [lat, lng, latRad, lngRad]
+// lat/lng arrays (as returned by _getCachedLatLng). Assumes radians are present.
 function _bearingFromLatLngs(s, e) {
-  const lat1 = s[2] !== undefined ? s[2] : (s[0] * Math.PI) / 180;
-  const lon1 = s[3] !== undefined ? s[3] : (s[1] * Math.PI) / 180;
-  const lat2 = e[2] !== undefined ? e[2] : (e[0] * Math.PI) / 180;
-  const lon2 = e[3] !== undefined ? e[3] : (e[1] * Math.PI) / 180;
+  const lat1 = s[2];
+  const lon1 = s[3];
+  const lat2 = e[2];
+  const lon2 = e[3];
   let y = Math.sin(lon2 - lon1) * Math.cos(lat2);
   let x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;

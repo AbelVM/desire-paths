@@ -81,11 +81,13 @@ function buildCellStateEntry(
   };
 }
 
+// Bearing between two cells, given their precomputed [lat, lng, latRad, lngRad]
+// lat/lng arrays (as returned by _getCachedLatLng). Assumes radians are present.
 function _bearingFromLatLngs(s, e) {
-  const lat1 = s[2] !== undefined ? s[2] : (s[0] * Math.PI) / 180;
-  const lon1 = s[3] !== undefined ? s[3] : (s[1] * Math.PI) / 180;
-  const lat2 = e[2] !== undefined ? e[2] : (e[0] * Math.PI) / 180;
-  const lon2 = e[3] !== undefined ? e[3] : (e[1] * Math.PI) / 180;
+  const lat1 = s[2];
+  const lon1 = s[3];
+  const lat2 = e[2];
+  const lon2 = e[3];
   let y = Math.sin(lon2 - lon1) * Math.cos(lat2);
   let x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
@@ -134,27 +136,32 @@ function _getCachedPathCells(ctx, a, b) {
     ctx._computePathCacheHits = 0;
     ctx._computePathCacheMisses = 0;
   }
-  let inner = ctx._computePathCacheObj[a];
+  // Normalize the key so bidirectional pairs (a,b) and (b,a) share one entry,
+  // since gridPathCells(a, b) === gridPathCells(b, a) as an unordered cell list.
+  const reversed = a > b;
+  const ka = reversed ? b : a;
+  const kb = reversed ? a : b;
+  let inner = ctx._computePathCacheObj[ka];
   if (inner) {
-    const hit = inner[b];
+    const hit = inner[kb];
     if (hit) {
       ctx._computePathCacheHits++;
-      return hit;
+      return reversed ? hit.slice().reverse() : hit;
     }
   }
-  const arr = gridPathCells(a, b);
+  const arr = gridPathCells(ka, kb);
   if (!inner) {
     inner = Object.create(null);
-    ctx._computePathCacheObj[a] = inner;
-    ctx._computePathCacheOrder.push(a);
+    ctx._computePathCacheObj[ka] = inner;
+    ctx._computePathCacheOrder.push(ka);
   }
-  inner[b] = arr;
+  inner[kb] = arr;
   ctx._computePathCacheMisses++;
   if (ctx._computePathCacheOrder.length > COMPUTE_PATH_CACHE_MAX) {
     const old = ctx._computePathCacheOrder.shift();
     delete ctx._computePathCacheObj[old];
   }
-  return arr;
+  return reversed ? arr.slice().reverse() : arr;
 }
 
 function _getCachedDisk(ctx, center, r) {
