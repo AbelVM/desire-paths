@@ -151,6 +151,11 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     }
     return result;
   }),
+  runVisibilityBearingTask: vi.fn(async (frictionSource, viewHexes, visionDepth) => {
+    // Mock visibility/bearing precompute — returns an empty CSR payload so the
+    // mapping stage reconstructs empty structures without exercising the real BFS.
+    return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
+  }),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────

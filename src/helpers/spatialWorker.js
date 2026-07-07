@@ -3,6 +3,7 @@ import {
   computeFastScanSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
+  computeVisibilityBearingCSR,
   normalizeFrictionEntries,
   computeAoiHexes,
 } from './spatialTasks.js';
@@ -269,6 +270,7 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
+  if (kind === 'visibility-bearing') return computeVisibilityBearingCSR(payload);
   if (kind === 'aoi-hexes')
     return computeAoiHexes(payload?.polygon || null, payload?.resolution);
   throw new Error(`Unknown spatial task: ${kind}`);
@@ -727,6 +729,37 @@ export async function runImpassableBlurTask(frictionSource, options = {}) {
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
   return runWorker('impassable-blur', { frictionEntries, ...options });
+}
+
+/**
+ * Compute visibility sets + bearing map off the main thread.
+ *
+ * The heavy BFS flood-fill + bearing trig runs in a worker. The result is
+ * serialized to flat CSR typed arrays (see `computeVisibilityBearingCSR`) and
+ * transferred via a SharedArrayBuffer (zero-copy when cross-origin isolated) or
+ * an ArrayBuffer (memcpy). The large bearing Map is NEVER structured-cloned
+ * across the boundary — that clone is what previously triggered SIGILL. The
+ * main thread reconstructs the plain-object visibility map and the bearing Map
+ * in-process from the buffer, keeping the simulation's consumers untouched.
+ *
+ * Returns `{ buffer, N, P, offsetsBytes, neighborsBytes }` (or an empty shape
+ * when there are no cells). `buffer` is `null` for the empty case.
+ */
+export async function runVisibilityBearingTask(frictionSource, viewHexes, visionDepth) {
+  if (!viewHexes || viewHexes.length === 0) {
+    return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
+  }
+
+  const frictionEntries =
+    frictionSource && typeof frictionSource.entries !== 'function'
+      ? frictionSource
+      : normalizeFrictionEntries(frictionSource);
+
+  // Single worker: visibility CSR offsets are only consistent when computed in
+  // one pass over the full origin set. (Sharding would require a two-phase
+  // count+fill protocol to lay out global offsets; deferred — the off-thread
+  // compute is the dominant responsiveness win.)
+  return runWorker('visibility-bearing', { frictionEntries, viewHexes, visionDepth });
 }
 
 /**

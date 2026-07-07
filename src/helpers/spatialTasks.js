@@ -9,6 +9,11 @@ import {
   POLY_CELLS_CACHE_MAX,
 } from './constants.js';
 import { computeDijkstra } from './dijkstra.js';
+// Visibility/bearing precomputes are shared with the main-thread simulation code
+// (compute.js). Importing them here lets the mapping stage run them off the main
+// thread. All usages are function-level, so the compute.js <-> spatialWorker.js
+// module graph stays safe (verified by build + tests).
+import { precomputeVisibilitySets, precomputeBearingMap } from './compute.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
@@ -422,4 +427,106 @@ export function computeImpassableBlurSnapshot({
   }
 
   return { blurWeights, updates };
+}
+
+/**
+ * Allocate a buffer for cross-worker transfer of the visibility/bearing result.
+ *
+ * Uses a SharedArrayBuffer when the page is cross-origin isolated (COOP/COEP,
+ * which this app enables via coi-serviceworker.js) so the buffer is *shared*
+ * with the main thread — zero-copy, no structured clone. Falls back to a plain
+ * ArrayBuffer (cloned by memcpy) when SAB is unavailable. Either way the large
+ * bearing Map is NEVER structured-cloned across the boundary, which is what
+ * previously triggered SIGILL in this app.
+ */
+function allocTransferBuffer(byteLength) {
+  if (
+    typeof SharedArrayBuffer !== 'undefined' &&
+    typeof globalThis !== 'undefined' &&
+    globalThis.crossOriginIsolated === true
+  ) {
+    return new SharedArrayBuffer(byteLength);
+  }
+  return new ArrayBuffer(byteLength);
+}
+
+/**
+ * Compute visibility sets + bearing map for a (shard of) origin cells and
+ * serialize the result to a flat CSR (compressed sparse row) layout backed by a
+ * single transferable buffer:
+ *
+ *   [ visOffsets: Int32Array(N+1) ][ visNeighbors: Int32Array(P) ][ bearings: Float32Array(P) ]
+ *
+ * where P is the total number of (origin, visible-neighbor) pairs. Cells are
+ * referenced by integer index into `viewHexes` (0..N-1), so no string H3 IDs or
+ * Maps live in the buffer. The main thread reconstructs the plain-object
+ * visibility map and the bearing Map in-process from this buffer.
+ *
+ * `viewHexes` is the FULL AOI cell list (needed for AOI membership / passability
+ * and for the index→cellId mapping); `originCells` is the shard of origins this
+ * call is responsible for (defaults to all of `viewHexes`).
+ */
+export function computeVisibilityBearingCSR({
+  frictionEntries,
+  viewHexes = [],
+  visionDepth = SIMULATION_PARAMS.visionDepth,
+  originCells,
+} = {}) {
+  const frictionLookup = normalizeFrictionEntries(frictionEntries);
+  const N = viewHexes.length;
+  const origins = originCells && originCells.length ? originCells : viewHexes;
+
+  const visibilityData = precomputeVisibilitySets(
+    frictionLookup,
+    viewHexes,
+    visionDepth,
+    undefined,
+    origins
+  );
+  const bearingMap = precomputeBearingMap(origins, visibilityData, frictionLookup);
+
+  // cellId -> integer index
+  const idxOf = Object.create(null);
+  for (let i = 0; i < N; i++) idxOf[viewHexes[i]] = i;
+
+  // Pass 1: prefix-sum of pair counts → visOffsets (length N+1)
+  const visOffsets = new Int32Array(N + 1);
+  let P = 0;
+  for (let i = 0; i < N; i++) {
+    const visible = visibilityData[viewHexes[i]];
+    const cnt = visible ? Object.keys(visible).length : 0;
+    visOffsets[i] = P;
+    P += cnt;
+  }
+  visOffsets[N] = P;
+
+  // Pass 2: fill neighbor indices + bearings
+  const visNeighbors = new Int32Array(P);
+  const bearings = new Float32Array(P);
+  for (let i = 0; i < N; i++) {
+    const cell = viewHexes[i];
+    const visible = visibilityData[cell];
+    if (!visible) continue;
+    const start = visOffsets[i];
+    let k = 0;
+    for (const n in visible) {
+      const p = start + k;
+      visNeighbors[p] = idxOf[n];
+      const b = bearingMap.get(cell + '::' + n);
+      bearings[p] = typeof b === 'number' ? b : 0;
+      k++;
+    }
+  }
+
+  // Pack into one transferable buffer (SAB when isolated, else ArrayBuffer)
+  const offsetsBytes = (N + 1) * 4;
+  const neighborsBytes = P * 4;
+  const bearingsBytes = P * 4;
+  const totalBytes = offsetsBytes + neighborsBytes + bearingsBytes;
+  const buffer = allocTransferBuffer(totalBytes);
+  new Int32Array(buffer, 0, N + 1).set(visOffsets);
+  new Int32Array(buffer, offsetsBytes, P).set(visNeighbors);
+  new Float32Array(buffer, offsetsBytes + neighborsBytes, P).set(bearings);
+
+  return { buffer, N, P, offsetsBytes, neighborsBytes };
 }

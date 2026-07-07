@@ -4,6 +4,7 @@ import {
   computeFastScanSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
+  computeVisibilityBearingCSR,
 } from '../helpers/spatialTasks.js';
 import { handleAgentBatch } from './agent.worker.js';
 
@@ -47,6 +48,8 @@ self.onmessage = (event) => {
       return;
     } else if (data.kind === 'impassable-blur') {
       result = computeImpassableBlurSnapshot(data.payload || {});
+    } else if (data.kind === 'visibility-bearing') {
+      result = computeVisibilityBearingCSR(data.payload || {});
     } else if (data.kind === 'aoi-hexes') {
       result = computeAoiHexes(data.payload?.polygon || null, data.payload?.resolution);
     } else {

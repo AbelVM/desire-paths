@@ -7,12 +7,10 @@ import {
   POLY_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
-import { runFastScanTask, runAoiHexesTask } from './spatialWorker.js';
+import { runFastScanTask, runAoiHexesTask, runVisibilityBearingTask } from './spatialWorker.js';
 import {
   clearComputeCaches,
   buildCellStateEntry,
-  precomputeVisibilitySets,
-  precomputeBearingMap,
 } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
@@ -242,24 +240,19 @@ export async function triggerFastScan(state, mapInstance) {
 
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
 
-  // Precompute visibility sets (BFS flood-fill). This is the heaviest remaining
-  // main-thread step; it is intentionally computed before bearings so the bearing
-  // map can be restricted to visible pairs only (see below).
-  const visibilityData = precomputeVisibilitySets(
-    state._frictionObj,
-    viewHexes,
-    visionDepth
-  );
-  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
-
-  // Precompute bearings between visible cell pairs only, to eliminate per-tick trig
-  // calls without paying for bearings that are never queried (agents only ever look
-  // up bearings for visible neighbors). Skip impassable cells (agents never stand on
-  // them) to keep the map small — it is structured-cloned into every agent worker,
-  // so size drives memory pressure / SIGILL.
+  // Compute visibility sets (BFS flood-fill) and the bearing map between visible
+  // cell pairs OFF the main thread. The worker serializes the result to flat CSR
+  // typed arrays (no Map) and transfers them via a SharedArrayBuffer (zero-copy
+  // when cross-origin isolated) or an ArrayBuffer (memcpy). The large bearing Map
+  // is NEVER structured-cloned across the worker boundary — that clone is what
+  // previously triggered SIGILL. We rebuild the plain-object visibility map and
+  // the bearing Map IN-PROCESS on the main thread (safe: no cross-boundary clone),
+  // so the simulation's consumers are untouched.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
   // lazily and cached during the simulation via getNeighborDisk (see compute.js).
-  const bearingMap = precomputeBearingMap(viewHexes, visibilityData, state._frictionObj);
+  const csr = await runVisibilityBearingTask(state._frictionObj, viewHexes, visionDepth);
+  const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
+  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();
@@ -330,4 +323,40 @@ function mapCells(frictionMap, cells, surface) {
     if (!val) continue; // outside AOI
     if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) val[layerKey] = layerVal;
   }
+}
+
+/**
+ * Rebuild the plain-object visibility map and the bearing Map from the flat CSR
+ * buffer produced by `computeVisibilityBearingCSR`. This runs IN-PROCESS on the
+ * main thread: it constructs the structures directly (no cross-worker structured
+ * clone of a Map), so it cannot trigger the SIGILL that cloning a large Map does.
+ *
+ * `viewHexes` supplies the integer-index → H3 cellId mapping used to turn the
+ * CSR's integer neighbor indices back into the string keys the simulation expects.
+ */
+function reconstructVisibilityBearing(csr, viewHexes) {
+  const { buffer, N, P, offsetsBytes, neighborsBytes } = csr;
+  if (!buffer || N === 0) {
+    return { visibilityData: Object.create(null), bearingMap: new Map() };
+  }
+  const visOffsets = new Int32Array(buffer, 0, N + 1);
+  const visNeighbors = new Int32Array(buffer, offsetsBytes, P);
+  const bearings = new Float32Array(buffer, offsetsBytes + neighborsBytes, P);
+
+  const visibilityData = Object.create(null);
+  const bearingMap = new Map();
+  for (let i = 0; i < N; i++) {
+    const origin = viewHexes[i];
+    const start = visOffsets[i];
+    const end = visOffsets[i + 1];
+    if (end <= start) continue;
+    const visObj = Object.create(null);
+    for (let p = start; p < end; p++) {
+      const neighbor = viewHexes[visNeighbors[p]];
+      visObj[neighbor] = true;
+      bearingMap.set(origin + '::' + neighbor, bearings[p]);
+    }
+    visibilityData[origin] = visObj;
+  }
+  return { visibilityData, bearingMap };
 }
