@@ -156,6 +156,37 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     // mapping stage reconstructs empty structures without exercising the real BFS.
     return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
   }),
+  runMergeCellsTask: vi.fn(async ({ cells, multiEntries, cellFrictionEntries, blurUpdateMap, blurWeights }) => {
+    // Mock per-cell assembly: replicate the essential mapping (friction from
+    // cellFrictionEntries / multiEntries min, affordance classification) so the
+    // mapping stage populates state without exercising the real worker compute.
+    const frictionArr = new Float64Array(cells.length);
+    const affArr = new Float64Array(cells.length);
+    const multiArr = new Array(cells.length);
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      const layerMap = multiEntries[cell];
+      let fr = 0;
+      if (layerMap) {
+        let min = Infinity;
+        for (const k in layerMap) if (layerMap[k] < min) min = layerMap[k];
+        fr = min;
+      } else {
+        fr = cellFrictionEntries[cell] ?? 0;
+      }
+      if (blurUpdateMap && blurUpdateMap[cell] !== undefined) fr = blurUpdateMap[cell];
+      let aff = 1;
+      if (fr >= 999999) aff = 0.1;
+      else if (fr < 1.5) aff = 1;
+      else if (fr < 3) aff = 2.5;
+      else aff = 4;
+      if (blurWeights && blurWeights[cell] != null) aff = Math.max(0, aff - Math.min(aff, blurWeights[cell] * 0.4));
+      frictionArr[i] = fr;
+      affArr[i] = aff;
+      multiArr[i] = layerMap || Object.create(null);
+    }
+    return { cells, frictionArr, affArr, multiArr };
+  }),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────

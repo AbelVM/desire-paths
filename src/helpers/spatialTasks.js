@@ -2,9 +2,11 @@ import { gridDisk, polygonToCells } from 'h3-js';
 import {
   FRICTION_COSTS,
   SIMULATION_PARAMS,
+  AFFORDANCE,
   IMPASSABLE_BLUR_RADIUS,
   IMPASSABLE_BLUR_SIGMA,
   IMPASSABLE_BLUR_FRICTION_ADD,
+  IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
   getSurface,
   POLY_CELLS_CACHE_MAX,
 } from './constants.js';
@@ -508,4 +510,93 @@ export function computeVisibilityBearingCSR({
   }
 
   return { N, P, localOffsets, visNeighbors, bearings, globalIdx };
+}
+
+/**
+ * Per-cell mapping assembly for a shard of cells (runs in a worker).
+ *
+ * Mirrors the body of the old single-threaded merge loop in `triggerFastScan`:
+ * for each cell it merges its multi-friction layer map, computes the effective
+ * friction (min across layers, or the fast-scan fallback), applies the
+ * impassable-blur friction update, classifies affordance (with the blur-weight
+ * penalty), and produces the merged layer map. Cells are independent, so this
+ * is embarrassingly parallel — the orchestrator shards `viewHexes` and merges
+ * the results. Returns flat typed arrays + per-cell layer maps so the main
+ * thread only does O(N) assignments (no min-reduction / classification / object
+ * construction on the UI thread).
+ *
+ * @param cells            subset of viewHexes this shard owns
+ * @param multiEntries     { cell: layerMap } for these cells (merged layers)
+ * @param cellFrictionEntries { cell: number } fast-scan fallback friction
+ * @param blurUpdateMap    { cell: number } | null  blur friction overrides
+ * @param blurWeights      { cell: number } | null  blur affordance penalties
+ */
+export function mergeCellsChunk({
+  cells = [],
+  multiEntries = Object.create(null),
+  cellFrictionEntries = Object.create(null),
+  blurUpdateMap = null,
+  blurWeights = null,
+} = {}) {
+  const n = cells.length;
+  const frictionArr = new Float64Array(n);
+  const affArr = new Float64Array(n);
+  const multiArr = new Array(n);
+
+  const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
+  const pavement = AFFORDANCE.PAVEMENT;
+  const lightPark = AFFORDANCE.LIGHT_PARK;
+  const heavyGrass = AFFORDANCE.HEAVY_GRASS;
+  const impassable = AFFORDANCE.IMPASSABLE;
+  const p = FRICTION_COSTS.PAVEMENT;
+  const l = FRICTION_COSTS.LIGHT_PARK;
+  const hg = FRICTION_COSTS.HEAVY_GRASS;
+  const midPL = (p + l) / 2;
+  const midLH = (l + hg) / 2;
+
+  for (let i = 0; i < n; i++) {
+    const cell = cells[i];
+    const layerMap = multiEntries[cell];
+
+    // Merge multi-friction layers (max-keeping) into a fresh map.
+    let target = null;
+    let fr = 0;
+    if (layerMap) {
+      target = Object.create(null);
+      let min = Infinity;
+      for (const k in layerMap) {
+        const v = layerMap[k];
+        target[k] = v;
+        if (v < min) min = v;
+      }
+      fr = min;
+    } else {
+      fr = cellFrictionEntries[cell] ?? 0;
+    }
+
+    // Apply the impassable blur friction override (nudge routing around obstacles).
+    if (blurUpdateMap) {
+      const blurred = blurUpdateMap[cell];
+      if (blurred !== undefined) fr = blurred;
+    }
+
+    // Affordance classification.
+    let aff;
+    if (fr >= impassable) aff = impassable;
+    else if (fr < midPL) aff = pavement;
+    else if (fr < midLH) aff = lightPark;
+    else aff = heavyGrass;
+
+    // Apply the blur affordance penalty (cells adjacent to buildings wear faster).
+    if (blurWeights) {
+      const weight = blurWeights[cell];
+      if (weight != null) aff = Math.max(0.0, aff - Math.min(aff, weight * penalty));
+    }
+
+    frictionArr[i] = fr;
+    affArr[i] = aff;
+    multiArr[i] = target || Object.create(null);
+  }
+
+  return { cells, frictionArr, affArr, multiArr };
 }

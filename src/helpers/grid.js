@@ -1,13 +1,11 @@
 import { polygonToCells, latLngToCell, gridPathCells } from 'h3-js';
 import {
   FRICTION_COSTS,
-  AFFORDANCE,
-  IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
   PATH_CACHE_MAX,
   POLY_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
-import { runFastScanTask, runAoiHexesTask, runVisibilityBearingTask } from './spatialWorker.js';
+import { runFastScanTask, runAoiHexesTask, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
 import {
   clearComputeCaches,
   buildCellStateEntry,
@@ -161,16 +159,6 @@ export async function triggerFastScan(state, mapInstance) {
       blurUpdateMap[blurUpdates[u][0]] = blurUpdates[u][1];
     }
   }
-  const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
-  const pavement = AFFORDANCE.PAVEMENT;
-  const lightPark = AFFORDANCE.LIGHT_PARK;
-  const heavyGrass = AFFORDANCE.HEAVY_GRASS;
-  const impassable = AFFORDANCE.IMPASSABLE;
-  const p = FRICTION_COSTS.PAVEMENT;
-  const l = FRICTION_COSTS.LIGHT_PARK;
-  const hg = FRICTION_COSTS.HEAVY_GRASS;
-  const midPL = (p + l) / 2;
-  const midLH = (l + hg) / 2;
 
   state._frictionObj = Object.create(null);
   state._multiFrictionObj = Object.create(null);
@@ -179,63 +167,30 @@ export async function triggerFastScan(state, mapInstance) {
   state._cellState = Object.create(null);
   state._cellStateMappingGen = state._mappingGeneration;
 
-  for (let i = 0, vlen = viewHexes.length; i < vlen; i++) {
-    const cell = viewHexes[i];
-    // Merge multi-friction layer values into the map entry
-    const target = state.multiFrictionMap.get(cell);
-    if (target) {
-      const layerMap = multiEntries[cell];
-      if (layerMap) {
-        const lk = Object.keys(layerMap);
-        for (let l2 = 0; l2 < lk.length; l2++) target[lk[l2]] = layerMap[lk[l2]];
-      }
-    }
-
-    // Effective friction: min across all layers, or 0 if no data
-    let fr = 0;
-    if (target) {
-      const keys = Object.keys(target);
-      if (keys.length > 0) {
-        let min = Infinity;
-        for (let k = 0; k < keys.length; k++) {
-          const v = target[keys[k]];
-          if (v < min) min = v;
-        }
-        fr = min;
-      }
-    } else {
-      // Fallback: look up from build result directly
-      fr = build.cellFrictionEntries?.[cell] ?? 0;
-    }
-
-    // Apply the impassable blur: cells adjacent to buildings get extra friction
-    // so agents are nudged to route *around* the obstacle rather than hugging
-    // its edge. Without this, the blur only touched affordance (too weakly to
-    // affect routing) and the friction penalty was computed but never applied.
-    if (blurUpdateMap) {
-      const blurred = blurUpdateMap[cell];
-      if (blurred !== undefined) fr = blurred;
-    }
-
+  // Assemble per-cell mapping state (friction, affordance, multi-friction layers)
+  // in a worker pool, sharded by cell. The heavy per-cell work (layer merge,
+  // min-friction, affordance classification, blur application) runs off the main
+  // thread in parallel; we only write the results into `state` here (O(N) assigns).
+  const merged = await runMergeCellsTask({
+    cells: viewHexes,
+    multiEntries,
+    cellFrictionEntries: build.cellFrictionEntries,
+    blurUpdateMap,
+    blurWeights,
+  });
+  for (let i = 0; i < merged.cells.length; i++) {
+    const cell = merged.cells[i];
+    const fr = merged.frictionArr[i];
+    const aff = merged.affArr[i];
+    const target = merged.multiArr[i];
     state._frictionObj[cell] = fr;
     state.cellFrictionMap.set(cell, fr);
-    state._multiFrictionObj[cell] = target || Object.create(null);
-
-    // Affordance classification
-    let aff;
-    if (fr >= FRICTION_COSTS.IMPASSABLE) aff = impassable;
-    else if (fr < midPL) aff = pavement;
-    else if (fr < midLH) aff = lightPark;
-    else aff = heavyGrass;
-
-    const weight = blurWeights[cell];
-    if (weight != null) {
-      aff = Math.max(0.0, aff - Math.min(aff, weight * penalty));
-    }
-
+    state._multiFrictionObj[cell] = target;
+    // Keep multiFrictionMap consistent with _multiFrictionObj (same reference).
+    state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
     state._affordanceObj[cell] = aff;
-    state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target || null, null, cell);
+    state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target, null, cell);
   }
 
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;

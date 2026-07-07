@@ -4,6 +4,7 @@ import {
   computeGradientBatch,
   computeImpassableBlurSnapshot,
   computeVisibilityBearingCSR,
+  mergeCellsChunk,
   normalizeFrictionEntries,
   computeAoiHexes,
 } from './spatialTasks.js';
@@ -271,6 +272,7 @@ function runLocally(kind, payload) {
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
   if (kind === 'visibility-bearing') return computeVisibilityBearingCSR(payload);
+  if (kind === 'merge-cells') return mergeCellsChunk(payload);
   if (kind === 'aoi-hexes')
     return computeAoiHexes(payload?.polygon || null, payload?.resolution);
   throw new Error(`Unknown spatial task: ${kind}`);
@@ -851,6 +853,76 @@ export async function runVisibilityBearingTask(frictionSource, viewHexes, vision
 
   const merged = mergeVisibilityBearingShards(shards, viewHexes.length);
   return packCSR(merged.visOffsets, merged.visNeighbors, merged.bearings, merged.N, merged.P);
+}
+
+/**
+ * Assemble per-cell mapping state (friction, affordance, multi-friction layers)
+ * off the main thread, sharded across the worker pool by cell.
+ *
+ * Each shard runs `mergeCellsChunk` (layer merge, min-friction, affordance
+ * classification, blur application) for its cells and returns flat typed
+ * arrays + per-cell layer maps. The orchestrator merges the shards and returns
+ * a single concatenated result; the caller only does O(N) assignments into
+ * `state` (no min-reduction / classification / object construction on the UI
+ * thread). Falls back to a single local compute when only one worker is available.
+ *
+ * @returns { cells, frictionArr: Float64Array, affArr: Float64Array, multiArr: Array }
+ *          indexed in cell order; `multiArr[i]` is the merged layer map (or empty).
+ */
+export async function runMergeCellsTask({
+  cells,
+  multiEntries,
+  cellFrictionEntries,
+  blurUpdateMap,
+  blurWeights,
+}) {
+  if (!cells || cells.length === 0) {
+    return { cells: [], frictionArr: new Float64Array(0), affArr: new Float64Array(0), multiArr: [] };
+  }
+
+  const workerCount = Math.min(MAX_WORKERS, cells.length);
+  if (workerCount <= 1) {
+    return mergeCellsChunk({ cells, multiEntries, cellFrictionEntries, blurUpdateMap, blurWeights });
+  }
+
+  // Build per-chunk subsets so each worker only receives its own cells' data
+  // (keeps the cross-boundary payload small instead of cloning the full maps N×).
+  const chunks = splitIntoChunks(cells, workerCount);
+  const payloads = chunks.map((chunk) => {
+    const me = Object.create(null);
+    const cf = Object.create(null);
+    const bu = blurUpdateMap ? Object.create(null) : null;
+    const bw = blurWeights ? Object.create(null) : null;
+    for (let i = 0; i < chunk.length; i++) {
+      const c = chunk[i];
+      if (multiEntries[c] !== undefined) me[c] = multiEntries[c];
+      if (cellFrictionEntries[c] !== undefined) cf[c] = cellFrictionEntries[c];
+      if (bu && blurUpdateMap[c] !== undefined) bu[c] = blurUpdateMap[c];
+      if (bw && blurWeights[c] !== undefined) bw[c] = blurWeights[c];
+    }
+    return { cells: chunk, multiEntries: me, cellFrictionEntries: cf, blurUpdateMap: bu, blurWeights: bw };
+  });
+
+  const results = await Promise.all(payloads.map((p) => runWorker('merge-cells', p)));
+
+  let total = 0;
+  for (let r = 0; r < results.length; r++) total += results[r].cells.length;
+  const outCells = new Array(total);
+  const outFr = new Float64Array(total);
+  const outAff = new Float64Array(total);
+  const outMulti = new Array(total);
+  let o = 0;
+  for (let r = 0; r < results.length; r++) {
+    const res = results[r];
+    for (let i = 0; i < res.cells.length; i++) {
+      outCells[o] = res.cells[i];
+      outFr[o] = res.frictionArr[i];
+      outAff[o] = res.affArr[i];
+      outMulti[o] = res.multiArr[i];
+      o++;
+    }
+  }
+  return { cells: outCells, frictionArr: outFr, affArr: outAff, multiArr: outMulti };
 }
 
 /**
