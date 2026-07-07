@@ -732,15 +732,95 @@ export async function runImpassableBlurTask(frictionSource, options = {}) {
 }
 
 /**
- * Compute visibility sets + bearing map off the main thread.
+ * Allocate a buffer for cross-worker transfer of the visibility/bearing result.
  *
- * The heavy BFS flood-fill + bearing trig runs in a worker. The result is
- * serialized to flat CSR typed arrays (see `computeVisibilityBearingCSR`) and
- * transferred via a SharedArrayBuffer (zero-copy when cross-origin isolated) or
- * an ArrayBuffer (memcpy). The large bearing Map is NEVER structured-cloned
- * across the boundary — that clone is what previously triggered SIGILL. The
- * main thread reconstructs the plain-object visibility map and the bearing Map
- * in-process from the buffer, keeping the simulation's consumers untouched.
+ * Uses a SharedArrayBuffer when the page is cross-origin isolated (COOP/COEP,
+ * which this app enables via coi-serviceworker.js) so the buffer is *shared*
+ * with the main thread — zero-copy, no structured clone. Falls back to a plain
+ * ArrayBuffer (cloned by memcpy) when SAB is unavailable. Either way the large
+ * bearing Map is NEVER structured-cloned across the boundary, which is what
+ * previously triggered SIGILL in this app.
+ */
+function allocTransferBuffer(byteLength) {
+  if (
+    typeof SharedArrayBuffer !== 'undefined' &&
+    typeof globalThis !== 'undefined' &&
+    globalThis.crossOriginIsolated === true
+  ) {
+    return new SharedArrayBuffer(byteLength);
+  }
+  return new ArrayBuffer(byteLength);
+}
+
+/** Pack CSR components into one transferable buffer (SAB when isolated, else AB). */
+function packCSR(visOffsets, visNeighbors, bearings, N, P) {
+  const offsetsBytes = (N + 1) * 4;
+  const neighborsBytes = P * 4;
+  const bearingsBytes = P * 4;
+  const totalBytes = offsetsBytes + neighborsBytes + bearingsBytes;
+  const buffer = allocTransferBuffer(totalBytes);
+  new Int32Array(buffer, 0, N + 1).set(visOffsets);
+  new Int32Array(buffer, offsetsBytes, P).set(visNeighbors);
+  new Float32Array(buffer, offsetsBytes + neighborsBytes, P).set(bearings);
+  return { buffer, N, P, offsetsBytes, neighborsBytes };
+}
+
+/**
+ * Merge per-shard CSR results into a single CSR over the full origin set.
+ * Shards own disjoint origins (globalIdx), so rows never collide; we just lay
+ * out global offsets via a prefix-sum of per-origin pair counts and copy each
+ * shard's neighbor/bearing slices into place. O(N + P) array copies — cheap
+ * next to the parallel BFS that produced the shards.
+ */
+function mergeVisibilityBearingShards(shards, N) {
+  let PTotal = 0;
+  for (let s = 0; s < shards.length; s++) PTotal += shards[s].P;
+
+  const counts = new Int32Array(N);
+  for (let s = 0; s < shards.length; s++) {
+    const shard = shards[s];
+    const M = shard.globalIdx.length;
+    for (let j = 0; j < M; j++) {
+      const gi = shard.globalIdx[j];
+      counts[gi] = shard.localOffsets[j + 1] - shard.localOffsets[j];
+    }
+  }
+
+  const visOffsets = new Int32Array(N + 1);
+  let acc = 0;
+  for (let i = 0; i < N; i++) {
+    visOffsets[i] = acc;
+    acc += counts[i];
+  }
+  visOffsets[N] = acc;
+
+  const visNeighbors = new Int32Array(PTotal);
+  const bearings = new Float32Array(PTotal);
+  for (let s = 0; s < shards.length; s++) {
+    const shard = shards[s];
+    const M = shard.globalIdx.length;
+    for (let j = 0; j < M; j++) {
+      const gi = shard.globalIdx[j];
+      const srcStart = shard.localOffsets[j];
+      const srcEnd = shard.localOffsets[j + 1];
+      const dstStart = visOffsets[gi];
+      visNeighbors.set(shard.visNeighbors.subarray(srcStart, srcEnd), dstStart);
+      bearings.set(shard.bearings.subarray(srcStart, srcEnd), dstStart);
+    }
+  }
+  return { visOffsets, visNeighbors, bearings, N, P: PTotal };
+}
+
+/**
+ * Compute visibility sets + bearing map off the main thread, sharded across the
+ * worker pool by origin cell so the expensive BFS flood-fill runs in parallel.
+ *
+ * Each shard computes visibility/bearing for its origin subset (over the full
+ * AOI for membership) and returns a CSR. Shards are merged on the main thread
+ * (disjoint origins → no conflicts) and packed into one transferable buffer.
+ * The heavy BFS + bearing trig never runs on the UI thread; the only main-thread
+ * work is the O(N + P) merge + the in-process rebuild of the object/Map (no
+ * cross-boundary Map clone → no SIGILL). The simulation's consumers are untouched.
  *
  * Returns `{ buffer, N, P, offsetsBytes, neighborsBytes }` (or an empty shape
  * when there are no cells). `buffer` is `null` for the empty case.
@@ -755,11 +835,22 @@ export async function runVisibilityBearingTask(frictionSource, viewHexes, vision
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
 
-  // Single worker: visibility CSR offsets are only consistent when computed in
-  // one pass over the full origin set. (Sharding would require a two-phase
-  // count+fill protocol to lay out global offsets; deferred — the off-thread
-  // compute is the dominant responsiveness win.)
-  return runWorker('visibility-bearing', { frictionEntries, viewHexes, visionDepth });
+  const workerCount = Math.min(MAX_WORKERS, viewHexes.length);
+  if (workerCount <= 1) {
+    const shard = computeVisibilityBearingCSR({ frictionEntries, viewHexes, visionDepth });
+    return packCSR(shard.localOffsets, shard.visNeighbors, shard.bearings, shard.N, shard.P);
+  }
+
+  // Shard by origin cell and run the BFS in parallel across the pool.
+  const chunks = splitIntoChunks(viewHexes, workerCount);
+  const shards = await Promise.all(
+    chunks.map((originCells) =>
+      runWorker('visibility-bearing', { frictionEntries, viewHexes, visionDepth, originCells })
+    )
+  );
+
+  const merged = mergeVisibilityBearingShards(shards, viewHexes.length);
+  return packCSR(merged.visOffsets, merged.visNeighbors, merged.bearings, merged.N, merged.P);
 }
 
 /**
