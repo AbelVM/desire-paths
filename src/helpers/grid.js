@@ -13,7 +13,6 @@ import {
   clearComputeCaches,
   buildCellStateEntry,
   precomputeVisibilitySets,
-  precomputeNeighborDisks,
   precomputeBearingMap,
 } from './compute.js';
 
@@ -240,24 +239,24 @@ export async function triggerFastScan(state, mapInstance) {
 
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
 
-  // Precompute neighbor disks for all AOI cells to avoid millions of redundant gridDisk calls
-  const neighborDisks = precomputeNeighborDisks(viewHexes, visionDepth);
-  state._precomputedNeighborDisks = { gen: state._mappingGeneration, data: neighborDisks };
-
-  // Precompute visibility sets using shared neighbor disks (avoids redundant gridDisk calls)
+  // Precompute visibility sets (BFS flood-fill). This is the heaviest remaining
+  // main-thread step; it is intentionally computed before bearings so the bearing
+  // map can be restricted to visible pairs only (see below).
   const visibilityData = precomputeVisibilitySets(
     state._frictionObj,
     viewHexes,
-    visionDepth,
-    neighborDisks
+    visionDepth
   );
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
 
-  // Precompute bearings between all cell pairs within VISUAL_DEPTH to eliminate per-tick trig calls
-  // OPTIMIZATION: Pass neighborDisks to avoid redundant gridDisk calls
-  // Skip impassable cells (agents never stand on them) to keep the map small — it is
-  // structured-cloned into every agent worker, so size drives memory pressure / SIGILL.
-  const bearingMap = precomputeBearingMap(viewHexes, visionDepth, neighborDisks, state._frictionObj);
+  // Precompute bearings between visible cell pairs only, to eliminate per-tick trig
+  // calls without paying for bearings that are never queried (agents only ever look
+  // up bearings for visible neighbors). Skip impassable cells (agents never stand on
+  // them) to keep the map small — it is structured-cloned into every agent worker,
+  // so size drives memory pressure / SIGILL.
+  // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
+  // lazily and cached during the simulation via getNeighborDisk (see compute.js).
+  const bearingMap = precomputeBearingMap(viewHexes, visibilityData, state._frictionObj);
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();

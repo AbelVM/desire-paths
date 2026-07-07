@@ -165,18 +165,12 @@ function _getCachedPathCells(ctx, a, b) {
 }
 
 function _getCachedDisk(ctx, center, r) {
-  // Use precomputed neighbor disk when available and fresh (VISUAL_DEPTH only)
   const visualDepth = ctx?.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+  // VISUAL_DEPTH disks are served from the lazy, generation-keyed cache. This
+  // avoids the upfront N×gridDisk cost that used to block the mapping stage.
   if (r === visualDepth) {
-    const precomputed = ctx._precomputedNeighborDisks;
-    const currentGen = ctx._mappingGeneration ?? 0;
-    if (precomputed && precomputed.gen === currentGen) {
-      const disk = precomputed.data[center];
-      if (disk) {
-        ctx._computeDiskCacheHits++;
-        return disk;
-      }
-    }
+    ctx._computeDiskCacheHits++;
+    return getNeighborDisk(center, visualDepth, ctx._mappingGeneration ?? 0);
   }
 
   // Fall back to LRU cache for other radii
@@ -221,6 +215,30 @@ function precomputeNeighborDisks(cells, visualDepth) {
     result[cell] = gridDisk(cell, visualDepth);
   }
   return result;
+}
+
+// Lazy, generation-keyed neighbor-disk cache (uncapped).
+// Replaces the upfront `precomputeNeighborDisks` pass that used to run N
+// `gridDisk(cell, visionDepth)` calls synchronously during the mapping stage and
+// block the main thread. Disks are now computed on first access during the
+// simulation and cached, so the mapping stage pays nothing and the total number
+// of `gridDisk` calls is unchanged (≤ N distinct cells are ever visited).
+let _neighborDiskCache = Object.create(null);
+let _neighborDiskGen = -1;
+let _neighborDiskDepth = -1;
+
+function getNeighborDisk(cell, visualDepth, gen) {
+  if (_neighborDiskGen !== gen || _neighborDiskDepth !== visualDepth) {
+    _neighborDiskCache = Object.create(null);
+    _neighborDiskGen = gen;
+    _neighborDiskDepth = visualDepth;
+  }
+  let d = _neighborDiskCache[cell];
+  if (d === undefined) {
+    d = gridDisk(cell, visualDepth);
+    _neighborDiskCache[cell] = d;
+  }
+  return d;
 }
 
 // Precompute visibility sets for all cells within the AOI.
@@ -299,7 +317,11 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
 // Returns a Map with string keys "center::neighbor" → bearing (degrees).
 // Uses Map instead of plain object to avoid V8 "too many properties to enumerate"
 // error when the bearing cache is transferred to Web Workers via postMessage.
-// OPTIMIZATION: Reuses precomputed neighbor disks to avoid redundant gridDisk calls.
+// OPTIMIZATION: Reuses precomputed visibility sets so bearings are only computed
+// for cell pairs an agent can actually see. During simulation, bearings are only
+// ever queried for *visible* neighbors (the visibility check precedes the bearing
+// lookup in getBestNextStep), so precomputing the full gridDisk(cell, visionDepth)
+// was computing and storing a large number of bearings that are never read.
 //
 // IMPORTANT: agents can never stand on impassable cells, so bearings *from* an
 // impassable cell are never queried, and bearings *to* an impassable cell are never
@@ -307,9 +329,8 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
 // map size, which matters because this map is structured-cloned into every agent
 // worker — cloning the full (impassable-inclusive) map across 2+ workers was the
 // memory pressure that triggered SIGILL with 2+ origins.
-function precomputeBearingMap(cells, visualDepth, precomputedDisks, frictionLookup) {
+function precomputeBearingMap(cells, visibilityData, frictionLookup) {
   const result = new Map();
-  const disks = precomputedDisks || (cells.length > 0 ? precomputeNeighborDisks(cells, visualDepth) : null);
   const impassable = FRICTION_COSTS.IMPASSABLE;
   const isPassable = (c) => (frictionLookup ? (frictionLookup[c] ?? 0) : 0) < impassable;
   for (let i = 0; i < cells.length; i++) {
@@ -317,12 +338,11 @@ function precomputeBearingMap(cells, visualDepth, precomputedDisks, frictionLook
     // No bearings FROM impassable cells — agents are never positioned there.
     if (!isPassable(cell)) continue;
     const sLatLng = _getCachedLatLng(cell);
-    // Use precomputed disks if available, otherwise compute on-demand
-    const disk = disks ? disks[cell] : gridDisk(cell, visualDepth);
-    for (let j = 0; j < disk.length; j++) {
-      const n = disk[j];
-      if (n === cell) continue;
-      // No bearings TO impassable cells — agents never step onto them.
+    // Only compute bearings for cells actually visible from `cell`. The visibility
+    // BFS already excludes impassable cells, so no extra impassable check is needed.
+    const visible = visibilityData ? visibilityData[cell] : null;
+    if (!visible) continue;
+    for (const n in visible) {
       if (!isPassable(n)) continue;
       const eLatLng = _getCachedLatLng(n);
       result.set(cell + '::' + n, _bearingFromLatLngs(sLatLng, eLatLng));

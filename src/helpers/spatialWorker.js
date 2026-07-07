@@ -687,30 +687,10 @@ export async function runFastScanTask(viewHexes, features) {
     })
   );
 
-  // Start blur computation as soon as we have partial results.
-  // Blur only needs cellFrictionEntries and is independent of multiFrictionEntries.
-  // We kick it off after the first two chunks resolve for a reasonable sample size,
-  // then re-run with full merged data at the end for correctness.
-  let blurPromise = null;
-  const resolvedResults = [];
-
-  // Process results as they arrive to start blur early
-  const processResult = async (result) => {
-    resolvedResults.push(result);
-    if (!blurPromise && resolvedResults.length >= Math.min(2, chunks.length)) {
-      blurPromise = _computeBlurFromPartial(
-        resolvedResults.map((r) => r.cellFrictionEntries ?? {})
-      );
-    }
-  };
-
-  // Race: process each result as it resolves
-  const racePromises = chunkTasks.map(async (task, i) => {
-    const result = await task;
-    await processResult(result);
-    return result;
-  });
-  const results = await Promise.all(racePromises);
+  // Blur is computed once below from the fully-merged friction data (see
+  // runImpassableBlurTask). The earlier "partial blur" path computed a full blur
+  // on incomplete chunk data and discarded the result, so it is intentionally gone.
+  const results = await Promise.all(chunkTasks);
 
   // Merge all chunk results
   const multiFrictionEntries = Object.create(null);
@@ -738,15 +718,6 @@ try {
     window.__dp_getMaxAgentWorkers = getMaxAgentWorkers;
   }
 } catch (_e) {}
-
-async function _computeBlurFromPartial(partialResults) {
-  // Merge partial friction entries from resolved chunks
-  const merged = Object.create(null);
-  for (let i = 0; i < partialResults.length; i++) {
-    mergeScalarEntries(merged, partialResults[i]);
-  }
-  return runImpassableBlurTask(merged);
-}
 
 export async function runImpassableBlurTask(frictionSource, options = {}) {
   const frictionEntries =
