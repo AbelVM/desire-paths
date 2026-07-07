@@ -62,6 +62,7 @@ export const SIMULATION_PARAM_LIMITS = Object.freeze({
   fieldOfView: { min: 30, max: 360, step: 30 },
   agentsPerWeightUnit: { min: 5, max: 100, step: 5 },
   temperature: { min: 0, max: 2, step: 0.25 },
+  h3StrideResolution: { min: 0, max: 15, step: 1 },
 });
 
 export const DEFAULT_SIMULATION_PARAMS = Object.freeze({
@@ -71,6 +72,7 @@ export const DEFAULT_SIMULATION_PARAMS = Object.freeze({
   fieldOfView: VISUAL_ANGLE,
   agentsPerWeightUnit: AGENTS_PER_DESTINATION,
   temperature: TEMPERATURE,
+  h3StrideResolution: H3_STRIDE_RESOLUTION,
   emergentWear: true,
 });
 
@@ -118,6 +120,12 @@ export function updateSimulationParams(next = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(next, 'emergentWear')) {
     SIMULATION_PARAMS.emergentWear = Boolean(next.emergentWear);
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'h3StrideResolution')) {
+    SIMULATION_PARAMS.h3StrideResolution = clampParam(
+      'h3StrideResolution',
+      next.h3StrideResolution
+    );
   }
 
   return SIMULATION_PARAMS;

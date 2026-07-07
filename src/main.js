@@ -8,7 +8,6 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 
 import {
   MAP_OPTIONS,
-  H3_STRIDE_RESOLUTION,
   FRICTION_COSTS,
   getSurface,
   SIMULATION_PARAMS,
@@ -406,7 +405,7 @@ const init = () => {
     // Clicks on rendered features may not carry lngLat — skip them
     if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return;
 
-    const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
+    const cell = latLngToCell(coords.lat, coords.lng, SIMULATION_PARAMS.h3StrideResolution);
 
     if (!(await isAccessible(desireMap, e))) {
       const msg = sourcesLoading(desireMap)

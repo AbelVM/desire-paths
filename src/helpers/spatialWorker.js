@@ -7,6 +7,7 @@ import {
   computeAoiHexes,
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
+import { SIMULATION_PARAMS } from './constants.js';
 
 const detectedHC =
   typeof navigator !== 'undefined' && navigator.hardwareConcurrency
@@ -268,7 +269,8 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
-  if (kind === 'aoi-hexes') return computeAoiHexes(payload || null);
+  if (kind === 'aoi-hexes')
+    return computeAoiHexes(payload?.polygon || null, payload?.resolution);
   throw new Error(`Unknown spatial task: ${kind}`);
 }
 
@@ -730,9 +732,9 @@ export async function runImpassableBlurTask(frictionSource, options = {}) {
 /**
  * Compute AOI hexes in a worker — runs off the main thread.
  */
-export async function runAoiHexesTask(aoiPolygon) {
+export async function runAoiHexesTask(aoiPolygon, resolution = SIMULATION_PARAMS.h3StrideResolution) {
   if (!aoiPolygon || !aoiPolygon.length) return [];
-  return runWorker('aoi-hexes', aoiPolygon);
+  return runWorker('aoi-hexes', { polygon: aoiPolygon, resolution });
 }
 
 /**

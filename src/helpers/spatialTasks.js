@@ -1,7 +1,7 @@
 import { gridDisk, gridRing, polygonToCells } from 'h3-js';
 import {
   FRICTION_COSTS,
-  H3_STRIDE_RESOLUTION,
+  SIMULATION_PARAMS,
   IMPASSABLE_BLUR_RADIUS,
   IMPASSABLE_BLUR_SIGMA,
   IMPASSABLE_BLUR_FRICTION_ADD,
@@ -30,10 +30,10 @@ function emitProgress(phase, processed, total) {
  * Convert AOI polygon to H3 hexes — designed for worker execution.
  * Cached via getCachedPolyCells so repeated calls with same geometry are fast.
  */
-export function computeAoiHexes(aoiPolygon) {
+export function computeAoiHexes(aoiPolygon, resolution = SIMULATION_PARAMS.h3StrideResolution) {
   if (!aoiPolygon || !aoiPolygon.length) return [];
   try {
-    return polygonToCells(aoiPolygon, H3_STRIDE_RESOLUTION, true);
+    return polygonToCells(aoiPolygon, resolution, true);
   } catch (_e) {
     return [];
   }
@@ -84,7 +84,7 @@ function getCachedPolyCells(coords) {
 
   let result;
   try {
-    result = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
+    result = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
   } catch (err) {
     try {
       console.warn && console.warn('computeFastScan: polygonToCells failed for coords', { key, err });

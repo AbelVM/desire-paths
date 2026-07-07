@@ -87,6 +87,10 @@
   --scrollbar-thumb-hover: var(--primary);
 }
 
+* {
+  scrollbar-width: thin;
+}
+
 body,
 html {
   margin: 0;
@@ -316,6 +320,81 @@ html {
   display: none !important;
 }
 
+/* ── Simulation panel: disclosure grows + scrolls, Run pinned ── */
+
+#panel-simulation {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#panel-simulation > .panel-section--run {
+  flex: 0 0 auto;
+  margin-top: auto;
+  margin-bottom: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  padding-bottom: 2px;
+}
+
+#simulation-params-disclosure {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#simulation-params-disclosure:not([open]) {
+  border-color: transparent;
+  background: transparent;
+}
+
+#simulation-params-disclosure[open] {
+  overflow-y: auto;
+}
+
+#simulation-params-disclosure[open] > .panel-disclosure-summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--panel);
+}
+
+#panel-simulation > *:not(#simulation-params-disclosure) {
+  flex: 0 0 auto;
+}
+
+#panel-simulation > .panel-section--run {
+  margin-top: auto;
+  margin-bottom: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  /* background: var(--panel); */
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+#simulation-params-disclosure {
+  display: flex;
+  flex-direction: column;
+}
+
+#simulation-params-disclosure[open] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#simulation-params-disclosure[open] > .panel-disclosure-summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--panel);
+}
+
 .panel-kicker {
   margin-bottom: 8px;
   color: var(--primary);
@@ -411,13 +490,10 @@ html {
 }
 
 .panel-meta,
-.panel-footer {
+.run-status {
   display: grid;
-  gap: 10px;
-}
-
-.panel-footer {
-  padding-bottom: 3em;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .panel-meta {
@@ -549,6 +625,11 @@ html {
     height: min(54dvh, 460px);
     min-height: 280px;
   }
+
+  .btn-group .btn {
+    font-size: 11px;
+    padding: 0.45rem 0.6rem;
+  }
 }
 
 /* ── Alert card (mt-router landing style) ─────────────── */
@@ -677,8 +758,13 @@ html {
 /* ── Buttons (mt-router landing style) ─────────────────── */
 
 .btn-group {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
+}
+
+.btn-group > :first-child {
+  grid-column: 1 / -1;
 }
 
 .placement-mode-group {
@@ -942,6 +1028,10 @@ html {
 .btn-group .btn {
   color: var(--text);
   border: 1px solid var(--border);
+  white-space: nowrap;
+  min-height: 34px;
+  padding: 0.5rem 0.85rem;
+  font-size: 12px;
 }
 
 .btn-group .btn.btn-accent {
@@ -1149,10 +1239,22 @@ html {
 }
 
 .density-readout {
+  justify-self: start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--white-rgb), 0.03);
   font-size: 11px;
   color: var(--text-dim);
-  text-align: right;
-  margin-top: 0;
+  text-align: left;
+}
+
+.density-readout[hidden] {
+  display: none;
+}
+
+.run-status .simulation-progress-label {
+  text-align: left;
 }
 
 .count-chip.is-ready {
@@ -1289,9 +1391,9 @@ html {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  row-gap: 5px;
+  row-gap: 4px;
   column-gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: rgba(var(--white-rgb), 0.02);
@@ -1332,7 +1434,7 @@ html {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: rgba(var(--white-rgb), 0.02);

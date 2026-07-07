@@ -48,7 +48,7 @@ self.onmessage = (event) => {
     } else if (data.kind === 'impassable-blur') {
       result = computeImpassableBlurSnapshot(data.payload || {});
     } else if (data.kind === 'aoi-hexes') {
-      result = computeAoiHexes(data.payload || null);
+      result = computeAoiHexes(data.payload?.polygon || null, data.payload?.resolution);
     } else {
       throw new Error(`Unknown spatial task: ${data.kind}`);
     }

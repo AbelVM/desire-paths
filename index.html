@@ -417,6 +417,17 @@
                   <input id="sim-param-temperature" type="range" min="0" max="2" step="0.25" value="0.5" />
                 </label>
 
+                <label class="param-item" for="sim-param-h3-stride">
+                  <span class="param-item-head">Grid resolution
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Grid resolution help"
+                      data-tooltip="H3 grid detail for the simulation. Higher = finer cells and more precise paths, but heavier compute. 0 is coarsest, 15 is finest.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-h3-stride-value">15</span>
+                  <input id="sim-param-h3-stride" type="range" min="0" max="15" step="1" value="15" />
+                </label>
+
                 <label class="param-toggle" for="sim-param-emergent-wear">
                   <input id="sim-param-emergent-wear" type="checkbox" checked />
                   <span>Paths wear in</span>
@@ -432,25 +443,24 @@
               </div>
             </details>
 
-            <div class="panel-section">
+            <div class="panel-section panel-section--run">
               <div class="section-label">Run</div>
               <div class="btn-group">
                 <button class="btn btn-accent" id="btn-compute" type="button">Reveal desire lines</button>
                 <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export walk map</button>
                 <button class="btn btn-danger" id="btn-clear">Clear map</button>
               </div>
-            </div>
-
-            <div class="panel-footer">
-              <div id="scan-loader">Reading the ground...</div>
-              <div class="simulation-progress-wrap">
-                <div id="simulation-progress" class="simulation-progress" role="progressbar"
-                  aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-                  <span id="simulation-progress-bar"></span>
+              <div class="run-status">
+                <div id="scan-loader">Reading the ground...</div>
+                <div class="simulation-progress-wrap">
+                  <div id="simulation-progress" class="simulation-progress" role="progressbar"
+                    aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+                    <span id="simulation-progress-bar"></span>
+                  </div>
+                  <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
                 </div>
-                <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
+                <div id="max-flow-readout" class="density-readout" hidden>Busiest path: 0 walks</div>
               </div>
-              <div id="max-flow-readout" class="density-readout">Busiest path: 0 walks</div>
             </div>
           </section>
 

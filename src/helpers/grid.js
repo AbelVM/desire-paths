@@ -2,7 +2,6 @@ import { polygonToCells, latLngToCell, gridPathCells } from 'h3-js';
 import {
   FRICTION_COSTS,
   AFFORDANCE,
-  H3_STRIDE_RESOLUTION,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
   PATH_CACHE_MAX,
   POLY_CACHE_MAX,
@@ -76,18 +75,19 @@ function _polyKey(coords) {
 
 export function getHexes(state, mapInstance) {
   const aoiKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';
-  // Return cached hexes when AOI hasn't changed to avoid repeated expensive H3 calls
-  if (state._cachedViewHexes && state._cachedAoiKey === aoiKey) return state._cachedViewHexes;
+  const cacheKey = `${aoiKey}:${SIMULATION_PARAMS.h3StrideResolution}`;
+  // Return cached hexes when AOI and resolution haven't changed to avoid repeated expensive H3 calls
+  if (state._cachedViewHexes && state._cachedAoiKey === cacheKey) return state._cachedViewHexes;
   let hexes;
   try {
     // `state.aoi_polygon` is GeoJSON ([lng, lat]). Use the isGeoJson flag.
-    hexes = polygonToCells(state.aoi_polygon, H3_STRIDE_RESOLUTION, true);
+    hexes = polygonToCells(state.aoi_polygon, SIMULATION_PARAMS.h3StrideResolution, true);
   } catch (e) {
     console.error('Error generating hexes for AOI. Please check your AOI geometry.', e);
     return;
   }
   state._cachedViewHexes = hexes;
-  state._cachedAoiKey = aoiKey;
+  state._cachedAoiKey = cacheKey;
   return hexes;
 }
 
@@ -100,7 +100,10 @@ export async function triggerFastScan(state, mapInstance) {
   // Start AOI hex generation in a Web Worker — runs off the main thread.
   // This is CPU-intensive (polygonToCells) and blocks for ~50-200ms otherwise.
   const aoiPolygon = state.aoi_polygon;
-  const aoiHexPromise = runAoiHexesTask(aoiPolygon).catch(() => []);
+  const aoiHexPromise = runAoiHexesTask(
+    aoiPolygon,
+    SIMULATION_PARAMS.h3StrideResolution
+  ).catch(() => []);
 
   // Fetch features in parallel — queryRenderedFeatures depends on map rendering,
   // which is already done (we waited for moveend in fitAoiBounds).
@@ -273,7 +276,7 @@ export function mapPolygonCells(state, mapInstance, coords, surface) {
     state._polyCache.delete(key);
     state._polyCache.set(key, cells);
   } else {
-    cells = polygonToCells(coords, H3_STRIDE_RESOLUTION, true);
+    cells = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
     state._polyCache.set(key, cells);
     // Evict oldest if over budget
     if (state._polyCache.size > POLY_CACHE_MAX) {
@@ -287,8 +290,12 @@ export function mapPolygonCells(state, mapInstance, coords, surface) {
 export function mapLineCells(state, mapInstance, coords, surface) {
   const cLen = coords.length;
   for (let i = 0; i < cLen - 1; i++) {
-    const c1 = latLngToCell(coords[i][1], coords[i][0], H3_STRIDE_RESOLUTION);
-    const c2 = latLngToCell(coords[i + 1][1], coords[i + 1][0], H3_STRIDE_RESOLUTION);
+    const c1 = latLngToCell(coords[i][1], coords[i][0], SIMULATION_PARAMS.h3StrideResolution);
+    const c2 = latLngToCell(
+      coords[i + 1][1],
+      coords[i + 1][0],
+      SIMULATION_PARAMS.h3StrideResolution
+    );
     // Cache gridPathCells per segment to avoid duplicate expansion with LRU eviction
     if (!state._pathCache) state._pathCache = new Map();
     const segKey = c1 + '::' + c2;

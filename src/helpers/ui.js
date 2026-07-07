@@ -1,6 +1,5 @@
 import { clearComputeCaches, clearLatLngCache } from './compute.js';
 import { latLngToCell } from 'h3-js';
-import { H3_STRIDE_RESOLUTION } from './constants.js';
 import { SIMULATION_PARAMS, updateSimulationParams } from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
 import { createIcons, icons } from 'lucide';
@@ -169,6 +168,8 @@ function createUIState(map) {
     simParamAgentsPerWeightValue: null,
     simParamTemperature: null,
     simParamTemperatureValue: null,
+    simParamH3Stride: null,
+    simParamH3StrideValue: null,
     simParamEmergentWear: null,
 
     // Context menu (created dynamically at runtime)
@@ -229,6 +230,8 @@ function createUIState(map) {
     simParamAgentsPerWeightValue: 'sim-param-agents-per-weight-value',
     simParamTemperature: 'sim-param-temperature',
     simParamTemperatureValue: 'sim-param-temperature-value',
+    simParamH3Stride: 'sim-param-h3-stride',
+    simParamH3StrideValue: 'sim-param-h3-stride-value',
     simParamEmergentWear: 'sim-param-emergent-wear',
   };
 
@@ -391,6 +394,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.simParamTemperature) uiState.simParamTemperature.value = String(p.temperature);
     if (uiState.simParamTemperatureValue)
       uiState.simParamTemperatureValue.textContent = Number(p.temperature).toFixed(2);
+
+    if (uiState.simParamH3Stride) uiState.simParamH3Stride.value = String(p.h3StrideResolution);
+    if (uiState.simParamH3StrideValue)
+      uiState.simParamH3StrideValue.textContent = String(p.h3StrideResolution);
 
     if (uiState.simParamEmergentWear)
       uiState.simParamEmergentWear.checked = Boolean(p.emergentWear);
@@ -777,6 +784,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const syncFlowReadout = () => {
     const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
     uiState.flowReadout.innerText = `Busiest path: ${peak} walks · ${map.flowsReady ? 'Desire lines ready' : 'No walk yet'}`;
+    uiState.flowReadout.hidden = !map.flowsReady;
   };
 
   const syncProgressUI = () => {
@@ -1006,6 +1014,14 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       applySimulationParamPatch({ temperature: Number(uiState.simParamTemperature.value) });
     });
   }
+  if (uiState.simParamH3Stride) {
+    addUIListener(uiState.simParamH3Stride, 'input', () => {
+      applySimulationParamPatch(
+        { h3StrideResolution: Number(uiState.simParamH3Stride.value) },
+        { requiresRemap: true }
+      );
+    });
+  }
   if (uiState.simParamEmergentWear) {
     addUIListener(uiState.simParamEmergentWear, 'change', () => {
       applySimulationParamPatch({ emergentWear: uiState.simParamEmergentWear.checked });
@@ -1021,6 +1037,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         fieldOfView: DEFAULT_SIMULATION_PARAMS.fieldOfView,
         agentsPerWeightUnit: DEFAULT_SIMULATION_PARAMS.agentsPerWeightUnit,
         temperature: DEFAULT_SIMULATION_PARAMS.temperature,
+        h3StrideResolution: DEFAULT_SIMULATION_PARAMS.h3StrideResolution,
         emergentWear: DEFAULT_SIMULATION_PARAMS.emergentWear,
       });
       showToastNotification('Behaviour reset to defaults', 'success');
@@ -1083,7 +1100,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     // Block drag while computing
     if (map.isComputing || dragState.active) return;
 
-    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
     const node = map.simulationNodes?.[cell];
     if (node && isActiveNode(node)) {
       e.preventDefault?.();
@@ -1103,7 +1120,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     dragState.moved = true;
 
     // Snap to nearest H3 cell
-    const newCell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+    const newCell = latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
     if (newCell !== dragState.startCell && map.simulationNodes[newCell]) {
       // Target cell already has a node — stop dragging here
       dragState.active = false;
@@ -1167,7 +1184,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const lngLat = map.unproject?.(px);
     if (!isFiniteLngLat(lngLat)) return;
 
-    const cell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    const cell = latLngToCell(lngLat.lat, lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
     const node = map.simulationNodes?.[cell];
 
     // Only prevent default (blocking pan) when touching an active node
@@ -1207,7 +1224,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (!isFiniteLngLat(lngLat)) return;
 
     // Snap to nearest H3 cell
-    const newCell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    const newCell = latLngToCell(lngLat.lat, lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
     if (newCell !== touchDragState.startCell && map.simulationNodes[newCell]) {
       touchDragState.active = false;
       map.isDragging = false;
@@ -1299,7 +1316,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const lngLat = map.unproject?.(px);
     if (!isFiniteLngLat(lngLat)) return;
 
-    longPressNodeCell = latLngToCell(lngLat.lat, lngLat.lng, H3_STRIDE_RESOLUTION);
+    longPressNodeCell = latLngToCell(lngLat.lat, lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
     const node = map.simulationNodes?.[longPressNodeCell];
 
     if (node && isActiveNode(node)) {
@@ -1329,7 +1346,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     // Strategy 1: Try lngLat from the event (works for canvas clicks)
     if (isFiniteLngLat(e.lngLat)) {
-      const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION);
+      const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
       node = map.simulationNodes?.[cell];
     }
 
@@ -1365,7 +1382,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
               }
             }
             if (closest) {
-              const cell = latLngToCell(closest.lat, closest.lng, H3_STRIDE_RESOLUTION);
+              const cell = latLngToCell(closest.lat, closest.lng, SIMULATION_PARAMS.h3StrideResolution);
               node = map.simulationNodes?.[cell];
             }
           }
@@ -1379,7 +1396,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       const cell =
         node.cell ||
         (isFiniteLngLat(e.lngLat)
-          ? latLngToCell(e.lngLat.lat, e.lngLat.lng, H3_STRIDE_RESOLUTION)
+          ? latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution)
           : undefined);
       if (cell) {
         e.preventDefault();
@@ -1409,7 +1426,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (!isFiniteLngLat(coords)) return;
 
     // Check if clicking on an existing active node — ignore (handled by drag / context menu)
-    const cell = latLngToCell(coords.lat, coords.lng, H3_STRIDE_RESOLUTION);
+    const cell = latLngToCell(coords.lat, coords.lng, SIMULATION_PARAMS.h3StrideResolution);
     const existingNode = map.simulationNodes?.[cell];
     if (existingNode && isActiveNode(existingNode)) return;
   };
