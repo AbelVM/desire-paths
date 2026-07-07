@@ -18,6 +18,11 @@ const detectedHC =
 
 const MAX_WORKERS = Math.min(4, Math.max(2, detectedHC || 4));
 
+// fast-scan is stateless, SIGILL-safe, and embarrassingly parallel (one
+// polygonToCells per geometry). It is not bound by the 4-worker cap that
+// protects the shared-state agent batches, so let it scale to more cores.
+export const MAX_FASTSCAN_WORKERS = Math.min(8, Math.max(2, detectedHC || 4));
+
 // Agent-heavy tasks can be tuned separately. Default to `hardwareConcurrency - 1`
 // (leave one core free) when available, otherwise fall back to `MAX_WORKERS`.
 export let MAX_AGENT_WORKERS = detectedHC ? Math.max(1, detectedHC - 1) : MAX_WORKERS;
@@ -160,7 +165,12 @@ function acquireWorkerSlot(kind = 'spatial') {
   }
 
   const pool = workerPoolByKind.get(kind) || [];
-  const maxForKind = kind === 'agent-batch' ? MAX_AGENT_WORKERS : MAX_WORKERS;
+  const maxForKind =
+    kind === 'agent-batch'
+      ? MAX_AGENT_WORKERS
+      : kind === 'fast-scan' || kind === 'fast-scan-chunk'
+        ? MAX_FASTSCAN_WORKERS
+        : MAX_WORKERS;
   if (pool.length < maxForKind) {
     const slot = createWorkerSlot(kind);
     pool.push(slot);
@@ -214,6 +224,45 @@ function splitIntoChunks(items, chunkCount) {
   const chunkSize = Math.ceil(items.length / chunkCount);
   for (let i = 0; i < items.length; i += chunkSize) chunks.push(items.slice(i, i + chunkSize));
   return chunks;
+}
+
+// Estimate the polygonToCells cost of a feature by its total vertex count.
+// Buildings are many tiny polygons; landuse/landcover are few huge MultiPolygons.
+// Balancing by vertex count (not feature count) keeps fast-scan workers from
+// straggling on a chunk full of large polygons.
+function featureVertexCost(feature) {
+  const geom = feature && feature.geometry;
+  if (!geom || !geom.coordinates) return 1;
+  const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+  let total = 0;
+  for (let p = 0; p < polys.length; p++) {
+    const poly = polys[p];
+    for (let r = 0; r < poly.length; r++) total += poly[r].length;
+  }
+  return total || 1;
+}
+
+// Longest-processing-time scheduling: sort items by descending cost, then greedily
+// assign each to the currently least-loaded chunk. Produces near-perfect balance
+// across `chunkCount` workers for the polygonToCells workload.
+function splitIntoBalancedChunks(items, chunkCount, costFn) {
+  const n = items.length;
+  if (chunkCount <= 1 || n <= 1) return [items];
+  const k = Math.min(chunkCount, n);
+  // Precompute costs once, then sort indices by descending cost (LPT scheduling).
+  const costs = new Array(n);
+  for (let i = 0; i < n; i++) costs[i] = costFn(items[i]);
+  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => costs[b] - costs[a]);
+  const chunks = Array.from({ length: k }, () => []);
+  const loads = new Array(k).fill(0);
+  for (let i = 0; i < n; i++) {
+    const idx = order[i];
+    let min = 0;
+    for (let c = 1; c < k; c++) if (loads[c] < loads[min]) min = c;
+    chunks[min].push(items[idx]);
+    loads[min] += costs[idx];
+  }
+  return chunks.filter((c) => c.length > 0);
 }
 
 // Flatten large payloads for cheaper structured-clone by converting plain
@@ -657,9 +706,17 @@ export async function runFastScanTask(viewHexes, features) {
   const featureCount = features?.length ?? 0;
   if (featureCount <= 1) return runWorker('fast-scan', { viewHexes, features });
 
-  const workerCount = Math.min(MAX_WORKERS, featureCount);
-  const chunks = splitIntoChunks(features, workerCount);
+  const workerCount = Math.min(MAX_FASTSCAN_WORKERS, featureCount);
+  const chunks = splitIntoBalancedChunks(features, workerCount, featureVertexCost);
   if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features });
+
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+  try {
+    console.debug &&
+      console.debug(
+        `spatialWorker: fast-scan-chunk dispatch workerCount=${chunks.length} featureCount=${featureCount}`
+      );
+  } catch (_e) {}
 
   // Launch all chunk tasks in parallel
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
@@ -697,6 +754,15 @@ export async function runFastScanTask(viewHexes, features) {
   // runImpassableBlurTask). The earlier "partial blur" path computed a full blur
   // on incomplete chunk data and discarded the result, so it is intentionally gone.
   const results = await Promise.all(chunkTasks);
+
+  if (t0) {
+    try {
+      console.debug &&
+        console.debug(
+          `spatialWorker: fast-scan-chunk done in ${(performance.now() - t0).toFixed(1)}ms`
+        );
+    } catch (_e) {}
+  }
 
   // Merge all chunk results
   const multiFrictionEntries = Object.create(null);
