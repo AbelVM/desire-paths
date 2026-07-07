@@ -968,7 +968,7 @@ describe('ui.js', () => {
     const nodeCountChip = doc.getElementById('node-count-chip');
 
     expect(modeLabel.innerText).not.toContain('Ready');
-    expect(modeLabel.setAttribute).toHaveBeenCalledWith('title', 'Drag nodes to move them · ↑↓ arrows adjust placement weight');
+    expect(modeLabel.setAttribute).toHaveBeenCalledWith('title', 'Drag points to move them · ↑↓ arrows adjust pull strength');
     expect(nodeCountChip.classList.remove).toHaveBeenCalledWith('is-ready');
     expect(nodeCountChip.querySelector('.count-chip-origins').textContent).toBe('1');
     expect(nodeCountChip.querySelector('.count-chip-dests').textContent).toBe('1');
@@ -1048,7 +1048,7 @@ describe('ui.js', () => {
     const modeLabel = doc.getElementById('mode-status');
     const nodeCountChip = doc.getElementById('node-count-chip');
 
-    expect(modeLabel.innerText).toContain('Add destination');
+    expect(modeLabel.innerText).toContain('Add an end');
     expect(modeLabel.innerText).not.toContain('Ready');
     expect(nodeCountChip.classList.remove).toHaveBeenCalledWith('is-ready');
     expect(nodeCountChip.querySelector('.count-chip-origins').textContent).toBe('1');

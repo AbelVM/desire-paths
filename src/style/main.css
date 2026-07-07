@@ -1358,65 +1358,12 @@ html {
   color: var(--primary);
 }
 
-.help-tip::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 8px);
-  transform: translate(-50%, 4px);
-  z-index: 8;
-  width: max-content;
-  max-width: 220px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(var(--surface-rgb), 0.98);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  letter-spacing: 0;
-  text-transform: none;
-  text-align: left;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.help-tip::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 3px);
-  transform: translateX(-50%);
-  width: 8px;
-  height: 8px;
-  rotate: 45deg;
-  background: rgba(var(--surface-rgb), 0.98);
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.help-tip:hover::after,
-.help-tip:hover::before,
-.help-tip:focus-visible::after,
-.help-tip:focus-visible::before {
-  opacity: 1;
-}
-
-.help-tip:hover::after,
-.help-tip:focus-visible::after {
-  transform: translate(-50%, 0);
-}
-
-/* ── Button tooltips (placement mode buttons) ─────────────── */
+/* ── Button tooltips (placement mode buttons + param help) ── */
 
 .button-tooltip {
   position: fixed;
   z-index: 1001;
+  max-width: 240px;
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -1425,6 +1372,7 @@ html {
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
+  text-align: left;
   pointer-events: none;
   transform: translate(-50%, 4px);
   transition: opacity 120ms ease, transform 120ms ease;

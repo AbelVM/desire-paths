@@ -425,12 +425,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     menu.hidden = true;
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `
-      <button id="context-change-type" class="context-btn" type="button">Change Type</button>
+      <button id="context-change-type" class="context-btn" type="button">Switch role</button>
       <div class="context-divider"></div>
-      <button id="context-increase-weight" class="context-btn" type="button"><span class="context-icon">＋</span> Increase Weight</button>
-      <button id="context-decrease-weight" class="context-btn" type="button"><span class="context-icon">－</span> Decrease Weight</button>
+      <button id="context-increase-weight" class="context-btn" type="button"><span class="context-icon">＋</span> Make busier</button>
+      <button id="context-decrease-weight" class="context-btn" type="button"><span class="context-icon">－</span> Make quieter</button>
       <div class="context-divider"></div>
-      <button id="context-remove-node" class="context-btn context-danger" type="button">Remove Node</button>
+      <button id="context-remove-node" class="context-btn context-danger" type="button">Remove</button>
     `;
     document.body.appendChild(menu);
     uiState.contextMenu = menu;
@@ -507,7 +507,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
           : currentType === 'destination'
             ? 'dual'
             : 'origin';
-      const label = nextType.charAt(0).toUpperCase() + nextType.slice(1);
+      const label = nextType === 'origin' ? 'Start' : nextType === 'destination' ? 'End' : 'Both ends';
 
       const nodeCellKey = cell;
       const handler = (ev) => {
@@ -522,9 +522,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         map.flowsReady = false;
         map.renderInterfacePins?.();
         syncSimulationUI?.();
-        showToastNotification(`Node changed to ${label}`, 'success');
+        showToastNotification(`Now a ${label}`, 'success');
       };
-      changeTypeBtn.innerHTML = `Change to ${label}`;
+      changeTypeBtn.innerHTML = `Switch to ${label}`;
       changeTypeBtn.addEventListener('click', handler);
       uiState.buttonHandlers.set(changeTypeBtn, handler);
     }
@@ -548,10 +548,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
             map.flowsReady = false;
             map.renderInterfacePins?.();
             syncSimulationUI?.();
-            showToastNotification(`Weight: ${newWeight}`, 'info');
+            showToastNotification(`Pull: ${newWeight}`, 'info');
           } else {
-            const label = delta > 0 ? 'already at maximum' : 'already at minimum';
-            showToastNotification(`Weight is ${label} (1–10)`, 'warning');
+            const label = delta > 0 ? 'already at the strongest' : 'already at the weakest';
+            showToastNotification(`Pull is ${label}`, 'warning');
           }
         };
       };
@@ -587,7 +587,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
           if (!nodeCellKey || !map.simulationNodes[nodeCellKey]) return;
 
           delete map.simulationNodes[nodeCellKey];
-          showToastNotification('Node removed', 'warning');
+          showToastNotification('Removed', 'warning');
 
           map.mappingReady = false;
           map.flowsReady = false;
@@ -595,7 +595,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
           syncSimulationUI?.();
         } catch (err) {
           console.error('[context menu] remove node failed:', err);
-          showToastNotification('Failed to remove node', 'error');
+          showToastNotification("Couldn't remove point", 'error');
         }
       };
       removeNodeBtn.addEventListener('click', handler);
@@ -673,14 +673,14 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     let modeText = '';
     if (map.placementMode === 'origin') {
-      modeText = `Origin · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
+      modeText = `Starts · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
       uiState.modeLabel.className = 'mode-indicator mode-origin';
     } else if (map.placementMode === 'destination') {
-      modeText = `Destination · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
+      modeText = `Ends · ${hasDestinations ? destCount + ' placed' : '0 placed'}`;
       uiState.modeLabel.className = 'mode-indicator mode-destination';
     } else {
       const dualNodes = nodes.filter((n) => n.weight > 0 && n.type === 'dual').length;
-      modeText = `Dual · ${dualNodes} placed`;
+      modeText = `Both ends · ${dualNodes} placed`;
       uiState.modeLabel.className = 'mode-indicator mode-dual';
     }
 
@@ -693,11 +693,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (uiState.nodeCountChip) uiState.nodeCountChip.classList.remove('is-ready');
 
       if (!hasOrigins && !hasDestinations) {
-        modeText += ' · Place a node';
+        modeText += ' · Add a point';
       } else if (!hasOrigins) {
-        modeText += ' · Add origin';
+        modeText += ' · Add a start';
       } else if (!hasDestinations) {
-        modeText += ' · Add destination';
+        modeText += ' · Add an end';
       }
     }
 
@@ -709,12 +709,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (hasNodes && !readyToCompute) {
         uiState.modeLabel.setAttribute(
           'title',
-          'Drag nodes to move them · ↑↓ arrows adjust placement weight'
+          'Drag points to move them · ↑↓ arrows adjust pull strength'
         );
       } else if (readyToCompute) {
         uiState.modeLabel.setAttribute(
           'title',
-          'Ready — press Simulate Flows · Drag nodes to reposition'
+          'Ready — reveal the desire lines · Drag points to reposition'
         );
       } else {
         uiState.modeLabel.removeAttribute('title');
@@ -758,7 +758,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
     uiState.frictionButton?.setAttribute(
       'aria-label',
-      enabled ? 'Hide friction legend' : 'Show friction legend'
+      enabled ? 'Hide walking-resistance legend' : 'Show walking-resistance legend'
     );
     uiState.frictionButton?.setAttribute('aria-pressed', String(enabled));
     if (uiState.frictionLegendBody) uiState.frictionLegendBody.hidden = !enabled;
@@ -776,7 +776,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const syncFlowReadout = () => {
     const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
-    uiState.flowReadout.innerText = `Peak Flow: ${peak} agents · ${map.flowsReady ? 'Simulation complete' : 'No simulation yet'}`;
+    uiState.flowReadout.innerText = `Busiest path: ${peak} walks · ${map.flowsReady ? 'Desire lines ready' : 'No walk yet'}`;
   };
 
   const syncProgressUI = () => {
@@ -788,9 +788,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
     if (uiState.progressLabel) {
       if (state.total > 0) {
-        uiState.progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} agents · ${Math.round(percent)}%</span>`;
+        uiState.progressLabel.innerHTML = `<span class="progress-phase">${state.phase}</span><span class="progress-detail">${state.processed}/${state.total} walks · ${Math.round(percent)}%</span>`;
       } else if (map.flowsReady === true) {
-        uiState.progressLabel.innerHTML = `<span class="progress-phase">Simulation complete</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Export or reset to start new</span>`;
+        uiState.progressLabel.innerHTML = `<span class="progress-phase">Desire lines ready</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} points placed · Export or clear to start new</span>`;
       } else {
         const hasOrigins = Object.values(map.simulationNodes ?? {}).some(
           (n) => (n.type === 'origin' || n.type === 'dual') && n.weight > 0
@@ -800,13 +800,13 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         );
 
         if (!hasOrigins && !hasDests) {
-          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Place origin and destination nodes on the map</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to begin</span><span class="progress-detail">Drop a start and an end point on the map</span>`;
         } else if (hasOrigins && hasDests) {
-          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to simulate</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} nodes placed · Press Simulate Flows</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Ready to reveal</span><span class="progress-detail">${Object.keys(map.simulationNodes ?? {}).length} points placed · Press Reveal desire lines</span>`;
         } else if (hasOrigins) {
-          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need destination</span><span class="progress-detail">Place a destination node to enable simulation</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need an end</span><span class="progress-detail">Add an end point to draw a path</span>`;
         } else {
-          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need origin</span><span class="progress-detail">Place an origin node to begin</span>`;
+          uiState.progressLabel.innerHTML = `<span class="progress-phase">Need a start</span><span class="progress-detail">Add a start point to begin</span>`;
         }
       }
     }
@@ -824,7 +824,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.clearButton) uiState.clearButton.disabled = busy || !hasGrid;
     uiState.computeButton.disabled = busy || (!canCompute && !canBuild);
     if (uiState.exportButton) uiState.exportButton.disabled = busy || !canExport;
-    uiState.computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    uiState.computeButton.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
     if (uiState.loader && !busy) {
       uiState.loader.style.display = 'none';
     }
@@ -846,7 +846,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     uiState.alertCard.dataset.tone = '';
   };
 
-  const setBusyState = (busy, message = 'Sampling walkable surfaces...') => {
+  const setBusyState = (busy, message = 'Reading the ground...') => {
     map.isComputing = busy;
     for (const button of uiState.modeButtons) button.disabled = busy;
     uiState.frictionButton.disabled = busy;
@@ -856,7 +856,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     uiState.clearButton.disabled = busy;
     uiState.loader.innerText = message;
     uiState.loader.style.display = busy ? 'block' : 'none';
-    uiState.computeButton.innerText = busy ? 'Simulating...' : 'Simulate Flows';
+    uiState.computeButton.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
     // Update cursor during computation
     setMapCursorWait?.(map, busy);
     if (uiState.progressLabel) {
@@ -912,39 +912,41 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   // Event Bindings — all reference uiState
   // ──────────────────────────────────────────────
 
+  // Shared body-level tooltip (appended to <body>) so tips escape the panel's
+  // overflow clipping. Used by both placement-mode buttons and param help icons.
+  const attachBodyTooltip = (el) => {
+    if (!el || !el.dataset.tooltip) return;
+    const show = () => {
+      const tooltip = uiState.buttonTooltip;
+      if (!tooltip) return;
+      tooltip.textContent = el.dataset.tooltip;
+      tooltip.hidden = false;
+      const rect = el.getBoundingClientRect();
+      tooltip.style.left = `${rect.left + rect.width / 2}px`;
+      tooltip.style.top = `${rect.bottom + 8}px`;
+    };
+    const hide = () => {
+      if (uiState.buttonTooltip) uiState.buttonTooltip.hidden = true;
+    };
+    addUIListener(el, 'mouseenter', show);
+    addUIListener(el, 'mouseleave', hide);
+    addUIListener(el, 'focus', show);
+    addUIListener(el, 'blur', hide);
+  };
+
   for (const button of uiState.modeButtons) {
     button.addEventListener('click', () => {
       map.placementMode = button.dataset.placementMode || 'origin';
       syncModeUI();
     });
 
-    // Tooltip handlers
-    if (button.dataset.tooltip) {
-      addUIListener(button, 'mouseenter', (e) => {
-        const tooltip = uiState.buttonTooltip;
-        if (!tooltip) return;
-        tooltip.textContent = button.dataset.tooltip;
-        tooltip.hidden = false;
-        const rect = button.getBoundingClientRect();
-        tooltip.style.left = `${rect.left + rect.width / 2}px`;
-        tooltip.style.top = `${rect.bottom + 8}px`;
-      });
-      addUIListener(button, 'mouseleave', () => {
-        if (uiState.buttonTooltip) uiState.buttonTooltip.hidden = true;
-      });
-      addUIListener(button, 'focus', (e) => {
-        const tooltip = uiState.buttonTooltip;
-        if (!tooltip) return;
-        tooltip.textContent = button.dataset.tooltip;
-        tooltip.hidden = false;
-        const rect = button.getBoundingClientRect();
-        tooltip.style.left = `${rect.left + rect.width / 2}px`;
-        tooltip.style.top = `${rect.bottom + 8}px`;
-      });
-      addUIListener(button, 'blur', () => {
-        if (uiState.buttonTooltip) uiState.buttonTooltip.hidden = true;
-      });
-    }
+    attachBodyTooltip(button);
+  }
+
+  // Param help icons use the same body-level tooltip. Their previous CSS ::after
+  // tip was clipped by the panel container, so route them through buttonTooltip.
+  for (const tip of document.querySelectorAll('.help-tip')) {
+    attachBodyTooltip(tip);
   }
 
   for (const button of uiState.tabButtons) {
@@ -1021,7 +1023,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         temperature: DEFAULT_SIMULATION_PARAMS.temperature,
         emergentWear: DEFAULT_SIMULATION_PARAMS.emergentWear,
       });
-      showToastNotification('Simulation parameters reset to defaults', 'success');
+      showToastNotification('Behaviour reset to defaults', 'success');
     });
   }
 

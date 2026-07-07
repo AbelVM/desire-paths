@@ -944,10 +944,10 @@ export async function computeDesirePaths(state, mapInstance) {
   }
   if (unreachableDests.length > 0) {
     const count = unreachableDests.length;
-    const msg = `${count} destination${count > 1 ? 's' : ''} unreachable — surrounded by impassable terrain`;
+    const msg = `${count} destination${count > 1 ? 's' : ''} can’t be reached on foot — walled off by buildings or barriers`;
     if (mapInstance?.showAlertCard) {
       try {
-        mapInstance.showAlertCard(msg, { title: 'Unreachable destination', tone: 'warning' });
+        mapInstance.showAlertCard(msg, { title: 'No walking route', tone: 'warning' });
       } catch (_e) { }
     }
   }
@@ -1001,8 +1001,8 @@ export async function computeDesirePaths(state, mapInstance) {
               destCell,
             });
           if (mapInstance?.showAlertCard)
-            mapInstance.showAlertCard('Simulation aborted: missing gradient data for plan.', {
-              title: 'Simulation aborted',
+            mapInstance.showAlertCard('Couldn’t finish the walk — some route data was missing. Try revealing the paths again.', {
+              title: 'Walk incomplete',
               tone: 'warning',
             });
         } catch (_e) { }
@@ -1967,10 +1967,10 @@ export function addDestination(ctx, targetCell, weight = 1) {
   const grad = ctx._gradientCacheObj[targetCell];
   const gradKeys = grad ? Object.keys(grad) : [];
   if (gradKeys.length <= 1) {
-    const msg = '1 destination unreachable — surrounded by impassable terrain';
+    const msg = '1 destination can’t be reached on foot — walled off by buildings or barriers';
     if (ctx.showAlertCard) {
       try {
-        ctx.showAlertCard(msg, { title: 'Unreachable destination', tone: 'warning' });
+        ctx.showAlertCard(msg, { title: 'No walking route', tone: 'warning' });
       } catch (_e) { }
     }
   }

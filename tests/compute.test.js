@@ -1042,7 +1042,7 @@ describe('unreachable destination warning', () => {
       updateLayers: () => {},
     };
     await computeDesirePaths(map, map);
-    expect(map._alertMsg).toContain('unreachable');
+    expect(map._alertMsg).toContain('reached on foot');
   });
 
   it('should detect unreachable destination with only self in gradient', async () => {
@@ -1076,7 +1076,7 @@ describe('unreachable destination warning', () => {
       updateLayers: () => {},
     };
     await computeDesirePaths(map, map);
-    expect(map._alertMsg).toContain('unreachable');
+    expect(map._alertMsg).toContain('reached on foot');
   });
 
   it('should not warn when all destinations are reachable', async () => {

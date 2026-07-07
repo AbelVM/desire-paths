@@ -5,11 +5,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <title>Desire Paths — Interactive Agent-Based Flow Simulator</title>
+  <title>Desire Paths — read where people choose to walk</title>
   <meta name="description"
-    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
   <meta name="keywords"
-    content="desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS, Dijkstra, walkability analysis" />
+    content="desire paths, desire lines, walkability, pedestrian movement, permeability, urban design, agent-based modeling, H3 hex grid, walking resistance, pathfinding, GIS, walkability analysis" />
   <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
 
   <meta name="theme-color" content="#0a0e17" />
@@ -22,9 +22,9 @@
 
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
-  <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+  <meta property="og:title" content="Desire Paths — read where people choose to walk" />
   <meta property="og:description"
-    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
   <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -32,9 +32,9 @@
   <meta property="og:site_name" content="Desire Paths" />
 
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
+  <meta name="twitter:title" content="Desire Paths — read where people choose to walk" />
   <meta name="twitter:description"
-    content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
   <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
 
   <!-- Open Graph / Facebook -->
@@ -66,7 +66,7 @@
       "@context": "https://schema.org",
       "@type": "SoftwareSourceCode",
       "name": "Desire Paths — Agent-Based Pedestrian Flow Simulator",
-      "description": "An interactive agent-based simulation that models how pedestrians naturally carve desire paths across terrain using H3 hex grids, friction fields, and real-world map data.",
+       "description": "An interactive simulator that reveals where pedestrians naturally walk across real streets and parks, using H3 hex grids, a walking-resistance surface, and real map data.",
       "url": "https://abelvm.github.io/desire-paths/",
       "codeRepository": "https://github.com/abelvm/desire-paths",
       "issueTracker": "https://github.com/abelvm/desire-paths/issues",
@@ -76,7 +76,7 @@
       },
       "operatingSystem": "Any modern web browser",
       "applicationCategory": "VisualizationApplication",
-      "keywords": ["desire paths", "pedestrian flow simulation", "agent-based modeling", "H3 hex grid", "urban planning", "friction field", "pathfinding", "cartography", "GIS", "walkability analysis", "Dijkstra algorithm", "affordance theory"],
+       "keywords": ["desire paths", "desire lines", "walkability", "pedestrian movement", "permeability", "urban design", "agent-based modeling", "H3 hex grid", "walking resistance", "pathfinding", "GIS", "affordance theory"],
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -179,7 +179,7 @@
       "@context": "https://schema.org",
       "@type": "WebApplication",
       "name": "Desire Paths",
-      "description": "An interactive agent-based simulation tool that models how pedestrians naturally carve desire paths across terrain. Place origin and destination nodes on real-world maps, then watch friction fields form and emergent foot traffic patterns emerge.",
+       "description": "An interactive tool that reveals where pedestrians naturally walk across real places. Drop start and end points on the map, then watch desire lines form and foot-traffic patterns emerge.",
       "url": "https://abelvm.github.io/desire-paths/",
       "applicationCategory": "VisualizationApplication",
       "operatingSystem": "Any modern web browser",
@@ -189,7 +189,7 @@
         "price": "0",
         "priceCurrency": "USD"
       },
-      "keywords": "desire paths, pedestrian flow simulation, agent-based modeling, H3 hex grid, urban planning, friction field, pathfinding, cartography, GIS",
+       "keywords": "desire paths, desire lines, walkability, pedestrian movement, permeability, urban design, agent-based modeling, H3 hex grid, walking resistance, pathfinding, GIS",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -203,13 +203,13 @@
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <script type="module" crossorigin src="./assets/index-BMnbicgN.js"></script>
+  <script type="module" crossorigin src="./assets/index-JzFcEtIv.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DdACKOZr.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-Uo15bBoF.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-CN6oZHO7.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-B78RwI9L.js">
   <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
-  <link rel="stylesheet" crossorigin href="./assets/index-Cr-K4i7T.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-BBvo96My.css">
 </head>
 
 <body>
@@ -240,7 +240,7 @@
       <div class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-kicker">Cartographic flow lab</div>
+            <div class="panel-kicker">Walking instinct lab</div>
             <h2>Desire Paths</h2>
           </div>
           <div class="panel-orb" aria-hidden="true"></div>
@@ -255,7 +255,7 @@
           <button id="tab-simulation" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
             aria-controls="panel-simulation" data-tab-target="panel-simulation" tabindex="-1">
             <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
-            <span>Simulation</span>
+            <span>Model</span>
           </button>
           <button id="tab-more-info" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
             aria-controls="panel-more-info" data-tab-target="panel-more-info" tabindex="-1">
@@ -270,12 +270,13 @@
             <div class="panel-text">
               <p>
                 A desire path, or social trail, is an unplanned route created by repeated pedestrian movement,
-                usually revealing a route that users perceive as shorter, clearer, or more convenient than the
-                official path.
+                usually revealing a route that people perceive as shorter, clearer, or more convenient than the
+                official path. They are the city's honest feedback — evidence of where the design aligns with,
+                or ignores, how people actually move.
               </p>
               <p>
-                Use this simulator to place origins and destinations on real map data, then observe emergent flow
-                corridors shaped by terrain resistance and collective movement.
+                Use this tool to drop start and end points on real map data, then watch desire lines emerge —
+                shaped by how walkable the ground is and by everyone walking at once.
               </p>
               <p>
                 Read more at <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank"
@@ -285,17 +286,16 @@
             <div class="onboarding-card intro-card">
               <div class="onboarding-step active" data-step="1">
                 <span class="step-number">1</span>
-                <span class="step-text">Choose Origin, Destination, or Dual mode, then click on the map to place nodes
-                  with your selected weight.</span>
+                <span class="step-text">Pick a start, an end, or a both-ends point, then click the map. Weight sets how much that place pulls walkers.</span>
               </div>
               <div class="onboarding-step active" data-step="2">
                 <span class="step-number">2</span>
-                <span class="step-text">Tune simulation parameters to explore different behavioral assumptions for route
-                  selection and path emergence.</span>
+                <span class="step-text">Adjust the behaviour sliders to explore how people weigh comfort against a direct
+                  line.</span>
               </div>
               <div class="onboarding-step active" data-step="3">
                 <span class="step-number">3</span>
-                <span class="step-text">Run Simulate Flows, inspect the resulting network, and export as GeoJSON for
+                <span class="step-text">Reveal the desire lines, inspect the network, and export as GeoJSON for
                   further urban analysis.</span>
               </div>
             </div>
@@ -304,31 +304,31 @@
           <section id="panel-simulation" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-simulation"
             tabindex="0" hidden>
             <div class="panel-meta">
-              <div id="mode-status" class="mode-indicator mode-origin">
-                Placement: Origin nodes · 0 placed
-              </div>
+                <div id="mode-status" class="mode-indicator mode-origin">
+                  Starts placed: 0
+                </div>
               <div id="node-count-chip" class="count-chip">
                 <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
-                  class="count-chip-dests">0</span><span class="count-chip-label"> nodes</span>
+                  class="count-chip-dests">0</span>                  <span class="count-chip-label"> points</span>
               </div>
             </div>
 
             <div class="panel-section">
-              <div class="section-label">Placement</div>
+              <div class="section-label">Add points</div>
               <div class="placement-mode-group" role="group" aria-label="Placement mode">
                 <button class="btn btn-segment is-active" id="btn-mode-origin" type="button"
-                  data-placement-mode="origin" aria-pressed="true" data-tooltip="Place origin nodes (start points)"><i data-lucide="log-out"></i></button>
+                  data-placement-mode="origin" aria-pressed="true" data-tooltip="Start point — where the walk begins"><i data-lucide="log-out"></i></button>
                 <button class="btn btn-segment" id="btn-mode-destination" type="button"
-                  data-placement-mode="destination" aria-pressed="false" data-tooltip="Place destination nodes (end points)"><i data-lucide="log-in"></i></button>
+                  data-placement-mode="destination" aria-pressed="false" data-tooltip="End point — where the walk ends"><i data-lucide="log-in"></i></button>
                 <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
-                  aria-pressed="false" data-tooltip="Place both origin and destination nodes"><i data-lucide="log-in"></i><i data-lucide="log-out"></i></button>
+                  aria-pressed="false" data-tooltip="Both ends — start and end at once"><i data-lucide="log-in"></i><i data-lucide="log-out"></i></button>
               </div>
               <div class="weight-control">
                 <div class="weight-control-head">
                   <span class="weight-label">
-                    Node weight
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Node weight help"
-                      data-tooltip="Adjust new node weight with the slider. Right-click placed nodes to change weight, type, or remove them.">
+                    Pull strength
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Pull strength help"
+                      data-tooltip="How strongly this place draws walkers. Higher = a more important destination or a busier origin. Right-click a placed point to change its pull, role, or remove it.">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -343,85 +343,85 @@
             </div>
 
             <details class="panel-section panel-disclosure" id="simulation-params-disclosure">
-              <summary class="panel-disclosure-summary">
-                <span class="section-label">Simulation parameters</span>
-                <span class="panel-disclosure-meta">Advanced tuning</span>
-              </summary>
-              <div class="param-list panel-disclosure-body">
-                <label class="param-item" for="sim-param-wa">
-                  <span class="param-item-head">Affordance weight
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Affordance weight help"
-                      data-tooltip="Higher values bias agents toward worn or comfortable surfaces.">
+                <summary class="panel-disclosure-summary">
+                  <span class="section-label">Walking behaviour</span>
+                  <span class="panel-disclosure-meta">Fine-tune the model</span>
+                </summary>
+                <div class="param-list panel-disclosure-body">
+                  <label class="param-item" for="sim-param-wa">
+                    <span class="param-item-head">Comfort preference
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Comfort preference help"
+                        data-tooltip="How much walkers favour ground that is already easy or worn-in, over a harder shortcut.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-wa-value">1</span>
+                    <input id="sim-param-wa" type="range" min="1" max="8" step="1" value="1" />
+                  </label>
+
+                  <label class="param-item" for="sim-param-wd">
+                    <span class="param-item-head">Shortcut preference
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Shortcut preference help"
+                        data-tooltip="How much walkers trade a direct line for an easier surface. Low = they'll detour for comfort; high = they go straight.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-wd-value">4</span>
+                    <input id="sim-param-wd" type="range" min="1" max="8" step="1" value="4" />
+                  </label>
+
+                  <label class="param-item" for="sim-param-vision-depth">
+                    <span class="param-item-head">Look-ahead
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Look-ahead help"
+                        data-tooltip="How far a walker scans ahead for options before committing to a step.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-vision-depth-value">15</span>
+                    <input id="sim-param-vision-depth" type="range" min="5" max="30" step="5" value="15" />
+                  </label>
+
+                  <label class="param-item" for="sim-param-fov">
+                    <span class="param-item-head">Viewing arc
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Viewing arc help"
+                        data-tooltip="The slice of ground ahead a walker can see and consider — narrow = tunnel vision, wide = scans everywhere.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-fov-value">120°</span>
+                    <input id="sim-param-fov" type="range" min="30" max="360" step="30" value="120" />
+                  </label>
+
+                  <label class="param-item" for="sim-param-agents-per-weight">
+                    <span class="param-item-head">Crowd size
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Crowd size help"
+                        data-tooltip="How many virtual walkers set out from each weighted place. More = smoother, more confident paths.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-agents-per-weight-value">25</span>
+                    <input id="sim-param-agents-per-weight" type="range" min="5" max="100" step="5" value="25" />
+                  </label>
+
+                  <label class="param-item" for="sim-param-temperature">
+                    <span class="param-item-head">Spontaneity
+                      <span class="help-tip" tabindex="0" role="button" aria-label="Spontaneity help"
+                        data-tooltip="How much chance overrides habit. Zero = everyone rational; high = some wander.">
+                        <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                      </span>
+                    </span>
+                    <span class="param-item-value" id="sim-param-temperature-value">0.50</span>
+                    <input id="sim-param-temperature" type="range" min="0" max="2" step="0.25" value="0.5" />
+                  </label>
+
+                  <label class="param-toggle" for="sim-param-emergent-wear">
+                    <input id="sim-param-emergent-wear" type="checkbox" checked />
+                    <span>Paths wear in</span>
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Paths wear in help"
+                      data-tooltip="Ground that gets used becomes more inviting — the feedback loop that turns a faint track into a real path.">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-wa-value">1</span>
-                  <input id="sim-param-wa" type="range" min="1" max="8" step="1" value="1" />
-                </label>
-
-                <label class="param-item" for="sim-param-wd">
-                  <span class="param-item-head">Distance penalty
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Distance penalty help"
-                      data-tooltip="Higher values prioritize shorter routes over high-affordance detours.">
-                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                    </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-wd-value">4</span>
-                  <input id="sim-param-wd" type="range" min="1" max="8" step="1" value="4" />
-                </label>
-
-                <label class="param-item" for="sim-param-vision-depth">
-                  <span class="param-item-head">Vision depth
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Vision depth help"
-                      data-tooltip="How far ahead each agent evaluates candidate cells.">
-                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                    </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-vision-depth-value">15</span>
-                  <input id="sim-param-vision-depth" type="range" min="5" max="30" step="5" value="15" />
-                </label>
-
-                <label class="param-item" for="sim-param-fov">
-                  <span class="param-item-head">Field of view
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Field of view help"
-                      data-tooltip="Agent angular perception cone in degrees.">
-                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                    </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-fov-value">120°</span>
-                  <input id="sim-param-fov" type="range" min="30" max="360" step="30" value="120" />
-                </label>
-
-                <label class="param-item" for="sim-param-agents-per-weight">
-                  <span class="param-item-head">Agents per weight unit
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Agents per weight unit help"
-                      data-tooltip="Scales how many agents are spawned for each origin weight level.">
-                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                    </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-agents-per-weight-value">25</span>
-                  <input id="sim-param-agents-per-weight" type="range" min="5" max="100" step="5" value="25" />
-                </label>
-
-                <label class="param-item" for="sim-param-temperature">
-                  <span class="param-item-head">Temperature
-                    <span class="help-tip" tabindex="0" role="button" aria-label="Temperature help"
-                      data-tooltip="Higher values add stochasticity to route choice.">
-                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                    </span>
-                  </span>
-                  <span class="param-item-value" id="sim-param-temperature-value">0.50</span>
-                  <input id="sim-param-temperature" type="range" min="0" max="2" step="0.25" value="0.5" />
-                </label>
-
-                <label class="param-toggle" for="sim-param-emergent-wear">
-                  <input id="sim-param-emergent-wear" type="checkbox" checked />
-                  <span>Emergent wear</span>
-                  <span class="help-tip" tabindex="0" role="button" aria-label="Emergent wear help"
-                    data-tooltip="When enabled, traversed cells become more attractive during and after simulation.">
-                    <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
-                  </span>
-                </label>
+                  </label>
 
                 <button class="btn btn-ghost btn-wide" id="btn-reset-sim-params" type="button">
                   Reset to defaults
@@ -430,16 +430,16 @@
             </details>
 
             <div class="panel-section">
-              <div class="section-label">Simulation</div>
+              <div class="section-label">Run</div>
               <div class="btn-group">
-                <button class="btn btn-accent" id="btn-compute" type="button">Simulate Flows</button>
-                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
-                <button class="btn btn-danger" id="btn-clear">Reset Grid</button>
+                <button class="btn btn-accent" id="btn-compute" type="button">Reveal desire lines</button>
+                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export walk map</button>
+                <button class="btn btn-danger" id="btn-clear">Clear map</button>
               </div>
             </div>
 
             <div class="panel-footer">
-              <div id="scan-loader">Sampling walkable surfaces...</div>
+              <div id="scan-loader">Reading the ground...</div>
               <div class="simulation-progress-wrap">
                 <div id="simulation-progress" class="simulation-progress" role="progressbar"
                   aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -447,7 +447,7 @@
                 </div>
                 <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
               </div>
-              <div id="max-flow-readout" class="density-readout">Peak flow intensity: 0</div>
+              <div id="max-flow-readout" class="density-readout">Busiest path: 0 walks</div>
             </div>
           </section>
 
@@ -488,7 +488,8 @@
                   <p>Urban planners can use desire path simulations to predict where pedestrians will create new routes
                     before they exist. This helps in designing park layouts that align with natural foot traffic,
                     identifying walkable versus impassable zones around facilities, and deciding where to build official
-                    paths to prevent environmental degradation from informal trails.</p>
+                    paths to prevent environmental degradation from informal trails. A dense desire-line network signals
+                    high pedestrian permeability; gaps show where connections are severed.</p>
                 </details>
 
                 <details class="faq-item">
@@ -525,10 +526,11 @@
 
                 <details class="faq-item">
                   <summary><strong>How do simulation parameters affect results?</strong></summary>
-                  <p>Adjustable in the Simulation tab: <strong>Affordance weight</strong> biases agents toward worn surfaces;
-                    <strong>Distance penalty</strong> prioritizes shorter routes; <strong>Vision depth</strong> and
-                    <strong>Field of view</strong> control local perception range; <strong>Temperature</strong> adds
-                    randomness to route choice; <strong>Emergent wear</strong> enables positive feedback on traversed cells.</p>
+                  <p>Adjustable in the Walking behaviour tab: <strong>Comfort preference</strong> biases walkers toward
+                    worn-in ground; <strong>Shortcut preference</strong> trades a direct line for an easier surface;
+                    <strong>Look-ahead</strong> and <strong>Viewing arc</strong> set how far and wide a walker scans;
+                    <strong>Spontaneity</strong> adds chance to route choice; <strong>Paths wear in</strong> lets used
+                    ground grow more inviting.</p>
                 </details>
               </div>
 
@@ -556,36 +558,36 @@
 
   <div class="legend">
     <div class="legend-title-row">
-      <div class="legend-title">Friction resistance map</div>
+      <div class="legend-title">Walking resistance</div>
       <button id="btn-toggle-friction" class="legend-icon-button legend-toggle-btn" type="button"
-        aria-label="Hide friction legend" aria-pressed="true">
+        aria-label="Hide walking-resistance legend" aria-pressed="true">
         <span class="toggle-icon">−</span>
       </button>
     </div>
     <div id="friction-legend-body">
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(231, 76, 60, 0.75)"></span>
-        Hard structure (Cost: ∞)
+        Building / barrier — can't cross
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(39, 174, 96, 0.55)"></span>
-        Dense vegetation (Cost: 4.0)
+        Dense planting
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(166, 216, 84, 0.45)"></span>
-        Permeable greenspace (Cost: 2.5)
+        Lawn / soft ground
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(0, 150, 255, 0.15)"></span>
-        Walkable baseline
+        Pavement / easy walking
       </div>
     </div>
 
-    <div class="legend-title legend-title-spaced">Continuous flow network</div>
+    <div class="legend-title legend-title-spaced">Where people choose to walk</div>
     <div class="legend-gradient"></div>
     <div class="legend-labels">
-      <span>0 Paths</span>
-      <span id="legend-max-label">Max Flow</span>
+      <span>Quiet</span>
+      <span id="legend-max-label">Busiest</span>
     </div>
   </div>
 
