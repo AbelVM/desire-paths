@@ -334,7 +334,7 @@ html {
   margin-bottom: 0;
   border-top: 1px solid var(--border);
   padding-top: 10px;
-  padding-bottom: 2px;
+  padding-bottom: 24px;
 }
 
 #simulation-params-disclosure {
@@ -374,6 +374,7 @@ html {
   /* background: var(--panel); */
   border-top: 1px solid var(--border);
   padding-top: 10px;
+  padding-bottom: 24px;
 }
 
 #simulation-params-disclosure {

@@ -782,6 +782,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   };
 
   const syncFlowReadout = () => {
+    if (!uiState.flowReadout) return;
     const peak = Math.max(0, Math.round(map.globalPeakFlow ?? 0));
     uiState.flowReadout.innerText = `Busiest path: ${peak} walks · ${map.flowsReady ? 'Desire lines ready' : 'No walk yet'}`;
     uiState.flowReadout.hidden = !map.flowsReady;
@@ -862,8 +863,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.exportButton) uiState.exportButton.disabled = busy;
     uiState.computeButton.disabled = busy;
     uiState.clearButton.disabled = busy;
-    uiState.loader.innerText = message;
-    uiState.loader.style.display = busy ? 'block' : 'none';
+    if (uiState.loader) {
+      uiState.loader.innerText = message;
+      uiState.loader.style.display = busy ? 'block' : 'none';
+    }
     uiState.computeButton.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
     // Update cursor during computation
     setMapCursorWait?.(map, busy);
