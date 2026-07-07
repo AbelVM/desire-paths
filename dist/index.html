@@ -18,19 +18,24 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
   <link rel="manifest" href="./manifest.json" />
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="icon" type="image/png" href="./favicon.png" />
 
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
   <meta property="og:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
   <meta property="og:description"
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Desire Paths simulator showing pedestrian flow heatmap on a city map" />
   <meta property="og:site_name" content="Desire Paths" />
 
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Desire Paths — Interactive Agent-Based Flow Simulator" />
   <meta name="twitter:description"
     content="Place origin and destination nodes on real-world maps, then simulate how pedestrians naturally carve paths through terrain friction fields using agent-based modeling." />
+  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
 
   <!-- Open Graph / Facebook -->
 
@@ -198,13 +203,13 @@
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
-  <script type="module" crossorigin src="./assets/index-Bkeae5PP.js"></script>
+  <script type="module" crossorigin src="./assets/index-Dgr996Hp.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DdACKOZr.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-Uo15bBoF.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-CN6oZHO7.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-B78RwI9L.js">
   <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
-  <link rel="stylesheet" crossorigin href="./assets/index-10fvoH1R.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-Cr-K4i7T.css">
 </head>
 
 <body>
@@ -417,6 +422,10 @@
                     <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                   </span>
                 </label>
+
+                <button class="btn btn-ghost btn-wide" id="btn-reset-sim-params" type="button">
+                  Reset to defaults
+                </button>
               </div>
             </details>
 
