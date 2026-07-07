@@ -255,7 +255,9 @@ export async function triggerFastScan(state, mapInstance) {
 
   // Precompute bearings between all cell pairs within VISUAL_DEPTH to eliminate per-tick trig calls
   // OPTIMIZATION: Pass neighborDisks to avoid redundant gridDisk calls
-  const bearingMap = precomputeBearingMap(viewHexes, visionDepth, neighborDisks);
+  // Skip impassable cells (agents never stand on them) to keep the map small — it is
+  // structured-cloned into every agent worker, so size drives memory pressure / SIGILL.
+  const bearingMap = precomputeBearingMap(viewHexes, visionDepth, neighborDisks, state._frictionObj);
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
   mapInstance.updateLayers?.();

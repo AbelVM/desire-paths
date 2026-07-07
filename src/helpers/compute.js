@@ -300,17 +300,30 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
 // Uses Map instead of plain object to avoid V8 "too many properties to enumerate"
 // error when the bearing cache is transferred to Web Workers via postMessage.
 // OPTIMIZATION: Reuses precomputed neighbor disks to avoid redundant gridDisk calls.
-function precomputeBearingMap(cells, visualDepth, precomputedDisks) {
+//
+// IMPORTANT: agents can never stand on impassable cells, so bearings *from* an
+// impassable cell are never queried, and bearings *to* an impassable cell are never
+// used (agents never step there). Skipping impassable cells here roughly halves the
+// map size, which matters because this map is structured-cloned into every agent
+// worker — cloning the full (impassable-inclusive) map across 2+ workers was the
+// memory pressure that triggered SIGILL with 2+ origins.
+function precomputeBearingMap(cells, visualDepth, precomputedDisks, frictionLookup) {
   const result = new Map();
   const disks = precomputedDisks || (cells.length > 0 ? precomputeNeighborDisks(cells, visualDepth) : null);
+  const impassable = FRICTION_COSTS.IMPASSABLE;
+  const isPassable = (c) => (frictionLookup ? (frictionLookup[c] ?? 0) : 0) < impassable;
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
+    // No bearings FROM impassable cells — agents are never positioned there.
+    if (!isPassable(cell)) continue;
     const sLatLng = _getCachedLatLng(cell);
     // Use precomputed disks if available, otherwise compute on-demand
     const disk = disks ? disks[cell] : gridDisk(cell, visualDepth);
     for (let j = 0; j < disk.length; j++) {
       const n = disk[j];
       if (n === cell) continue;
+      // No bearings TO impassable cells — agents never step onto them.
+      if (!isPassable(n)) continue;
       const eLatLng = _getCachedLatLng(n);
       result.set(cell + '::' + n, _bearingFromLatLngs(sLatLng, eLatLng));
     }

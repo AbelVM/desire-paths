@@ -498,7 +498,15 @@ export async function runAgentBatches(
     } catch (_e2) {}
   }
 
-  const workerCount = Math.min(MAX_AGENT_WORKERS, plan.length);
+  // The agent simulation is a true ABM: agents accumulate footprints into a single
+  // shared `accumulatedFootprints` structure that boosts affordance for subsequent
+  // agents (paper §3.4 — friction/affordance updates). That shared state MUST be
+  // consistent across the whole run, so the plan cannot be split across multiple
+  // workers (each worker would receive an independent structured-clone and the ABM
+  // interaction would be lost). Running in a single execution context also removes
+  // the 2+ worker trigger that produced SIGILL with 2+ origins. Gradient batches
+  // (runGradientBatches) remain parallel because they are independent per destination.
+  const workerCount = 1;
   try {
     console.debug &&
       console.debug(
