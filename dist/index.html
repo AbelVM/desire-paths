@@ -207,13 +207,13 @@
   <!-- COI service worker registration script for cross-origin isolation and SharedArrayBuffer support. See https://web.dev/coop-coep/ -->
   <script src="coi-serviceworker.js"></script>
 
-  <script type="module" crossorigin src="./assets/index-DVyXN5u3.js"></script>
+  <script type="module" crossorigin src="./assets/index-CWlRzLx8.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DdACKOZr.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-Uo15bBoF.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-CN6oZHO7.js">
-  <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-B78RwI9L.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-1sk8uQNK.js">
   <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
-  <link rel="stylesheet" crossorigin href="./assets/index-Cy6VFHod.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-B5K0Q4yd.css">
 </head>
 
 <body>
@@ -455,17 +455,6 @@
                 <button class="btn btn-accent" id="btn-compute" type="button">Reveal desire lines</button>
                 <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export walk map</button>
                 <button class="btn btn-danger" id="btn-clear">Clear map</button>
-              </div>
-              <div class="run-status">
-                <div id="scan-loader">Reading the ground...</div>
-                <div class="simulation-progress-wrap">
-                  <div id="simulation-progress" class="simulation-progress" role="progressbar"
-                    aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-                    <span id="simulation-progress-bar"></span>
-                  </div>
-                  <div id="simulation-progress-label" class="simulation-progress-label">Idle</div>
-                </div>
-                <div id="max-flow-readout" class="density-readout" hidden>Busiest path: 0 walks</div>
               </div>
             </div>
           </section>

@@ -1,4 +1,4 @@
-import { gridDisk, gridRing, polygonToCells } from 'h3-js';
+import { gridDisk, polygonToCells } from 'h3-js';
 import {
   FRICTION_COSTS,
   SIMULATION_PARAMS,
@@ -363,9 +363,21 @@ export function computeImpassableBlurSnapshot({
     visited[impassables[i]] = 0;
   }
 
-  // Multi-source BFS using gridRing for proper ring-by-ring expansion.
-  // gridRing(d) returns only cells at exactly distance d, avoiding the center cell.
-  // This is more efficient than gridDisk(cell, 1) in a loop.
+  // Multi-source BFS using cached distance-1 neighbor disks for ring-by-ring
+  // expansion. gridRing(cell, 1) internally computes gridDisk(cell, 1) and then
+  // filters out the center, so calling gridDisk once and skipping the center is
+  // strictly cheaper. The result is cached per cell: each cell is expanded at
+  // most once, so there is no redundant H3 work.
+  const nbrCache = Object.create(null);
+  const getNeighbors = (c) => {
+    let d = nbrCache[c];
+    if (d === undefined) {
+      d = gridDisk(c, 1);
+      nbrCache[c] = d;
+    }
+    return d;
+  };
+
   // Track frontier: cells at distance d-1 that need to expand to distance d
   const frontier = [];
   for (let i = 0; i < impassables.length; i++) {
@@ -377,16 +389,15 @@ export function computeImpassableBlurSnapshot({
     const nextFrontier = [];
     for (let i = 0; i < frontier.length; i++) {
       const cell = frontier[i];
-      try {
-        const ring = gridRing(cell, 1);
-        for (let n = 0; n < ring.length; n++) {
-          const nc = ring[n];
-          if (visited[nc] === undefined) {
-            visited[nc] = currentDist;
-            nextFrontier.push(nc);
-          }
+      const ring = getNeighbors(cell);
+      for (let n = 0; n < ring.length; n++) {
+        const nc = ring[n];
+        if (nc === cell) continue; // skip the center cell
+        if (visited[nc] === undefined) {
+          visited[nc] = currentDist;
+          nextFrontier.push(nc);
         }
-      } catch (_e) {}
+      }
     }
     frontier.length = 0;
     for (let i = 0; i < nextFrontier.length; i++) {
