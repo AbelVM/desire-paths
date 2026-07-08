@@ -49,6 +49,21 @@ const DIAL_MAX_C = 128;
 let _graphCacheKey = null;
 let _graphCache = null;
 
+/**
+ * Drop the cached gradient graph. The graph is keyed by the *identity* of the
+ * friction source (see getGradientGraph). The mapping stage reuses the same
+ * `cellFrictionMap` instance across remaps (it calls `.clear()` then re-`.set`s
+ * new friction), so the reference is stable while the *contents* change. Without
+ * an explicit invalidation the next simulation run would silently reuse the
+ * previous mapping's adjacency/topology. Call this whenever friction topology
+ * changes (e.g. from clearComputeCaches, which runs at the start of every
+ * triggerFastScan).
+ */
+export function invalidateGradientGraph() {
+  _graphCache = null;
+  _graphCacheKey = null;
+}
+
 export function getGradientGraph(cellSource) {
   if (_graphCache && _graphCacheKey === cellSource) return _graphCache;
 

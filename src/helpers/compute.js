@@ -24,7 +24,12 @@ import {
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
-import { computeDijkstra, getGradientGraph, getGraphNeighborsR1 } from './dijkstra.js';
+import {
+  computeDijkstra,
+  getGradientGraph,
+  getGraphNeighborsR1,
+  invalidateGradientGraph,
+} from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
 
 // Re-export for backward compatibility with existing code references
@@ -283,6 +288,12 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
   const visited = Object.create(null);
   let gen = 0;
 
+  // Single BFS queue reused across all origins (sized to the max possible
+  // frontier: every passable cell is enqueued at most once per generation). This
+  // replaces the per-origin / per-level `nextQueue` array churn that previously
+  // allocated ~maxDepth small arrays per origin — a major GC source at city scale.
+  const queue = new Array(cells.length);
+
   const origins = originCells && originCells.length ? originCells : cells;
   for (let i = 0; i < origins.length; i++) {
     const cell = origins[i];
@@ -291,35 +302,40 @@ function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDi
     gen++;
     const visible = Object.create(null);
     let visibleCount = 0;
-    const queue = [cell]; // BFS queue
+
+    // Ring-buffer BFS: head/tail pointers over `queue`, with level counting so we
+    // stop expanding once we reach `maxDepth` (cells at exactly maxDepth are still
+    // marked visible, just not expanded).
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = cell;
     visited[cell] = gen;
 
-    // Flood-fill from origin using cached distance-1 disks for proper ring-by-ring expansion.
-    // This marks all cells reachable without crossing impassable terrain.
+    let levelRemaining = 1;
+    let nextLevelCount = 0;
     let currentDist = 0;
-    while (currentDist < maxDepth && queue.length > 0) {
-      const nextQueue = [];
-      for (let q = 0; q < queue.length; q++) {
-        const current = queue[q];
-        // Get immediate neighbors from the lazy cache
-        const neighbors = getNeighbors(current);
-        for (let n = 0; n < neighbors.length; n++) {
-          const neighbor = neighbors[n];
-          if (neighbor === current) continue;
-          if (visited[neighbor] === gen) continue;
-          if (!isPassable[neighbor]) continue;
+    while (currentDist < maxDepth && head < tail) {
+      const current = queue[head++];
+      levelRemaining--;
+      // Get immediate neighbors from the lazy cache
+      const neighbors = getNeighbors(current);
+      for (let n = 0; n < neighbors.length; n++) {
+        const neighbor = neighbors[n];
+        if (neighbor === current) continue;
+        if (visited[neighbor] === gen) continue;
+        if (!isPassable[neighbor]) continue;
 
-          visited[neighbor] = gen;
-          visible[neighbor] = true;
-          visibleCount++;
-          nextQueue.push(neighbor);
-        }
+        visited[neighbor] = gen;
+        visible[neighbor] = true;
+        visibleCount++;
+        queue[tail++] = neighbor;
+        nextLevelCount++;
       }
-      queue.length = 0;
-      for (let q = 0; q < nextQueue.length; q++) {
-        queue.push(nextQueue[q]);
+      if (levelRemaining === 0) {
+        currentDist++;
+        levelRemaining = nextLevelCount;
+        nextLevelCount = 0;
       }
-      currentDist++;
     }
 
     if (visibleCount > 0) result[cell] = visible;
@@ -485,6 +501,10 @@ export function clearComputeCaches(ctx) {
   clearGradientCache(ctx);
   ctx._gradientCacheGen = undefined;
   clearLatLngCache();
+  // The gradient graph is keyed by the (stable) cellFrictionMap reference, which
+  // the mapping stage reuses in place across remaps. Drop it so the next run
+  // rebuilds adjacency from the current friction instead of a stale topology.
+  invalidateGradientGraph();
 }
 
 /** Clear the module-level lat/lng cache to prevent unbounded memory growth. */

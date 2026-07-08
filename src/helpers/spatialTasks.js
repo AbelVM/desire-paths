@@ -47,19 +47,26 @@ export function computeAoiHexes(aoiPolygon, resolution = SIMULATION_PARAMS.h3Str
 }
 
 // --- Deterministic coordinate hash for precise deduplication -----------------
-// FNV-1a style hash over downsampled coordinates of the first ring.
+// FNV-1a style hash over downsampled coordinates of ALL rings (outer + holes),
+// so polygons that share an outer ring but differ in holes (common for
+// landuse/landcover) do not collide in the cell cache.
 function _hashCoords(coords) {
-  const ring = coords && coords[0];
-  if (!ring || !ring.length) return '';
+  if (!coords || !coords.length) return '';
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < ring.length; i++) {
-    const c = ring[i] || [0, 0];
-    h ^= Math.imul(Math.round(c[0] * 1e4), 16777619) >>> 0;
-    h = Math.imul(h, 16777619) >>> 0;
-    h ^= Math.imul(Math.round(c[1] * 1e4), 16777619) >>> 0;
-    h = Math.imul(h, 16777619) >>> 0;
+  let totalVerts = 0;
+  for (let r = 0; r < coords.length; r++) {
+    const ring = coords[r] || [];
+    totalVerts += ring.length;
+    for (let i = 0; i < ring.length; i++) {
+      const c = ring[i] || [0, 0];
+      h ^= Math.imul(Math.round(c[0] * 1e4), 16777619) >>> 0;
+      h = Math.imul(h, 16777619) >>> 0;
+      h ^= Math.imul(Math.round(c[1] * 1e4), 16777619) >>> 0;
+      h = Math.imul(h, 16777619) >>> 0;
+    }
   }
-  return `${h}:${ring.length}`;
+  if (totalVerts === 0) return '';
+  return `${h}:${totalVerts}`;
 }
 
 // Cache polygonToCells results to avoid repeated H3 computation for identical geometries
@@ -84,8 +91,11 @@ function _computeBboxKey(coords) {
 }
 
 function getCachedPolyCells(coords) {
-  // Fast bbox check: compute key only on cache miss (moved from top of function)
-  const key = _computeBboxKey(coords) + ':' + _hashCoords(coords);
+  // Fast bbox check: compute key only on cache miss (moved from top of function).
+  // Include the H3 resolution in the key: the same geometry at a different
+  // resolution yields different cells, so without it a resolution change would
+  // silently return stale cached cells.
+  const key = _computeBboxKey(coords) + ':' + _hashCoords(coords) + ':' + SIMULATION_PARAMS.h3StrideResolution;
   const cached = _polyCellsCache[key];
   if (cached) return cached;
 
@@ -170,8 +180,25 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   const cellToIdx = Object.create(null);
   for (let i = 0; i < n; i++) cellToIdx[viewHexes[i]] = i;
 
+  // Dynamic key→index map — grows as new layer keys are encountered. Defined
+  // before grouping so each group can be assigned a stable key id up front.
+  const keyToIdx = Object.create(null);
+  let nextIdx = 0;
+
+  function getOrCreateKeyId(key) {
+    let idx = keyToIdx[key];
+    if (idx === undefined) {
+      if (nextIdx >= MAX_LAYER_KEYS) return -1; // safety cap
+      idx = nextIdx++;
+      keyToIdx[key] = idx;
+    }
+    return idx;
+  }
+
   // Group features by surface classification tuple to enable batch processing
-  // Key: "layerKey|layerVal" → array of {geometry}
+  // Key: "layerKey|layerVal" → array of {geometry}. Assign each group a stable
+  // key id during grouping so the dense typed arrays can be sized to the ACTUAL
+  // number of distinct keys (not the fixed MAX_LAYER_KEYS stride).
   const grouped = Object.create(null);
   for (let i = 0; i < features.length; i++) {
     const feature = features[i];
@@ -186,39 +213,33 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     if (typeof layerVal === 'undefined') continue;
 
     const groupKey = `${layerKey}|${layerVal}`;
-    if (!grouped[groupKey]) grouped[groupKey] = { layerKey, layerVal, geometries: [] };
-    grouped[groupKey].geometries.push(feature.geometry);
-  }
-
-  // Pre-allocate typed arrays sized for worst-case (all cells × max distinct keys)
-  const layerFrictions = new Float32Array(n * MAX_LAYER_KEYS);
-  const hasLayer = new Uint8Array(n * MAX_LAYER_KEYS);
-
-  // Dynamic key→index map — grows as new layer keys are encountered
-  const keyToIdx = Object.create(null);
-  let nextIdx = 0;
-
-  function getOrCreateKeyId(key) {
-    let idx = keyToIdx[key];
-    if (idx === undefined) {
-      if (nextIdx >= MAX_LAYER_KEYS) return -1; // safety cap
-      idx = nextIdx++;
-      keyToIdx[key] = idx;
+    let group = grouped[groupKey];
+    if (!group) {
+      const layerId = getOrCreateKeyId(layerKey);
+      if (layerId < 0) continue; // exceeded key budget, skip this group
+      group = grouped[groupKey] = { layerKey, layerVal, layerId, geometries: [] };
     }
-    return idx;
+    group.geometries.push(feature.geometry);
   }
+
+  // Pre-allocate typed arrays sized for the ACTUAL number of distinct layer keys
+  // (not the fixed MAX_LAYER_KEYS stride). Distinct (layerKey, layerVal) pairs are
+  // bounded by the number of surface types, so this is typically a small fraction
+  // of MAX_LAYER_KEYS — cutting both memory footprint and the zeroing cost by
+  // roughly MAX_LAYER_KEYS/nextIdx for every fast-scan chunk.
+  const width = Math.max(1, nextIdx);
+  const layerFrictions = new Float32Array(n * width);
+  const hasLayer = new Uint8Array(n * width);
 
   // Process each group in batch — writes directly into typed arrays
   for (const group of Object.values(grouped)) {
-    const layerId = getOrCreateKeyId(group.layerKey);
-    if (layerId < 0) continue; // exceeded key budget, skip this group
     _applyGroupToBufferTyped(
       group.geometries,
-      layerId,
+      group.layerId,
       group.layerVal,
       cellToIdx,
       n,
-      MAX_LAYER_KEYS,
+      width,
       layerFrictions,
       hasLayer
     );
@@ -234,7 +255,7 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   const cellFrictionEntries = Object.create(null);
   for (let i = 0; i < n; i++) {
     let min = Infinity;
-    const base = i * MAX_LAYER_KEYS;
+    const base = i * width;
     for (let l = 0; l < nextIdx; l++) {
       if (hasLayer[base + l]) {
         const v = layerFrictions[base + l];
@@ -247,7 +268,7 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   // Reconstruct multiFrictionEntries from typed arrays for backward compatibility
   const multiFrictionEntries = Object.create(null);
   for (let i = 0; i < n; i++) {
-    const base = i * MAX_LAYER_KEYS;
+    const base = i * width;
     let hasData = false;
     // Check and build in single pass
     const entry = Object.create(null);
