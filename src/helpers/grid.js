@@ -286,7 +286,7 @@ function mapCells(frictionMap, cells, surface) {
 
 /**
  * Rebuild the plain-object visibility map and the bearing Map from the flat CSR
- * buffer produced by `computeVisibilityBearingCSR`. This runs IN-PROCESS on the
+ * buffer produced by `computeVisibilityBearingCSRIndexed`. This runs IN-PROCESS on the
  * main thread: it constructs the structures directly (no cross-worker structured
  * clone of a Map), so it cannot trigger the SIGILL that cloning a large Map does.
  *

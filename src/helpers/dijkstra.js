@@ -89,38 +89,41 @@ export function getGradientGraph(cellSource) {
   const cellToIdx = Object.create(null);
   for (let i = 0; i < V; i++) cellToIdx[cells[i]] = i;
 
-  // CSR adjacency built in TWO passes (count, then fill) rather than keeping a
-  // `lists` array of V intermediate arrays. Holding ~V intermediate arrays while
-  // calling `gridDisk` ~V times triggers non-deterministic memory corruption at
-  // city scale (V ~ 5e5): the prefix-sum `adjOffsets` ends up garbage, breaking
-  // every consumer (gradient Dijkstra, visibility BFS). The two-pass form
-  // allocates only the final flat `adjNeighbors` and is correct at any V. The
-  // extra `gridDisk` pass is a one-time cost (the graph is cached per source).
-  const adjOffsets = new Int32Array(V + 1);
+  // CSR adjacency built in a SINGLE `gridDisk` pass into one flat temp buffer,
+  // then prefix-summed + compacted. The prior two-pass form called `gridDisk`
+  // twice per cell; this halves that cost. It holds only ONE contiguous
+  // `Int32Array(6V)` (not V intermediate arrays) — the V-arrays shape is what
+  // previously triggered non-deterministic memory corruption at city scale
+  // (V ~ 5e5), where the prefix-sum `adjOffsets` came back garbage and broke
+  // every consumer (gradient Dijkstra, visibility BFS). A single flat buffer is
+  // correct at any V. The temp + `deg` arrays are freed once `adjNeighbors` is
+  // built (the graph is cached per source, so this is a one-time cost).
+  const temp = new Int32Array(V * 6);
+  const deg = new Int32Array(V);
+  let tempPos = 0;
   for (let i = 0; i < V; i++) {
     const cell = cells[i];
     const disk = gridDisk(cell, 1);
-    let cnt = 0;
     for (let k = 0; k < disk.length; k++) {
       const nb = disk[k];
       if (nb === cell) continue; // skip the center
       const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
-      if (j !== undefined) cnt++; // keep only passable, in-AOI neighbors
+      if (j !== undefined) {
+        temp[tempPos++] = j; // keep only passable, in-AOI neighbors
+        deg[i]++;
+      }
     }
-    adjOffsets[i + 1] = adjOffsets[i] + cnt;
   }
 
+  const adjOffsets = new Int32Array(V + 1);
+  for (let i = 0; i < V; i++) adjOffsets[i + 1] = adjOffsets[i] + deg[i];
+
   const adjNeighbors = new Int32Array(adjOffsets[V]);
-  let p = 0;
+  let w = 0;
   for (let i = 0; i < V; i++) {
-    const cell = cells[i];
-    const disk = gridDisk(cell, 1);
-    for (let k = 0; k < disk.length; k++) {
-      const nb = disk[k];
-      if (nb === cell) continue; // skip the center
-      const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
-      if (j !== undefined) adjNeighbors[p++] = j; // keep only passable, in-AOI neighbors
-    }
+    const start = adjOffsets[i];
+    const end = adjOffsets[i + 1];
+    for (let e = start; e < end; e++) adjNeighbors[w++] = temp[e];
   }
 
   // Precompute cell-id → r=1 neighbor cell-id array for O(1) reuse in the sim

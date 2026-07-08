@@ -3,7 +3,6 @@ import {
   computeFastScanSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
-  computeVisibilityBearingCSR,
   computeVisibilityBearingCSRIndexed,
   buildMappingGraph,
   mergeCellsChunk,
@@ -322,7 +321,6 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
-  if (kind === 'visibility-bearing') return computeVisibilityBearingCSR(payload);
   if (kind === 'visibility-bearing-indexed')
     return computeVisibilityBearingCSRIndexed(payload);
   if (kind === 'mapping-graph') return buildMappingGraph(payload);

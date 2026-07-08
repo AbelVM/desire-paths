@@ -11,11 +11,6 @@ import {
   POLY_CELLS_CACHE_MAX,
 } from './constants.js';
 import { computeDijkstra, getGradientGraph } from './dijkstra.js';
-// Visibility/bearing precomputes are shared with the main-thread simulation code
-// (compute.js). Importing them here lets the mapping stage run them off the main
-// thread. All usages are function-level, so the compute.js <-> spatialWorker.js
-// module graph stays safe (verified by build + tests).
-import { precomputeVisibilitySets, precomputeBearingMap } from './compute.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
@@ -478,76 +473,17 @@ export function computeImpassableBlurSnapshot({
  * and for the index→cellId mapping); `originCells` is the shard of origins this
  * call is responsible for (defaults to all of `viewHexes`).
  */
-export function computeVisibilityBearingCSR({
-  frictionEntries,
-  viewHexes = [],
-  visionDepth = SIMULATION_PARAMS.visionDepth,
-  originCells,
-} = {}) {
-  const frictionLookup = normalizeFrictionEntries(frictionEntries);
-  const N = viewHexes.length;
-  const origins = originCells && originCells.length ? originCells : viewHexes;
-  const M = origins.length;
-
-  const visibilityData = precomputeVisibilitySets(
-    frictionLookup,
-    viewHexes,
-    visionDepth,
-    undefined,
-    origins
-  );
-  const bearingMap = precomputeBearingMap(origins, visibilityData, frictionLookup);
-
-  // cellId -> integer index
-  const idxOf = Object.create(null);
-  for (let i = 0; i < N; i++) idxOf[viewHexes[i]] = i;
-
-  const globalIdx = new Int32Array(M);
-  for (let j = 0; j < M; j++) globalIdx[j] = idxOf[origins[j]];
-
-  // Pass 1: prefix-sum of pair counts → localOffsets (length M+1)
-  const localOffsets = new Int32Array(M + 1);
-  let P = 0;
-  for (let j = 0; j < M; j++) {
-    const visible = visibilityData[origins[j]];
-    const cnt = visible ? Object.keys(visible).length : 0;
-    localOffsets[j] = P;
-    P += cnt;
-  }
-  localOffsets[M] = P;
-
-  // Pass 2: fill neighbor indices + bearings
-  const visNeighbors = new Int32Array(P);
-  const bearings = new Float32Array(P);
-  for (let j = 0; j < M; j++) {
-    const cell = origins[j];
-    const visible = visibilityData[cell];
-    if (!visible) continue;
-    const start = localOffsets[j];
-    let k = 0;
-    for (const n in visible) {
-      const p = start + k;
-      visNeighbors[p] = idxOf[n];
-      const b = bearingMap.get(cell + '::' + n);
-      bearings[p] = typeof b === 'number' ? b : 0;
-      k++;
-    }
-  }
-
-  return { N, P, localOffsets, visNeighbors, bearings, globalIdx };
-}
-
 // ---------------------------------------------------------------------------
 // Index-space mapping graph (P1 + P3).
 //
-// The legacy `computeVisibilityBearingCSR` rebuilt r=1 adjacency per shard via
+// The previous gridDisk-based approach rebuilt r=1 adjacency per shard via
 // `gridDisk(cell, 1)` (see precomputeVisibilitySets) and looked friction up in a
 // plain-object map. That paid ~shards×V `gridDisk` calls and re-flattened the
 // friction object once per shard. This module builds the adjacency + an
 // index-aligned friction/lat-lng representation ONCE, off the main thread, and
 // the visibility shards then run entirely in integer index space — no `gridDisk`,
 // no cell strings, no per-shard friction flatten. The result CSR is identical in
-// shape to `computeVisibilityBearingCSR` (neighbor indices into `viewHexes`), so
+// shape (neighbor indices into `viewHexes`), so
 // `mergeVisibilityBearingShards` / `packCSR` / `reconstructVisibilityBearing`
 // are unchanged.
 // ---------------------------------------------------------------------------
@@ -591,56 +527,51 @@ export function buildMappingGraph({ frictionEntries, viewHexes } = {}) {
   // CSR adjacency in viewHexes index space. Impassable cells get an empty row
   // (they are never BFS origins and never appear as neighbors).
   //
-  // IMPORTANT: the CSR is built in TWO passes (count, then fill) instead of
-  // keeping a `lists` array of N intermediate arrays. Holding ~N intermediate
-  // arrays while calling `gridDisk` ~N times triggers non-deterministic memory
-  // corruption at city scale (N ~ 5e5): the prefix-sum `adjOffsets` ends up
-  // garbage, so the visibility BFS reads neighbour indices from the wrong rows
-  // and produces long-range ("grid-distance 76") edges. The two-pass form
-  // allocates only the final flat `adjNeighbors` and is correct at any N. The
-  // extra `gridDisk` pass is a one-time cost (the graph is built once per
-  // mapping generation), so it does not affect steady-state throughput.
-  const adjOffsets = new Int32Array(N + 1);
+  // IMPORTANT: the CSR is built in a SINGLE `gridDisk` pass into one flat temp
+  // buffer, then prefix-summed + compacted — half the `gridDisk` calls of the
+  // old two-pass form. It holds only ONE contiguous `Int32Array(6N)` (not N
+  // intermediate arrays): the V-arrays shape is what previously triggered
+  // non-deterministic memory corruption at city scale (N ~ 5e5), where the
+  // prefix-sum `adjOffsets` came back garbage and the visibility BFS read
+  // neighbour indices from the wrong rows (long-range "grid-distance 76"
+  // edges). A single flat buffer is correct at any N. The temp + `deg` arrays
+  // are freed once `adjNeighbors` is built (the graph is built once per mapping
+  // generation), so steady-state throughput is unaffected.
+  const temp = new Int32Array(N * 6);
+  const deg = new Int32Array(N);
+  let tempPos = 0;
   for (let i = 0; i < N; i++) {
+    if (frictionArr[i] < 0) continue; // impassable cells get an empty row
     const cell = viewHexes[i];
-    if (frictionArr[i] < 0) {
-      adjOffsets[i + 1] = adjOffsets[i];
-      continue;
-    }
     const disk = gridDisk(cell, 1);
-    let cnt = 0;
     for (let k = 0; k < disk.length; k++) {
       const nb = disk[k];
-      if (nb === cell) continue;
+      if (nb === cell) continue; // skip the center
       const j = idxOf[nb];
       if (j === undefined) continue; // out of AOI
       if (frictionArr[j] < 0) continue; // impassable neighbor
-      cnt++;
+      temp[tempPos++] = j;
+      deg[i]++;
     }
-    adjOffsets[i + 1] = adjOffsets[i] + cnt;
   }
+
+  const adjOffsets = new Int32Array(N + 1);
+  for (let i = 0; i < N; i++) adjOffsets[i + 1] = adjOffsets[i] + deg[i];
+
   const adjNeighbors = new Int32Array(adjOffsets[N]);
-  let p = 0;
+  let w = 0;
   for (let i = 0; i < N; i++) {
-    if (frictionArr[i] < 0) continue;
-    const cell = viewHexes[i];
-    const disk = gridDisk(cell, 1);
-    for (let k = 0; k < disk.length; k++) {
-      const nb = disk[k];
-      if (nb === cell) continue;
-      const j = idxOf[nb];
-      if (j === undefined) continue; // out of AOI
-      if (frictionArr[j] < 0) continue; // impassable neighbor
-      adjNeighbors[p++] = j;
-    }
+    const start = adjOffsets[i];
+    const end = adjOffsets[i + 1];
+    for (let e = start; e < end; e++) adjNeighbors[w++] = temp[e];
   }
 
   return { N, adjOffsets, adjNeighbors, frictionArr, latLngArr };
 }
 
 /**
- * Index-space visibility + bearing (shard). Equivalent output to
- * `computeVisibilityBearingCSR` but operates purely on integer indices using the
+ * Index-space visibility + bearing (shard). Equivalent output to the previous
+ * gridDisk-based approach but operates purely on integer indices using the
  * prebuilt CSR adjacency, aligned friction, and lat/lng arrays — no `gridDisk`,
  * no cell strings, no friction-object lookup. `originIdx` is an Int32Array of
  * viewHexes indices this shard owns (so the caller need not ship `viewHexes`).
