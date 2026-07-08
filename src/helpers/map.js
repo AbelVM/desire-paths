@@ -204,32 +204,65 @@ function updateOrCreateLayer(existingLayer, layerProps) {
   return new H3HexagonLayer(layerProps);
 }
 
+// Unified path-desire lookup that works for both Map and plain-object scores.
+function getPathScore(pathObj, h) {
+  if (!pathObj) return 0;
+  if (typeof pathObj.get === 'function') return pathObj.get(h) || 0;
+  return pathObj[h] || 0;
+}
+
+// Defensive one-time fallbacks: build the canonical lookup from the raw maps
+// and cache it on state so subsequent calls reuse it instead of re-copying.
+// In production these objects are always built before updateLayers is called
+// (grid.js / compute.js), so the fallback is rarely hit.
+function _buildFrictionObj(state) {
+  const obj = Object.create(null);
+  const src = state.cellFrictionMap;
+  if (src && typeof src.entries === 'function') {
+    for (const [k, v] of src.entries()) obj[k] = v;
+  } else if (src) {
+    for (const k in src) obj[k] = src[k];
+  }
+  state._frictionObj = obj;
+  return obj;
+}
+
+function _buildAffordanceObj(state) {
+  const obj = Object.create(null);
+  const src = state.affordanceMap;
+  if (src && typeof src.entries === 'function') {
+    for (const [k, v] of src.entries()) obj[k] = v;
+  } else if (state._affordanceObj) {
+    for (const k in state._affordanceObj) obj[k] = state._affordanceObj[k];
+  }
+  state._affordanceObj = obj;
+  return obj;
+}
+
 export function updateLayers(state, mapInstance) {
   const viewHexes = mapInstance.getHexes?.() ?? Array.from(state.cellFrictionMap?.keys() ?? []);
 
-  const frictionObj = Object.create(null);
-  if (state.cellFrictionMap && typeof state.cellFrictionMap.entries === 'function') {
-    for (const [k, v] of state.cellFrictionMap.entries()) frictionObj[k] = v;
-  } else {
-    for (const k in state.cellFrictionMap ?? {}) frictionObj[k] = state.cellFrictionMap[k];
-  }
+  // Use the canonical lookup objects directly instead of re-copying the full
+  // cell maps on every call. `_frictionObj` / `_affordanceObj` are built once
+  // per mapping/sim run (grid.js) and mutated in place; `pathDesireScores` is
+  // the live score map/object. Re-copying them here was O(N) over ~500k cells
+  // on every updateLayers call — including the per-frame friction toggle loop.
+  const frictionObj = state._frictionObj || _buildFrictionObj(state);
+  const affordanceObj = state._affordanceObj || _buildAffordanceObj(state);
+  const pathObj = state.pathDesireScores; // Map or plain object
 
-  const pathObj = Object.create(null);
-  if (state.pathDesireScores) {
-    if (typeof state.pathDesireScores.entries === 'function') {
-      for (const [k, v] of state.pathDesireScores.entries()) pathObj[k] = v;
-    } else {
-      for (const k in state.pathDesireScores) pathObj[k] = state.pathDesireScores[k];
-    }
-  }
-
-  // Build affordance lookup
-  const affordanceObj = Object.create(null);
-  if (state.affordanceMap && typeof state.affordanceMap.entries === 'function') {
-    for (const [k, v] of state.affordanceMap.entries()) affordanceObj[k] = v;
-  } else if (state._affordanceObj) {
-    for (const k in state._affordanceObj) affordanceObj[k] = state._affordanceObj[k];
-  }
+  // Only rebuild the per-view flat/flow arrays when the underlying data or the
+  // visible hex set actually changed. Calls that don't mutate the data (e.g.
+  // the friction-mesh visibility toggle) skip the rebuild entirely and just
+  // re-apply the layer props below. `_layerDataVersion` is bumped at every
+  // site that changes the canonical maps (grid.js / compute.js).
+  const dataVersion = state._layerDataVersion || 0;
+  const viewRef = viewHexes;
+  const unchanged =
+    state._lastLayerDataVersion !== undefined &&
+    state._lastLayerDataVersion === dataVersion &&
+    state._lastViewHexes === viewRef &&
+    state._flatData;
 
   const logMax = Math.log1p(state.globalPeakFlow ?? 1);
   const invLogMax = logMax > 0 ? 1 / logMax : 0;
@@ -249,32 +282,42 @@ export function updateLayers(state, mapInstance) {
     state._flatPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
   }
 
-  let flatCount = 0;
-  let flowCount = 0;
+  let flatData;
+  let flowData;
 
-  for (let i = 0; i < len; i++) {
-    const h = viewHexes[i];
-    const s = pathObj[h] ?? 0;
-    const entry = state._flatPool[flatCount++];
-    entry.hex = h;
-    entry.f = frictionObj[h] ?? 0;
-    entry.s = s;
-    entry.a = affordanceObj[h] ?? 0.1;
-    if (s > 0) {
-      while (state._flowPool.length < flowCount + 1) {
-        state._flowPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
+  if (!unchanged) {
+    let flatCount = 0;
+    let flowCount = 0;
+
+    for (let i = 0; i < len; i++) {
+      const h = viewHexes[i];
+      const s = getPathScore(pathObj, h);
+      const entry = state._flatPool[flatCount++];
+      entry.hex = h;
+      entry.f = frictionObj[h] ?? 0;
+      entry.s = s;
+      entry.a = affordanceObj[h] ?? 0.1;
+      if (s > 0) {
+        while (state._flowPool.length < flowCount + 1) {
+          state._flowPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
+        }
+        state._flowPool[flowCount++] = entry;
       }
-      state._flowPool[flowCount++] = entry;
     }
+
+    state._flatData = state._flatPool.slice(0, flatCount);
+    state._flowData = state._flowPool.slice(0, flowCount);
+    state._lastLayerDataVersion = dataVersion;
+    state._lastViewHexes = viewRef;
+
+    // Version counters let updateTriggers fire only when data actually changes,
+    // without relying on array-reference churn.
+    state._flatDataVersion = (state._flatDataVersion || 0) + 1;
+    state._flowDataVersion = (state._flowDataVersion || 0) + 1;
   }
 
-  const flatData = state._flatPool.slice(0, flatCount);
-  const flowData = state._flowPool.slice(0, flowCount);
-
-  // Version counters let updateTriggers fire only when data actually changes,
-  // without relying on array-reference churn.
-  state._flatDataVersion = (state._flatDataVersion || 0) + 1;
-  state._flowDataVersion = (state._flowDataVersion || 0) + 1;
+  flatData = state._flatData;
+  flowData = state._flowData;
 
   const baseLayerProps = {
     id: 'friction-mesh',

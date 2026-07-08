@@ -773,15 +773,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     );
     uiState.frictionButton?.setAttribute('aria-pressed', String(enabled));
     if (uiState.frictionLegendBody) uiState.frictionLegendBody.hidden = !enabled;
+    // A single updateLayers call is enough: the friction-mesh toggle only
+    // changes which layers are displayed, not the underlying data. updateLayers
+    // now skips the per-view array rebuild when the data is unchanged, so a
+    // per-frame rAF loop here was pure waste (~18 full rebuilds over 300ms).
     if (map.baseLayer || map.flowLayer) {
-      const startTime = performance.now();
-      const animateUpdate = () => {
-        if (performance.now() - startTime < 300) {
-          map.updateLayers?.();
-          requestAnimationFrame(animateUpdate);
-        }
-      };
-      requestAnimationFrame(animateUpdate);
+      map.updateLayers?.();
     }
   };
 

@@ -1126,6 +1126,8 @@ export async function computeDesirePaths(state, mapInstance) {
   try {
     clearSpatialWorkerProgressHandler();
   } catch (_e) {}
+  // Path scores / affordance changed — bump so updateLayers rebuilds.
+  state._layerDataVersion = (state._layerDataVersion || 0) + 1;
   mapInstance?.updateLayers?.();
   state.flowsReady = true;
 }
@@ -2095,6 +2097,8 @@ export function addDestination(ctx, targetCell, weight = 1) {
   ctx._targetWeights = Object.create(null);
   for (const d of destinations) ctx._targetWeights[d] = ctx.simulationNodes[d]?.weight || 1;
   _recomputeGlobalPeakFlow(ctx);
+  // Affordance / path scores changed — bump so updateLayers rebuilds.
+  ctx._layerDataVersion = (ctx._layerDataVersion || 0) + 1;
   if (ctx.updateLayers) ctx.updateLayers();
   return { changed: Array.from(changed), affectedCells: allAffected.size };
 }
@@ -2156,6 +2160,8 @@ export function removeDestination(ctx, targetCell) {
   ctx._targetWeights = Object.create(null);
   for (const d of destinations) ctx._targetWeights[d] = ctx.simulationNodes[d]?.weight || 1;
   _recomputeGlobalPeakFlow(ctx);
+  // Affordance / path scores changed — bump so updateLayers rebuilds.
+  ctx._layerDataVersion = (ctx._layerDataVersion || 0) + 1;
   if (ctx.updateLayers) ctx.updateLayers();
   return { removed: true, changed: Array.from(changed), affectedCells: allAffected.size };
 }

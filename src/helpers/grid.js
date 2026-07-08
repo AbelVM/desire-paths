@@ -220,6 +220,9 @@ export async function triggerFastScan(state, mapInstance) {
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
 
+  // Friction/affordance lookups changed — bump so updateLayers rebuilds the
+  // per-view arrays instead of reusing a stale snapshot.
+  state._layerDataVersion = (state._layerDataVersion || 0) + 1;
   mapInstance.updateLayers?.();
 }
 
