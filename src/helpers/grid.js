@@ -5,7 +5,7 @@ import {
   POLY_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
-import { runFastScanTask, runAoiHexesTask, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
+import { runFastScanTask, runAoiHexesTask, runBuildMappingGraph, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
 import {
   clearComputeCaches,
   buildCellStateEntry,
@@ -196,16 +196,20 @@ export async function triggerFastScan(state, mapInstance) {
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
 
   // Compute visibility sets (BFS flood-fill) and the bearing map between visible
-  // cell pairs OFF the main thread. The worker serializes the result to flat CSR
-  // typed arrays (no Map) and transfers them via a SharedArrayBuffer (zero-copy
-  // when cross-origin isolated) or an ArrayBuffer (memcpy). The large bearing Map
-  // is NEVER structured-cloned across the worker boundary — that clone is what
-  // previously triggered SIGILL. We rebuild the plain-object visibility map and
-  // the bearing Map IN-PROCESS on the main thread (safe: no cross-boundary clone),
-  // so the simulation's consumers are untouched.
+  // cell pairs OFF the main thread. The mapping graph (CSR adjacency + index-
+  // aligned friction/lat-lng) is built ONCE in a worker, then the visibility
+  // shards run entirely in integer index space — no `gridDisk`, no cell strings,
+  // no per-shard friction flatten (P1 + P3). The worker serializes the result to
+  // flat CSR typed arrays (no Map) and transfers them via a SharedArrayBuffer
+  // (zero-copy when cross-origin isolated) or an ArrayBuffer (memcpy). The large
+  // bearing Map is NEVER structured-cloned across the worker boundary — that
+  // clone is what previously triggered SIGILL. We rebuild the plain-object
+  // visibility map and the bearing Map IN-PROCESS on the main thread (safe: no
+  // cross-boundary clone), so the simulation's consumers are untouched.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
   // lazily and cached during the simulation via getNeighborDisk (see compute.js).
-  const csr = await runVisibilityBearingTask(state._frictionObj, viewHexes, visionDepth);
+  const mappingGraph = await runBuildMappingGraph(state._frictionObj, viewHexes);
+  const csr = await runVisibilityBearingTask(mappingGraph, viewHexes, visionDepth);
   const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
   state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };

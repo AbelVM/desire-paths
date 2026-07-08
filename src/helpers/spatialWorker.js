@@ -4,6 +4,8 @@ import {
   computeGradientBatch,
   computeImpassableBlurSnapshot,
   computeVisibilityBearingCSR,
+  computeVisibilityBearingCSRIndexed,
+  buildMappingGraph,
   mergeCellsChunk,
   normalizeFrictionEntries,
   computeAoiHexes,
@@ -321,6 +323,9 @@ function runLocally(kind, payload) {
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
   if (kind === 'visibility-bearing') return computeVisibilityBearingCSR(payload);
+  if (kind === 'visibility-bearing-indexed')
+    return computeVisibilityBearingCSRIndexed(payload);
+  if (kind === 'mapping-graph') return buildMappingGraph(payload);
   if (kind === 'merge-cells') return mergeCellsChunk(payload);
   if (kind === 'aoi-hexes')
     return computeAoiHexes(payload?.polygon || null, payload?.resolution);
@@ -847,9 +852,9 @@ function mergeVisibilityBearingShards(shards, N) {
   const counts = new Int32Array(N);
   for (let s = 0; s < shards.length; s++) {
     const shard = shards[s];
-    const M = shard.globalIdx.length;
+    const M = shard.globalIdx ? shard.globalIdx.length : N;
     for (let j = 0; j < M; j++) {
-      const gi = shard.globalIdx[j];
+      const gi = shard.globalIdx ? shard.globalIdx[j] : j;
       counts[gi] = shard.localOffsets[j + 1] - shard.localOffsets[j];
     }
   }
@@ -866,9 +871,9 @@ function mergeVisibilityBearingShards(shards, N) {
   const bearings = new Float32Array(PTotal);
   for (let s = 0; s < shards.length; s++) {
     const shard = shards[s];
-    const M = shard.globalIdx.length;
+    const M = shard.globalIdx ? shard.globalIdx.length : N;
     for (let j = 0; j < M; j++) {
-      const gi = shard.globalIdx[j];
+      const gi = shard.globalIdx ? shard.globalIdx[j] : j;
       const srcStart = shard.localOffsets[j];
       const srcEnd = shard.localOffsets[j + 1];
       const dstStart = visOffsets[gi];
@@ -893,31 +898,63 @@ function mergeVisibilityBearingShards(shards, N) {
  * Returns `{ buffer, N, P, offsetsBytes, neighborsBytes }` (or an empty shape
  * when there are no cells). `buffer` is `null` for the empty case.
  */
-export async function runVisibilityBearingTask(frictionSource, viewHexes, visionDepth) {
+/**
+ * Build the mapping graph (CSR adjacency + index-aligned friction/lat-lng) ONCE,
+ * off the main thread. This is the shared, index-space representation that the
+ * visibility shards consume — it replaces the per-shard `gridDisk` + friction
+ * flatten that the legacy path did (P1 + P3). The returned typed arrays are
+ * posted back without a transfer list so a SharedArrayBuffer (when the page is
+ * cross-origin isolated) is shared zero-copy, and an ArrayBuffer is copied once.
+ */
+export async function runBuildMappingGraph(frictionSource, viewHexes) {
   if (!viewHexes || viewHexes.length === 0) {
-    return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
+    return { N: 0, adjOffsets: new Int32Array(0), adjNeighbors: new Int32Array(0), frictionArr: new Float32Array(0), latLngArr: new Float32Array(0) };
   }
-
   const frictionEntries =
     frictionSource && typeof frictionSource.entries !== 'function'
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
+  return runWorker('mapping-graph', { frictionEntries, viewHexes });
+}
 
-  const workerCount = Math.min(MAX_WORKERS, viewHexes.length);
+/**
+ * Compute visibility sets + bearing map off the main thread, sharded across the
+ * worker pool by origin INDEX (not cell string), so `viewHexes` is never cloned
+ * to the shards. Each shard runs `computeVisibilityBearingCSRIndexed` over the
+ * prebuilt graph (CSR adjacency + aligned friction/lat-lng) entirely in integer
+ * index space — no `gridDisk`, no cell strings, no per-shard friction flatten.
+ * Shards are merged on the main thread (disjoint origins → no conflicts) and
+ * packed into one transferable buffer, identical in shape to the legacy path.
+ *
+ * @param graph { N, adjOffsets, adjNeighbors, frictionArr, latLngArr }
+ * @param viewHexes full AOI cell list (used only for the empty-check + N here)
+ * @param visionDepth BFS flood-fill radius
+ */
+export async function runVisibilityBearingTask(graph, viewHexes, visionDepth) {
+  if (!viewHexes || viewHexes.length === 0) {
+    return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
+  }
+  const N = viewHexes.length;
+
+  const workerCount = Math.min(MAX_WORKERS, N);
   if (workerCount <= 1) {
-    const shard = computeVisibilityBearingCSR({ frictionEntries, viewHexes, visionDepth });
+    const shard = computeVisibilityBearingCSRIndexed({ ...graph, viewHexes, visionDepth });
     return packCSR(shard.localOffsets, shard.visNeighbors, shard.bearings, shard.N, shard.P);
   }
 
-  // Shard by origin cell and run the BFS in parallel across the pool.
-  const chunks = splitIntoChunks(viewHexes, workerCount);
+  // Shard by origin INDEX and run the BFS in parallel across the pool. Passing
+  // indices (not cell strings) means `viewHexes` is shipped only to the graph
+  // builder, never to these shards.
+  const allIdx = new Int32Array(N);
+  for (let i = 0; i < N; i++) allIdx[i] = i;
+  const idxChunks = splitIntoChunks(allIdx, workerCount);
   const shards = await Promise.all(
-    chunks.map((originCells) =>
-      runWorker('visibility-bearing', { frictionEntries, viewHexes, visionDepth, originCells })
+    idxChunks.map((originIdx) =>
+      runWorker('visibility-bearing-indexed', { ...graph, visionDepth, originIdx })
     )
   );
 
-  const merged = mergeVisibilityBearingShards(shards, viewHexes.length);
+  const merged = mergeVisibilityBearingShards(shards, N);
   return packCSR(merged.visOffsets, merged.visNeighbors, merged.bearings, merged.N, merged.P);
 }
 

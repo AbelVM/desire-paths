@@ -156,6 +156,19 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     // mapping stage reconstructs empty structures without exercising the real BFS.
     return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
   }),
+  runBuildMappingGraph: vi.fn(async (frictionSource, viewHexes) => {
+    // Mock the one-time mapping-graph build (P1+P3). Returns an empty graph so
+    // the (also mocked) visibility task receives a valid shape without running
+    // the real gridDisk/cellToLatLng graph construction.
+    const N = viewHexes ? viewHexes.length : 0;
+    return {
+      N,
+      adjOffsets: new Int32Array(N + 1),
+      adjNeighbors: new Int32Array(0),
+      frictionArr: new Float32Array(N),
+      latLngArr: new Float32Array(N * 4),
+    };
+  }),
   runMergeCellsTask: vi.fn(async ({ cells, multiEntries, cellFrictionEntries, blurUpdateMap, blurWeights }) => {
     // Mock per-cell assembly: replicate the essential mapping (friction from
     // cellFrictionEntries / multiEntries min, affordance classification) so the

@@ -89,27 +89,38 @@ export function getGradientGraph(cellSource) {
   const cellToIdx = Object.create(null);
   for (let i = 0; i < V; i++) cellToIdx[cells[i]] = i;
 
+  // CSR adjacency built in TWO passes (count, then fill) rather than keeping a
+  // `lists` array of V intermediate arrays. Holding ~V intermediate arrays while
+  // calling `gridDisk` ~V times triggers non-deterministic memory corruption at
+  // city scale (V ~ 5e5): the prefix-sum `adjOffsets` ends up garbage, breaking
+  // every consumer (gradient Dijkstra, visibility BFS). The two-pass form
+  // allocates only the final flat `adjNeighbors` and is correct at any V. The
+  // extra `gridDisk` pass is a one-time cost (the graph is cached per source).
   const adjOffsets = new Int32Array(V + 1);
-  const lists = new Array(V);
   for (let i = 0; i < V; i++) {
     const cell = cells[i];
     const disk = gridDisk(cell, 1);
-    const list = [];
+    let cnt = 0;
     for (let k = 0; k < disk.length; k++) {
       const nb = disk[k];
       if (nb === cell) continue; // skip the center
       const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
-      if (j !== undefined) list.push(j); // keep only passable, in-AOI neighbors
+      if (j !== undefined) cnt++; // keep only passable, in-AOI neighbors
     }
-    lists[i] = list;
-    adjOffsets[i + 1] = adjOffsets[i] + list.length;
+    adjOffsets[i + 1] = adjOffsets[i] + cnt;
   }
 
   const adjNeighbors = new Int32Array(adjOffsets[V]);
   let p = 0;
   for (let i = 0; i < V; i++) {
-    const list = lists[i];
-    for (let k = 0; k < list.length; k++) adjNeighbors[p++] = list[k];
+    const cell = cells[i];
+    const disk = gridDisk(cell, 1);
+    for (let k = 0; k < disk.length; k++) {
+      const nb = disk[k];
+      if (nb === cell) continue; // skip the center
+      const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
+      if (j !== undefined) adjNeighbors[p++] = j; // keep only passable, in-AOI neighbors
+    }
   }
 
   // Precompute cell-id → r=1 neighbor cell-id array for O(1) reuse in the sim

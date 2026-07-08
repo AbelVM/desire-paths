@@ -1,4 +1,4 @@
-import { gridDisk, polygonToCells } from 'h3-js';
+import { gridDisk, polygonToCells, cellToLatLng } from 'h3-js';
 import {
   FRICTION_COSTS,
   SIMULATION_PARAMS,
@@ -534,6 +534,205 @@ export function computeVisibilityBearingCSR({
     }
   }
 
+  return { N, P, localOffsets, visNeighbors, bearings, globalIdx };
+}
+
+// ---------------------------------------------------------------------------
+// Index-space mapping graph (P1 + P3).
+//
+// The legacy `computeVisibilityBearingCSR` rebuilt r=1 adjacency per shard via
+// `gridDisk(cell, 1)` (see precomputeVisibilitySets) and looked friction up in a
+// plain-object map. That paid ~shards×V `gridDisk` calls and re-flattened the
+// friction object once per shard. This module builds the adjacency + an
+// index-aligned friction/lat-lng representation ONCE, off the main thread, and
+// the visibility shards then run entirely in integer index space — no `gridDisk`,
+// no cell strings, no per-shard friction flatten. The result CSR is identical in
+// shape to `computeVisibilityBearingCSR` (neighbor indices into `viewHexes`), so
+// `mergeVisibilityBearingShards` / `packCSR` / `reconstructVisibilityBearing`
+// are unchanged.
+// ---------------------------------------------------------------------------
+
+const EMPTY_IDX_ARR = Object.freeze([]);
+
+/**
+ * Build the viewHexes-indexed CSR adjacency + aligned friction/lat-lng ONCE.
+ *
+ * Adjacency is indexed by position in `viewHexes` (0..N-1). Impassable and
+ * out-of-AOI neighbors are omitted, exactly as the legacy BFS filtered them, so
+ * the index-space flood-fill is equivalent. `frictionArr[i]` holds the friction
+ * of `viewHexes[i]` (or -1 for impassable/missing); `latLngArr` stores
+ * [lat, lng, latRad, lngRad] per cell so bearings need no `cellToLatLng` call.
+ *
+ * @returns { N, adjOffsets:Int32Array(N+1), adjNeighbors:Int32Array(E),
+ *            frictionArr:Float32Array(N), latLngArr:Float32Array(4N) }
+ */
+export function buildMappingGraph({ frictionEntries, viewHexes } = {}) {
+  const frictionLookup = normalizeFrictionEntries(frictionEntries);
+  const N = viewHexes ? viewHexes.length : 0;
+  const impassable = FRICTION_COSTS.IMPASSABLE;
+
+  const frictionArr = new Float32Array(N);
+  const latLngArr = new Float32Array(N * 4);
+  const idxOf = Object.create(null);
+  for (let i = 0; i < N; i++) {
+    const cell = viewHexes[i];
+    idxOf[cell] = i;
+    const f = frictionLookup[cell] ?? 0;
+    frictionArr[i] = f < impassable ? f : -1; // -1 marks impassable / missing
+    const ll = cellToLatLng(cell);
+    const latRad = (ll[0] * Math.PI) / 180;
+    const lngRad = (ll[1] * Math.PI) / 180;
+    latLngArr[i * 4] = ll[0];
+    latLngArr[i * 4 + 1] = ll[1];
+    latLngArr[i * 4 + 2] = latRad;
+    latLngArr[i * 4 + 3] = lngRad;
+  }
+
+  // CSR adjacency in viewHexes index space. Impassable cells get an empty row
+  // (they are never BFS origins and never appear as neighbors).
+  //
+  // IMPORTANT: the CSR is built in TWO passes (count, then fill) instead of
+  // keeping a `lists` array of N intermediate arrays. Holding ~N intermediate
+  // arrays while calling `gridDisk` ~N times triggers non-deterministic memory
+  // corruption at city scale (N ~ 5e5): the prefix-sum `adjOffsets` ends up
+  // garbage, so the visibility BFS reads neighbour indices from the wrong rows
+  // and produces long-range ("grid-distance 76") edges. The two-pass form
+  // allocates only the final flat `adjNeighbors` and is correct at any N. The
+  // extra `gridDisk` pass is a one-time cost (the graph is built once per
+  // mapping generation), so it does not affect steady-state throughput.
+  const adjOffsets = new Int32Array(N + 1);
+  for (let i = 0; i < N; i++) {
+    const cell = viewHexes[i];
+    if (frictionArr[i] < 0) {
+      adjOffsets[i + 1] = adjOffsets[i];
+      continue;
+    }
+    const disk = gridDisk(cell, 1);
+    let cnt = 0;
+    for (let k = 0; k < disk.length; k++) {
+      const nb = disk[k];
+      if (nb === cell) continue;
+      const j = idxOf[nb];
+      if (j === undefined) continue; // out of AOI
+      if (frictionArr[j] < 0) continue; // impassable neighbor
+      cnt++;
+    }
+    adjOffsets[i + 1] = adjOffsets[i] + cnt;
+  }
+  const adjNeighbors = new Int32Array(adjOffsets[N]);
+  let p = 0;
+  for (let i = 0; i < N; i++) {
+    if (frictionArr[i] < 0) continue;
+    const cell = viewHexes[i];
+    const disk = gridDisk(cell, 1);
+    for (let k = 0; k < disk.length; k++) {
+      const nb = disk[k];
+      if (nb === cell) continue;
+      const j = idxOf[nb];
+      if (j === undefined) continue; // out of AOI
+      if (frictionArr[j] < 0) continue; // impassable neighbor
+      adjNeighbors[p++] = j;
+    }
+  }
+
+  return { N, adjOffsets, adjNeighbors, frictionArr, latLngArr };
+}
+
+/**
+ * Index-space visibility + bearing (shard). Equivalent output to
+ * `computeVisibilityBearingCSR` but operates purely on integer indices using the
+ * prebuilt CSR adjacency, aligned friction, and lat/lng arrays — no `gridDisk`,
+ * no cell strings, no friction-object lookup. `originIdx` is an Int32Array of
+ * viewHexes indices this shard owns (so the caller need not ship `viewHexes`).
+ */
+export function computeVisibilityBearingCSRIndexed({
+  adjOffsets,
+  adjNeighbors,
+  frictionArr,
+  latLngArr,
+  visionDepth = SIMULATION_PARAMS.visionDepth,
+  originIdx,
+} = {}) {
+  // N is derived from the graph (adjOffsets is length N+1), so `viewHexes` is
+  // never required by the shard — callers ship only origin indices + the graph.
+  const N = adjOffsets ? adjOffsets.length - 1 : 0;
+  const origins = originIdx && originIdx.length ? originIdx : null;
+  const M = origins ? origins.length : N;
+
+  const localOffsets = new Int32Array(M + 1);
+  // Reused across origins: BFS queue (indices) and a generation-stamped visited
+  // marker (avoids per-origin allocation / GC churn).
+  const queue = new Int32Array(N);
+  const visited = new Int32Array(N);
+  let gen = 0;
+
+  // First pass: BFS per origin, count visible pairs → localOffsets.
+  let P = 0;
+  const visibleLists = new Array(M);
+  for (let j = 0; j < M; j++) {
+    const start = origins ? origins[j] : j;
+    if (frictionArr[start] < 0) {
+      visibleLists[j] = EMPTY_IDX_ARR;
+      localOffsets[j + 1] = localOffsets[j];
+      continue;
+    }
+    gen++;
+    const visible = [];
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    visited[start] = gen;
+    // Ring BFS: pop exactly `levelSize` cells per level. `levelSize` is reset to
+    // the number of cells enqueued for the next level (tail - head) after each
+    // level, so it can never drift negative and the depth cap is always honored.
+    let levelSize = 1;
+    let dist = 0;
+    while (dist < visionDepth && head < tail) {
+      for (let i = 0; i < levelSize; i++) {
+        const cur = queue[head++];
+        const s = adjOffsets[cur];
+        const e = adjOffsets[cur + 1];
+        for (let x = s; x < e; x++) {
+          const nb = adjNeighbors[x];
+          if (visited[nb] === gen) continue;
+          visited[nb] = gen;
+          visible.push(nb);
+          queue[tail++] = nb;
+        }
+      }
+      levelSize = tail - head;
+      dist++;
+    }
+    visibleLists[j] = visible;
+    localOffsets[j + 1] = localOffsets[j] + visible.length;
+  }
+  P = localOffsets[M];
+
+  // Second pass: fill neighbor indices + bearings (from latLngArr, no trig on cells).
+  const visNeighbors = new Int32Array(P);
+  const bearings = new Float32Array(P);
+  let pp = 0;
+  for (let j = 0; j < M; j++) {
+    const start = origins ? origins[j] : j;
+    const list = visibleLists[j];
+    if (list.length === 0) continue;
+    const b = start * 4;
+    const sLatR = latLngArr[b + 2];
+    const sLngR = latLngArr[b + 3];
+    for (let k = 0; k < list.length; k++) {
+      const nb = list[k];
+      visNeighbors[pp] = nb;
+      const n = nb * 4;
+      const nLatR = latLngArr[n + 2];
+      const nLngR = latLngArr[n + 3];
+      const y = Math.sin(nLngR - sLngR) * Math.cos(nLatR);
+      const x = Math.cos(sLatR) * Math.sin(nLatR) - Math.sin(sLatR) * Math.cos(nLatR) * Math.cos(nLngR - sLngR);
+      bearings[pp] = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      pp++;
+    }
+  }
+
+  const globalIdx = origins ? Int32Array.from(origins) : null;
   return { N, P, localOffsets, visNeighbors, bearings, globalIdx };
 }
 
