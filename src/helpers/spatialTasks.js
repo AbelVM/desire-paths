@@ -70,7 +70,10 @@ const _polyCellsCacheOrder = [];
 
 // Fast bbox check: compute key only on cache miss
 function _computeBboxKey(coords) {
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
   for (let i = 0; i < coords.length; i++) {
     const ring = coords[i] || [];
     for (let j = 0; j < ring.length; j++) {
@@ -90,7 +93,12 @@ function getCachedPolyCells(coords) {
   // Include the H3 resolution in the key: the same geometry at a different
   // resolution yields different cells, so without it a resolution change would
   // silently return stale cached cells.
-  const key = _computeBboxKey(coords) + ':' + _hashCoords(coords) + ':' + SIMULATION_PARAMS.h3StrideResolution;
+  const key =
+    _computeBboxKey(coords) +
+    ':' +
+    _hashCoords(coords) +
+    ':' +
+    SIMULATION_PARAMS.h3StrideResolution;
   const cached = _polyCellsCache[key];
   if (cached) return cached;
 
@@ -99,7 +107,8 @@ function getCachedPolyCells(coords) {
     result = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
   } catch (err) {
     try {
-      console.warn && console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
+      console.warn &&
+        console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
     } catch (_e) {}
     result = [];
   }
@@ -119,11 +128,7 @@ export function normalizeFrictionEntries(source) {
   // read-only by every caller (blur, gradient graph, mapping graph, agent
   // batches), so alias it directly instead of copying all N keys. This avoids
   // 2-3 full N-key object copies per mapping generation.
-  if (
-    typeof source === 'object' &&
-    !source.__flat &&
-    typeof source.entries !== 'function'
-  ) {
+  if (typeof source === 'object' && !source.__flat && typeof source.entries !== 'function') {
     return source;
   }
 
@@ -259,34 +264,30 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     idxToKey[keyToIdx[k]] = k;
   }
 
-  // Build cellFrictionEntries: min friction across all keys per cell
+  // Build cellFrictionEntries (min friction across keys) and multiFrictionEntries
+  // (per-key layer map) in a SINGLE pass over all cells — previously these were
+  // two separate O(N·width) loops. `width` is the number of distinct vertical
+  // layers (typically a handful), so this halves the dominant loop cost here.
   const cellFrictionEntries = Object.create(null);
-  for (let i = 0; i < n; i++) {
-    let min = Infinity;
-    const base = i * width;
-    for (let l = 0; l < nextIdx; l++) {
-      if (hasLayer[base + l]) {
-        const v = layerFrictions[base + l];
-        if (v < min) min = v;
-      }
-    }
-    cellFrictionEntries[viewHexes[i]] = min === Infinity ? 0 : min;
-  }
-
-  // Reconstruct multiFrictionEntries from typed arrays for backward compatibility
   const multiFrictionEntries = Object.create(null);
   for (let i = 0; i < n; i++) {
     const base = i * width;
+    let min = Infinity;
     let hasData = false;
-    // Check and build in single pass
     const entry = Object.create(null);
     for (let l = 0; l < nextIdx; l++) {
-      if (hasLayer[base + l]) {
-        hasData = true;
-        entry[idxToKey[l]] = layerFrictions[base + l];
-      }
+      if (!hasLayer[base + l]) continue;
+      const v = layerFrictions[base + l];
+      entry[idxToKey[l]] = v;
+      hasData = true;
+      if (v < min) min = v;
     }
-    if (hasData) multiFrictionEntries[viewHexes[i]] = entry;
+    if (hasData) {
+      cellFrictionEntries[viewHexes[i]] = min;
+      multiFrictionEntries[viewHexes[i]] = entry;
+    } else {
+      cellFrictionEntries[viewHexes[i]] = 0;
+    }
   }
 
   return { multiFrictionEntries, cellFrictionEntries };
@@ -297,13 +298,23 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
  * Replaces the old nested-object allocation pattern with O(1) per-cell writes.
  * OPTIMIZED: Reduced try-catch overhead, inlined lookups.
  */
-function _applyGroupToBufferTyped(geometries, layerId, layerVal, cellToIdx, numCells, maxKeys, layerFrictions, hasLayer) {
+function _applyGroupToBufferTyped(
+  geometries,
+  layerId,
+  layerVal,
+  cellToIdx,
+  numCells,
+  maxKeys,
+  layerFrictions,
+  hasLayer
+) {
   const offsetBase = layerId;
   for (let g = 0; g < geometries.length; g++) {
     const geometry = geometries[g];
     if (!geometry || !geometry.coordinates) continue;
 
-    const coordsArray = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+    const coordsArray =
+      geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
     for (let p = 0; p < coordsArray.length; p++) {
       const cells = getCachedPolyCells(coordsArray[p]);
       if (!cells) continue;
@@ -379,27 +390,34 @@ export function computeImpassableBlurSnapshot({
 } = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
 
-  const useIndexSpace =
-    r1Adjacency && viewHexes && r1Adjacency.N === viewHexes.length;
-
-  // Collect impassable sources. In index space these are viewHexes indices
-  // (via a locally-built idxOf); otherwise cell strings (legacy path).
-  const impassables = [];
-  if (useIndexSpace) {
-    const idxOf = Object.create(null);
-    for (let i = 0; i < viewHexes.length; i++) idxOf[viewHexes[i]] = i;
-    for (const cell in frictionLookup) {
-      if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) {
-        const idx = idxOf[cell];
-        if (idx !== undefined) impassables.push(idx);
-      }
-    }
-  } else {
-    for (const cell in frictionLookup) {
-      if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) impassables.push(cell);
+  // Always run in index space over the shared r=1 CSR. The legacy string-keyed
+  // BFS (gridDisk + per-cell nbrCache) is removed — production always supplies
+  // r1Adjacency + viewHexes (grid.js), and the fallback allocated a neighbor-disk
+  // cache per cell for no benefit. Derive viewHexes/r1Adjacency when a caller
+  // omits them (e.g. direct unit tests) so the single code path still works, and
+  // degrade to an empty result on malformed input (e.g. invalid H3 ids).
+  const vh = viewHexes && viewHexes.length ? viewHexes : Object.keys(frictionLookup);
+  let adj = r1Adjacency;
+  if (!adj || adj.N !== vh.length) {
+    try {
+      adj = buildR1Adjacency({ viewHexes: vh });
+    } catch (_e) {
+      return { blurWeights: Object.create(null), updates: [] };
     }
   }
-  if (impassables.length === 0 || radius < 1) return { blurWeights: Object.create(null), updates: [] };
+
+  // Collect impassable sources as viewHexes indices via a locally-built idxOf.
+  const idxOf = Object.create(null);
+  for (let i = 0; i < vh.length; i++) idxOf[vh[i]] = i;
+  const impassables = [];
+  for (const cell in frictionLookup) {
+    if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) {
+      const idx = idxOf[cell];
+      if (idx !== undefined) impassables.push(idx);
+    }
+  }
+  if (impassables.length === 0 || radius < 1)
+    return { blurWeights: Object.create(null), updates: [] };
 
   // Pre-compute gaussian weights per distance to avoid repeated Math.exp calls
   const gaussianWeights = new Array(radius + 1);
@@ -411,100 +429,56 @@ export function computeImpassableBlurSnapshot({
   const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
   const updates = [];
 
-  if (useIndexSpace) {
-    // Index-space multi-source BFS over the shared r=1 CSR. No `gridDisk` in the
-    // loop and no string-keyed nbrCache/visited/frontier — each cell is expanded
-    // at most once and distances are integer indices. `visited` uses 0 = unvisited
-    // and -1 = impassable source so the two never collide.
-    const { offsets, neighbors, N } = r1Adjacency;
-    const visited = new Int32Array(N);
-    const frontier = new Int32Array(N);
-    let fHead = 0;
-    let fTail = 0;
-    for (let i = 0; i < impassables.length; i++) {
-      visited[impassables[i]] = -1; // impassable source
-      frontier[fTail++] = impassables[i];
-    }
+  // Index-space multi-source BFS over the shared r=1 CSR. No `gridDisk` in the
+  // loop and no string-keyed nbrCache/visited/frontier — each cell is expanded
+  // at most once and distances are integer indices. `visited` uses 0 = unvisited
+  // and -1 = impassable source so the two never collide.
+  const { offsets, neighbors, N } = adj;
+  const visited = new Int32Array(N);
+  const frontier = new Int32Array(N);
+  let fHead = 0;
+  let fTail = 0;
+  for (let i = 0; i < impassables.length; i++) {
+    visited[impassables[i]] = -1; // impassable source
+    frontier[fTail++] = impassables[i];
+  }
 
-    let currentDist = 1;
-    while (currentDist <= radius && fHead < fTail) {
-      const nextFrontier = [];
-      for (let i = fHead; i < fTail; i++) {
-        const cell = frontier[i];
-        const s = offsets[cell];
-        const e = offsets[cell + 1];
-        for (let x = s; x < e; x++) {
-          const nc = neighbors[x];
-          if (visited[nc] === 0) {
-            visited[nc] = currentDist;
-            nextFrontier.push(nc);
-          }
+  let currentDist = 1;
+  while (currentDist <= radius && fHead < fTail) {
+    // Ring-buffer BFS: process exactly the current frontier (fHead..levelEnd),
+    // appending next-level cells after levelEnd. Each cell is enqueued at most
+    // once (visited check), so fTail grows monotonically and never overwrites
+    // unprocessed cells — no per-level `nextFrontier` array allocation.
+    const levelEnd = fTail;
+    for (let i = fHead; i < levelEnd; i++) {
+      const cell = frontier[i];
+      const s = offsets[cell];
+      const e = offsets[cell + 1];
+      for (let x = s; x < e; x++) {
+        const nc = neighbors[x];
+        if (visited[nc] === 0) {
+          visited[nc] = currentDist;
+          frontier[fTail++] = nc;
         }
       }
-      fHead = fTail;
-      for (let i = 0; i < nextFrontier.length; i++) frontier[fTail++] = nextFrontier[i];
-      currentDist++;
     }
+    fHead = levelEnd;
+    currentDist++;
+  }
 
-    // Build updates in a single pass over all cells.
-    for (let idx = 0; idx < N; idx++) {
-      const dist = visited[idx];
-      if (dist <= 0) continue; // unvisited (0) or impassable source (-1)
-      const cell = viewHexes[idx];
-      if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
-      const weight = gaussianWeights[dist];
-      if (weight === undefined) continue;
-      blurWeights[cell] = weight;
-      updates.push([cell, Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor)]);
-    }
-  } else {
-    // Legacy string-keyed BFS (no shared adjacency available). Multi-source BFS
-    // using cached distance-1 neighbor disks for ring-by-ring expansion.
-    const visited = Object.create(null);
-    for (let i = 0; i < impassables.length; i++) visited[impassables[i]] = 0;
-
-    const nbrCache = Object.create(null);
-    const getNeighbors = (c) => {
-      let d = nbrCache[c];
-      if (d === undefined) {
-        d = gridDisk(c, 1);
-        nbrCache[c] = d;
-      }
-      return d;
-    };
-
-    const frontier = [];
-    for (let i = 0; i < impassables.length; i++) frontier.push(impassables[i]);
-
-    let currentDist = 1;
-    while (currentDist <= radius && frontier.length > 0) {
-      const nextFrontier = [];
-      for (let i = 0; i < frontier.length; i++) {
-        const cell = frontier[i];
-        const ring = getNeighbors(cell);
-        for (let n = 0; n < ring.length; n++) {
-          const nc = ring[n];
-          if (nc === cell) continue; // skip the center cell
-          if (visited[nc] === undefined) {
-            visited[nc] = currentDist;
-            nextFrontier.push(nc);
-          }
-        }
-      }
-      frontier.length = 0;
-      for (let i = 0; i < nextFrontier.length; i++) frontier.push(nextFrontier[i]);
-      currentDist++;
-    }
-
-    for (const cell in visited) {
-      const dist = visited[cell];
-      if (dist === 0) continue; // skip impassables
-      if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
-      const weight = gaussianWeights[dist];
-      if (weight === undefined) continue;
-      blurWeights[cell] = weight;
-      updates.push([cell, Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor)]);
-    }
+  // Build updates in a single pass over all cells.
+  for (let idx = 0; idx < N; idx++) {
+    const dist = visited[idx];
+    if (dist <= 0) continue; // unvisited (0) or impassable source (-1)
+    const cell = vh[idx];
+    if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
+    const weight = gaussianWeights[dist];
+    if (weight === undefined) continue;
+    blurWeights[cell] = weight;
+    updates.push([
+      cell,
+      Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor),
+    ]);
   }
 
   return { blurWeights, updates };
@@ -579,6 +553,10 @@ function allocTransferBuffer(byteLength) {
  */
 export function buildR1Adjacency({ viewHexes } = {}) {
   const N = viewHexes ? viewHexes.length : 0;
+  // `idxOf` is built only for this function's own use (the single gridDisk pass)
+  // and is deliberately dropped from the return value — returning it would
+  // structured-clone a ~500k-key object across the worker boundary (into both
+  // the blur and mapping-graph workers) on every mapping build.
   const idxOf = Object.create(null);
   for (let i = 0; i < N; i++) idxOf[viewHexes[i]] = i;
 
@@ -612,7 +590,7 @@ export function buildR1Adjacency({ viewHexes } = {}) {
     for (let e = start; e < end; e++) neighbors[w++] = temp[e];
   }
 
-  return { N, offsets, neighbors, idxOf };
+  return { N, offsets, neighbors };
 }
 
 /**
@@ -640,10 +618,8 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
   // shard workers is zero-copy (no per-shard structured clone of a large graph).
   const frictionArr = new Float32Array(allocTransferBuffer(N * 4));
   const latLngArr = new Float32Array(allocTransferBuffer(N * 4 * 4));
-  const idxOf = Object.create(null);
   for (let i = 0; i < N; i++) {
     const cell = viewHexes[i];
-    idxOf[cell] = i;
     const f = frictionLookup[cell] ?? 0;
     frictionArr[i] = f < impassable ? f : -1; // -1 marks impassable / missing
     const ll = cellToLatLng(cell);
@@ -697,6 +673,11 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
       }
     }
   } else {
+    // Fallback path only: build cell→index for the gridDisk neighbor lookup
+    // below. The shared r1Adjacency path reuses its CSR instead, so it must not
+    // pay for this ~500k-key object on the common code path.
+    const idxOf = Object.create(null);
+    for (let i = 0; i < N; i++) idxOf[viewHexes[i]] = i;
     const temp = new Int32Array(N * 6);
     const deg = new Int32Array(N);
     let tempPos = 0;
@@ -758,20 +739,50 @@ export function computeVisibilityBearingCSRIndexed({
   const visited = new Int32Array(N);
   let gen = 0;
 
-  // Pass 1: BFS per origin, count visible pairs → localOffsets. No storage, so
-  // no M intermediate arrays / P-entry GC churn (the old `visibleLists` held a
-  // JS array per origin plus all P neighbor indices as boxed numbers).
+  // Single BFS pass: for each origin we flood-fill to visionDepth and, as each
+  // visible neighbor is first discovered, append its index to `visNeighbors` and
+  // write its bearing (origin→neighbor, from latLngArr) into `bearings`. This
+  // folds the old "count pass" + "write pass" into ONE traversal — the BFS was
+  // the dominant cost (degree-6 expansion of ~3·d² cells/origin), so running it
+  // once instead of twice roughly halves the shard's CPU. `localOffsets` is the
+  // running prefix sum of pair counts, so the merge step still works unchanged.
+  //
+  // `visNeighbors`/`bearings` grow on demand (doubling) so we never over-allocate
+  // to the worst-case P (which would be ~3·visionDepth²·M Int32s — gigabytes for
+  // a city) yet never overflow mid-origin (each origin contributes at most
+  // `maxPairsPerOrigin` pairs, reserved up front before its BFS).
+  const maxPairsPerOrigin = 1 + 3 * visionDepth * (visionDepth + 1);
+  let cap = Math.max(16, Math.min(M * maxPairsPerOrigin, M * 64));
+  let visNeighbors = new Int32Array(cap);
+  let bearings = new Float32Array(cap);
+  let writePos = 0;
+
   for (let j = 0; j < M; j++) {
     const start = origins ? origins[j] : j;
     if (frictionArr[start] < 0) {
       localOffsets[j + 1] = localOffsets[j];
       continue;
     }
+    // Reserve this origin's worst-case pair count so the BFS below never overflows.
+    if (writePos + maxPairsPerOrigin > visNeighbors.length) {
+      let nc = visNeighbors.length;
+      while (nc < writePos + maxPairsPerOrigin) nc *= 2;
+      const vg = new Int32Array(nc);
+      vg.set(visNeighbors.subarray(0, writePos));
+      visNeighbors = vg;
+      const bg = new Float32Array(nc);
+      bg.set(bearings.subarray(0, writePos));
+      bearings = bg;
+    }
+
     gen++;
     let head = 0;
     let tail = 0;
     queue[tail++] = start;
     visited[start] = gen;
+    const b = start * 4;
+    const sLatR = latLngArr[b + 2];
+    const sLngR = latLngArr[b + 3];
     // Ring BFS: pop exactly `levelSize` cells per level. `levelSize` is reset to
     // the number of cells enqueued for the next level (tail - head) after each
     // level, so it can never drift negative and the depth cap is always honored.
@@ -788,6 +799,16 @@ export function computeVisibilityBearingCSRIndexed({
           if (visited[nb] === gen) continue;
           visited[nb] = gen;
           count++;
+          visNeighbors[writePos] = nb;
+          const n = nb * 4;
+          const nLatR = latLngArr[n + 2];
+          const nLngR = latLngArr[n + 3];
+          const y = Math.sin(nLngR - sLatR) * Math.cos(nLatR);
+          const bx =
+            Math.cos(sLatR) * Math.sin(nLatR) -
+            Math.sin(sLatR) * Math.cos(nLatR) * Math.cos(nLngR - sLngR);
+          bearings[writePos] = ((Math.atan2(y, bx) * 180) / Math.PI + 360) % 360;
+          writePos++;
           queue[tail++] = nb;
         }
       }
@@ -799,51 +820,16 @@ export function computeVisibilityBearingCSRIndexed({
     // localOffsets[j]) is exactly this origin's pair count for the merge.
     localOffsets[j + 1] = localOffsets[j] + count;
   }
-  const P = localOffsets[M];
+  const P = writePos;
 
-  // Second pass: re-run the BFS per origin, writing neighbor indices + bearings
-  // (from latLngArr, no trig on cells) directly into the preallocated output
-  // arrays. The offsets from pass 1 make the write position for each origin
-  // known up front, so no intermediate storage is needed.
-  const visNeighbors = new Int32Array(P);
-  const bearings = new Float32Array(P);
-  let pp = 0;
-  for (let j = 0; j < M; j++) {
-    const start = origins ? origins[j] : j;
-    if (frictionArr[start] < 0) continue;
-    gen++;
-    let head = 0;
-    let tail = 0;
-    queue[tail++] = start;
-    visited[start] = gen;
-    let levelSize = 1;
-    let dist = 0;
-    const b = start * 4;
-    const sLatR = latLngArr[b + 2];
-    const sLngR = latLngArr[b + 3];
-    while (dist < visionDepth && head < tail) {
-      for (let i = 0; i < levelSize; i++) {
-        const cur = queue[head++];
-        const s = adjOffsets[cur];
-        const e = adjOffsets[cur + 1];
-        for (let x = s; x < e; x++) {
-          const nb = adjNeighbors[x];
-          if (visited[nb] === gen) continue;
-          visited[nb] = gen;
-          visNeighbors[pp] = nb;
-          const n = nb * 4;
-          const nLatR = latLngArr[n + 2];
-          const nLngR = latLngArr[n + 3];
-          const y = Math.sin(nLngR - sLngR) * Math.cos(nLatR);
-          const bx = Math.cos(sLatR) * Math.sin(nLatR) - Math.sin(sLatR) * Math.cos(nLatR) * Math.cos(nLngR - sLngR);
-          bearings[pp] = ((Math.atan2(y, bx) * 180) / Math.PI + 360) % 360;
-          pp++;
-          queue[tail++] = nb;
-        }
-      }
-      levelSize = tail - head;
-      dist++;
-    }
+  // Trim to exact size (drop any unused growth headroom) for a compact transfer.
+  if (P < visNeighbors.length) {
+    const vTrim = new Int32Array(P);
+    vTrim.set(visNeighbors.subarray(0, P));
+    visNeighbors = vTrim;
+    const bTrim = new Float32Array(P);
+    bTrim.set(bearings.subarray(0, P));
+    bearings = bTrim;
   }
 
   const globalIdx = origins ? Int32Array.from(origins) : null;
@@ -885,7 +871,11 @@ export function mergeCellsChunk({
   const pavement = AFFORDANCE.PAVEMENT;
   const lightPark = AFFORDANCE.LIGHT_PARK;
   const heavyGrass = AFFORDANCE.HEAVY_GRASS;
-  const impassable = AFFORDANCE.IMPASSABLE;
+  // `fr` is a FRICTION value, so the impassable test must use the friction
+  // threshold (999999), not the affordance value (0.0). Using AFFORDANCE.IMPASSABLE
+  // here made `fr >= 0` always true, classifying EVERY cell as impassable
+  // affordance and rendering the whole affordance classification dead code.
+  const impassable = FRICTION_COSTS.IMPASSABLE;
   const p = FRICTION_COSTS.PAVEMENT;
   const l = FRICTION_COSTS.LIGHT_PARK;
   const hg = FRICTION_COSTS.HEAVY_GRASS;
@@ -896,21 +886,14 @@ export function mergeCellsChunk({
     const cell = cells[i];
     const layerMap = multiEntries[cell];
 
-    // Merge multi-friction layers (max-keeping) into a fresh map.
-    let target = null;
-    let fr;
-    if (layerMap) {
-      target = Object.create(null);
-      let min = Infinity;
-      for (const k in layerMap) {
-        const v = layerMap[k];
-        target[k] = v;
-        if (v < min) min = v;
-      }
-      fr = min;
-    } else {
-      fr = cellFrictionEntries[cell] ?? 0;
-    }
+    // `cellFrictionEntries[cell]` already holds the min friction across all
+    // layers (computed once in the fast-scan pass), so reuse it directly instead
+    // of re-reducing the layer map here. The layer map is reused by reference
+    // (no per-cell copy) — it is the canonical multiFrictionMap entry and is
+    // mutated in place by later map edits, so sharing it is correct and saves
+    // N object allocations plus an O(N·avgLayers) reduction loop.
+    let fr = cellFrictionEntries[cell] ?? 0;
+    const target = layerMap || Object.create(null);
 
     // Apply the impassable blur friction override (nudge routing around obstacles).
     if (blurUpdateMap) {
@@ -920,7 +903,7 @@ export function mergeCellsChunk({
 
     // Affordance classification.
     let aff;
-    if (fr >= impassable) aff = impassable;
+    if (fr >= impassable) aff = AFFORDANCE.IMPASSABLE;
     else if (fr < midPL) aff = pavement;
     else if (fr < midLH) aff = lightPark;
     else aff = heavyGrass;
@@ -933,7 +916,7 @@ export function mergeCellsChunk({
 
     frictionArr[i] = fr;
     affArr[i] = aff;
-    multiArr[i] = target || Object.create(null);
+    multiArr[i] = target;
   }
 
   return { cells, frictionArr, affArr, multiArr };

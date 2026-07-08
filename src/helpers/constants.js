@@ -303,7 +303,11 @@ function isRailway(cls, subclass) {
 
 // Lazy-populated friction classification cache (on-demand fills)
 const _surfaceCache = new Map();
-const MAX_SURFACE_CACHE = 256;
+// City-scale AOIs surface thousands of features but only a few hundred distinct
+// property tuples, so a 256 cap thrashed (evicting useful entries mid-scan and
+// re-classifying the same tuples repeatedly). 2048 covers the realistic tuple
+// space with negligible memory cost (each entry is a tiny {cost, layer} object).
+const MAX_SURFACE_CACHE = 2048;
 
 /**
  * Build a normalized cache key from feature properties.

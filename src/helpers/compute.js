@@ -25,7 +25,7 @@ import {
 import {
   computeDijkstra,
   getGradientGraph,
-  getGraphNeighborsR1,
+  getGraphNeighborIndicesR1,
   invalidateGradientGraph,
 } from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
@@ -544,7 +544,11 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
 
   // Reuse the canonical gradient graph's r=1 adjacency (CSR) instead of a
   // separate gridDisk(cell, 1) call — same passable, in-AOI neighbor set.
-  const neighbors = getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), curr);
+  // Iterate neighbor *indices* (zero-copy CSR view) and map back to cell ids via
+  // `idxToCell`; this drops the old `cellNeighbors` string-array materialization.
+  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const nbrIdxs = getGraphNeighborIndicesR1(graph, curr);
+  const idxToCell = graph.idxToCell;
   // _frictionObj is always the canonical lookup — already built once per sim run.
   // Direct property access on plain object is faster than iterating Map.entries().
   const frictionLookup = ctx._frictionObj;
@@ -552,8 +556,8 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   let bestNeighbor = null;
   let bestGrad = gCurr;
 
-  for (let i = 0; i < neighbors.length; i++) {
-    const n = neighbors[i];
+  for (let i = 0; i < nbrIdxs.length; i++) {
+    const n = idxToCell[nbrIdxs[i]];
     if (n === curr) continue;
     // Prefer _cellState.friction (updated during sim); fall back to frictionLookup.
     let f = cellState?.[n]?.friction ?? frictionLookup?.[n];
@@ -599,7 +603,8 @@ function runSingleAgentPath(
   }
 
   let simDirection =
-    getGradientDirection(ctx, simCurrent, destGradientObj, bearingMap) ?? getBearingFast(ctx, simCurrent, simTarget, bearingMap);
+    getGradientDirection(ctx, simCurrent, destGradientObj, bearingMap) ??
+    getBearingFast(ctx, simCurrent, simTarget, bearingMap);
   const simPath = [originCell];
 
   if (pathDesireDeltas) recordTraversal(pathDesireDeltas, originCell);
@@ -629,7 +634,15 @@ function runSingleAgentPath(
       break;
     }
 
-    const nextStep = getBestNextStep(ctx, simCurrent, destGradientObj, simDirection, simAgentId, accumulatedFootprints, bearingMap);
+    const nextStep = getBestNextStep(
+      ctx,
+      simCurrent,
+      destGradientObj,
+      simDirection,
+      simAgentId,
+      accumulatedFootprints,
+      bearingMap
+    );
     if (!nextStep || nextStep === simCurrent) break;
 
     // Walk toward nextStep. Prefer the straight H3 line, but if it is blocked
@@ -676,7 +689,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
       try {
         console.debug &&
           console.debug('getReachableDestinations: missing gradient', { originCell, destCell });
-      } catch (_e) { }
+      } catch (_e) {}
       continue;
     }
     const hasOrigin =
@@ -688,7 +701,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
             originCell,
             destCell,
           });
-      } catch (_e) { }
+      } catch (_e) {}
       continue;
     }
     const w = ctx.simulationNodes[destCell]?.weight || 1;
@@ -794,7 +807,7 @@ export async function computeDesirePaths(state, mapInstance) {
     if (mapInstance.showAlertCard) {
       mapInstance.showAlertCard(
         'Build the mapping first by clicking "Build Mapping". ' +
-        'The simulation requires a friction map generated from the map tiles.',
+          'The simulation requires a friction map generated from the map tiles.',
         { title: 'Mapping not built', tone: 'warning' }
       );
     }
@@ -922,14 +935,14 @@ export async function computeDesirePaths(state, mapInstance) {
     // Centralized error handling: surface to UI and ensure handler cleared
     try {
       clearSpatialWorkerProgressHandler();
-    } catch (_e) { }
+    } catch (_e) {}
     if (typeof mapInstance?.showAlertCard === 'function') {
       try {
         mapInstance.showAlertCard(err?.message || String(err), {
           title: 'Simulation error',
           tone: 'error',
         });
-      } catch (_e) { }
+      } catch (_e) {}
     } else if (typeof console !== 'undefined') {
       console.error('Gradient computation failed:', err);
     }
@@ -958,7 +971,7 @@ export async function computeDesirePaths(state, mapInstance) {
     if (mapInstance?.showAlertCard) {
       try {
         mapInstance.showAlertCard(msg, { title: 'No walking route', tone: 'warning' });
-      } catch (_e) { }
+      } catch (_e) {}
     }
   }
 
@@ -990,7 +1003,7 @@ export async function computeDesirePaths(state, mapInstance) {
           assignedLen: p.assigned?.length ?? 0,
         })),
       });
-  } catch (_e) { }
+  } catch (_e) {}
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
   for (let pi = 0; pi < plan.length; pi++) {
     const originCell = plan[pi].originCell;
@@ -1011,11 +1024,14 @@ export async function computeDesirePaths(state, mapInstance) {
               destCell,
             });
           if (mapInstance?.showAlertCard)
-            mapInstance.showAlertCard('Couldn’t finish the walk — some route data was missing. Try revealing the paths again.', {
-              title: 'Walk incomplete',
-              tone: 'warning',
-            });
-        } catch (_e) { }
+            mapInstance.showAlertCard(
+              'Couldn’t finish the walk — some route data was missing. Try revealing the paths again.',
+              {
+                title: 'Walk incomplete',
+                tone: 'warning',
+              }
+            );
+        } catch (_e) {}
         // Do not apply an incomplete plan; abort early.
         return;
       }
@@ -1039,7 +1055,7 @@ export async function computeDesirePaths(state, mapInstance) {
           );
           mapInstance?.syncSimulationUI?.();
         }
-      } catch (_e) { }
+      } catch (_e) {}
     });
 
     const agentResults = await runAgentBatches(
@@ -1076,7 +1092,7 @@ export async function computeDesirePaths(state, mapInstance) {
   } finally {
     try {
       clearSpatialWorkerProgressHandler();
-    } catch (_e) { }
+    } catch (_e) {}
   }
 
   applyPathDesireDeltas(state, pathDesireDeltas);
@@ -1101,15 +1117,23 @@ export async function computeDesirePaths(state, mapInstance) {
   updateSimulationProgress(state, totalAgents, totalAgents, 'Complete');
   try {
     clearSpatialWorkerProgressHandler();
-  } catch (_e) { }
+  } catch (_e) {}
   mapInstance?.updateLayers?.();
   state.flowsReady = true;
 }
 
 /**
-  * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
-  */
-function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', accumulatedFootprints = null, bearingMap = null) {
+ * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
+ */
+function getBestNextStep(
+  ctx,
+  curr,
+  gradient,
+  currentDirection,
+  agentId = '',
+  accumulatedFootprints = null,
+  bearingMap = null
+) {
   const simParams = ctx.simulationParams || SIMULATION_PARAMS;
   const affordanceLookup = ctx._affordanceObj;
   const weights = {
@@ -1141,15 +1165,15 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
   // Inline friction/affordance lookups — direct property access is ~3× faster than function calls
   const getFriction = stateEnabled
     ? (n) => {
-      const s = cellState[n];
-      return s ? s.friction : undefined;
-    }
+        const s = cellState[n];
+        return s ? s.friction : undefined;
+      }
     : (n) => frictionLookup[n];
   const getAffordance = stateEnabled
     ? (n) => {
-      const s = cellState[n];
-      return s ? (s.affordance ?? 0.1) : 0.1;
-    }
+        const s = cellState[n];
+        return s ? (s.affordance ?? 0.1) : 0.1;
+      }
     : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
@@ -1256,18 +1280,19 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
   }
 
   if (cellsArr.length === 0) {
+    // depth=1 reuses the canonical graph's r=1 adjacency (CSR indices); deeper
+    // rings fall back to the disk cache (the graph only encodes distance-1 edges).
+    const graph = getGradientGraph(ctx.cellFrictionMap);
+    const idxToCell = graph.idxToCell;
     for (let depth = 1; depth <= 3; depth++) {
-      // depth=1 reuses the canonical graph's r=1 adjacency; deeper rings fall
-      // back to the disk cache (the graph only encodes distance-1 edges).
-      const neighbors =
-        depth === 1
-          ? getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), curr)
-          : _getCachedDisk(ctx, curr, depth);
+      const nbrIdxs = depth === 1 ? getGraphNeighborIndicesR1(graph, curr) : null;
+      const disk = depth === 1 ? null : _getCachedDisk(ctx, curr, depth);
+      const count = nbrIdxs ? nbrIdxs.length : disk.length;
       let bestGrad = Infinity;
       let bestCandidate = null;
 
-      for (let i = 0; i < neighbors.length; i++) {
-        const n = neighbors[i];
+      for (let i = 0; i < count; i++) {
+        const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
         if (n === curr) continue;
         const f = getFriction(n);
         if (f === undefined || f >= impassableVal) continue;
@@ -1408,8 +1433,8 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
 }
 
 /**
-  * Optimized Dijkstra Gradient (Production-Ready)
-  */
+ * Optimized Dijkstra Gradient (Production-Ready)
+ */
 function computeDijkstraGradient(ctx, targetCell) {
   // _frictionObj may not be built yet during incremental gradient computation.
   // Use it when available; otherwise build once from cellFrictionMap.
@@ -1438,8 +1463,8 @@ function computeDijkstraGradient(ctx, targetCell) {
 }
 
 /**
-  * Geometric Helpers (Visibility & Bearing)
-  */
+ * Geometric Helpers (Visibility & Bearing)
+ */
 function isVisible(ctx, start, end) {
   // _frictionObj is the canonical lookup; build once from cellFrictionMap if absent.
   // Using a simple check (not IIFE) to avoid repeated overhead in hot path.
@@ -1490,10 +1515,13 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
       found = true;
       break;
     }
-    // Reuse the canonical graph's r=1 adjacency for the BFS expansion.
-    const nb = getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), node);
-    for (let i = 0; i < nb.length; i++) {
-      const m = nb[i];
+    // Reuse the canonical graph's r=1 adjacency (CSR indices) for the BFS
+    // expansion; map neighbor indices back to cell ids via `graph.idxToCell`.
+    const graph = getGradientGraph(ctx.cellFrictionMap);
+    const nbrIdxs = getGraphNeighborIndicesR1(graph, node);
+    const idxToCell = graph.idxToCell;
+    for (let i = 0; i < nbrIdxs.length; i++) {
+      const m = idxToCell[nbrIdxs[i]];
       if (m === node || seen[m]) continue;
       const ms = cellState && cellState[m];
       const mf = ms ? ms.friction : frictionLookup[m];
@@ -1984,7 +2012,7 @@ export function addDestination(ctx, targetCell, weight = 1) {
     if (ctx.showAlertCard) {
       try {
         ctx.showAlertCard(msg, { title: 'No walking route', tone: 'warning' });
-      } catch (_e) { }
+      } catch (_e) {}
     }
   }
 

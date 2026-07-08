@@ -1,6 +1,6 @@
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
-import { getGradientGraph, getGraphNeighborsR1 } from './dijkstra.js';
+import { getGradientGraph, getGraphNeighborIndicesR1 } from './dijkstra.js';
 import {
   FRICTION_COSTS,
   WEIGHTS,
@@ -165,21 +165,31 @@ function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
   return true;
 }
 
-function getGradientDirection(curr, gradientObj, frictionLookup, cellState, neighborDisks, bearingMap, graph) {
+function getGradientDirection(
+  curr,
+  gradientObj,
+  frictionLookup,
+  cellState,
+  neighborDisks,
+  bearingMap,
+  graph
+) {
   if (!gradientObj) return null;
   const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
 
-  // Reuse the canonical gradient graph's r=1 adjacency when available; fall
-  // back to the disk cache otherwise (same passable, in-AOI neighbor set).
-  const neighbors = graph
-    ? getGraphNeighborsR1(graph, curr)
-    : _getCachedDisk(curr, 1, neighborDisks);
+  // Reuse the canonical gradient graph's r=1 adjacency (CSR indices) when
+  // available; fall back to the disk cache otherwise (same passable, in-AOI
+  // neighbor set). Map neighbor indices back to cell ids via `graph.idxToCell`.
+  const nbrIdxs = graph ? getGraphNeighborIndicesR1(graph, curr) : null;
+  const disk = graph ? null : _getCachedDisk(curr, 1, neighborDisks);
+  const idxToCell = graph ? graph.idxToCell : null;
   let bestNeighbor = null;
   let bestGrad = gCurr;
 
-  for (let i = 0; i < neighbors.length; i++) {
-    const n = neighbors[i];
+  const count = nbrIdxs ? nbrIdxs.length : disk.length;
+  for (let i = 0; i < count; i++) {
+    const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
     if (n === curr) continue;
     let f;
     if (cellState && cellState[n]) f = cellState[n].friction;
@@ -228,15 +238,15 @@ function getBestNextStep(
   // Inline friction/affordance lookups — direct property access is ~3× faster than function calls
   const getFriction = cellState
     ? (n) => {
-      const s = cellState[n];
-      return s ? s.friction : undefined;
-    }
+        const s = cellState[n];
+        return s ? s.friction : undefined;
+      }
     : (n) => frictionLookup[n];
   const getAffordance = cellState
     ? (n) => {
-      const s = cellState[n];
-      return s ? (s.affordance ?? 0.1) : 0.1;
-    }
+        const s = cellState[n];
+        return s ? (s.affordance ?? 0.1) : 0.1;
+      }
     : (n) => affordanceLookup?.[n] ?? 0.1;
 
   const cellsArr = [];
@@ -330,18 +340,18 @@ function getBestNextStep(
   }
 
   if (cellsArr.length === 0) {
+    // depth=1 reuses the canonical graph's r=1 adjacency (CSR indices); deeper
+    // rings fall back to the disk cache (the graph only encodes distance-1 edges).
+    const idxToCell = graph ? graph.idxToCell : null;
     for (let depth = 1; depth <= 3; depth++) {
-      // depth=1 reuses the canonical graph's r=1 adjacency; deeper rings fall
-      // back to the disk cache (the graph only encodes distance-1 edges).
-      const neighbors =
-        depth === 1 && graph
-          ? getGraphNeighborsR1(graph, curr)
-          : _getCachedDisk(curr, depth, neighborDisks);
+      const nbrIdxs = depth === 1 && graph ? getGraphNeighborIndicesR1(graph, curr) : null;
+      const disk = nbrIdxs ? null : _getCachedDisk(curr, depth, neighborDisks);
+      const count = nbrIdxs ? nbrIdxs.length : disk.length;
       let bestGrad = Infinity;
       let bestCandidate = null;
 
-      for (let i = 0; i < neighbors.length; i++) {
-        const n = neighbors[i];
+      for (let i = 0; i < count; i++) {
+        const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
         if (n === curr) continue;
         const f = getFriction(n);
         if (f === undefined || f >= impassableVal) continue;
@@ -465,10 +475,14 @@ function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDis
       found = true;
       break;
     }
-    // Reuse the canonical graph's r=1 adjacency for the BFS expansion.
-    const nb = graph ? getGraphNeighborsR1(graph, node) : _getCachedDisk(node, 1, neighborDisks);
-    for (let i = 0; i < nb.length; i++) {
-      const m = nb[i];
+    // Reuse the canonical graph's r=1 adjacency (CSR indices) for the BFS
+    // expansion; map neighbor indices back to cell ids via `graph.idxToCell`.
+    const nbrIdxs = graph ? getGraphNeighborIndicesR1(graph, node) : null;
+    const disk = nbrIdxs ? null : _getCachedDisk(node, 1, neighborDisks);
+    const idxToCell = graph ? graph.idxToCell : null;
+    const count = nbrIdxs ? nbrIdxs.length : disk.length;
+    for (let i = 0; i < count; i++) {
+      const m = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
       if (m === node || seen[m]) continue;
       const mf = cellState && cellState[m] ? cellState[m].friction : frictionLookup[m];
       if (typeof mf === 'undefined' || mf >= FRICTION_COSTS.IMPASSABLE) continue;
@@ -558,8 +572,15 @@ function runAgentPath(
 
   let distToTarget = 0;
   let simDirection =
-    getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks, bearingMap, graph) ??
-    getBearingFast(simCurrent, simTarget, bearingMap);
+    getGradientDirection(
+      simCurrent,
+      destGradientObj,
+      frictionLookup,
+      cellState,
+      neighborDisks,
+      bearingMap,
+      graph
+    ) ?? getBearingFast(simCurrent, simTarget, bearingMap);
   const simPath = [originCell];
   if (pathDesireMap) recordTraversal(pathDesireMap, originCell);
 
@@ -612,7 +633,14 @@ function runAgentPath(
     // by an impassable cell or would cut a building corner, route a local
     // detour around the obstacle so the agent walks *around* the corner
     // instead of jumping over it or stalling against the building.
-    const line = _resolveStepLine(simCurrent, nextStep, frictionLookup, cellState, neighborDisks, graph);
+    const line = _resolveStepLine(
+      simCurrent,
+      nextStep,
+      frictionLookup,
+      cellState,
+      neighborDisks,
+      graph
+    );
     let hitTarget = false;
     let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {

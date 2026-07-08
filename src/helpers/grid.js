@@ -1,15 +1,14 @@
 import { polygonToCells, latLngToCell, gridPathCells } from 'h3-js';
+import { FRICTION_COSTS, PATH_CACHE_MAX, POLY_CACHE_MAX, SIMULATION_PARAMS } from './constants.js';
 import {
-  FRICTION_COSTS,
-  PATH_CACHE_MAX,
-  POLY_CACHE_MAX,
-  SIMULATION_PARAMS,
-} from './constants.js';
-import { runFastScanTask, runAoiHexesTask, runBuildMappingGraph, runBuildR1Adjacency, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
-import {
-  clearComputeCaches,
-  buildCellStateEntry,
-} from './compute.js';
+  runFastScanTask,
+  runAoiHexesTask,
+  runBuildMappingGraph,
+  runBuildR1Adjacency,
+  runVisibilityBearingTask,
+  runMergeCellsTask,
+} from './spatialWorker.js';
+import { clearComputeCaches, buildCellStateEntry } from './compute.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -96,10 +95,9 @@ export async function triggerFastScan(state, mapInstance) {
   // Start AOI hex generation in a Web Worker — runs off the main thread.
   // This is CPU-intensive (polygonToCells) and blocks for ~50-200ms otherwise.
   const aoiPolygon = state.aoi_polygon;
-  const aoiHexPromise = runAoiHexesTask(
-    aoiPolygon,
-    SIMULATION_PARAMS.h3StrideResolution
-  ).catch(() => []);
+  const aoiHexPromise = runAoiHexesTask(aoiPolygon, SIMULATION_PARAMS.h3StrideResolution).catch(
+    () => []
+  );
 
   // Fetch features in parallel — queryRenderedFeatures depends on map rendering,
   // which is already done (we waited for moveend in fitAoiBounds).
@@ -212,7 +210,11 @@ export async function triggerFastScan(state, mapInstance) {
   // cross-boundary clone), so the simulation's consumers are untouched.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
   // lazily and cached during the simulation via getNeighborDisk (see compute.js).
-  const mappingGraph = await runBuildMappingGraph(state._frictionObj, viewHexes, await r1AdjacencyPromise);
+  const mappingGraph = await runBuildMappingGraph(
+    state._frictionObj,
+    viewHexes,
+    await r1AdjacencyPromise
+  );
   const csr = await runVisibilityBearingTask(mappingGraph, viewHexes, visionDepth);
   const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };

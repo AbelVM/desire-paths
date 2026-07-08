@@ -6,12 +6,7 @@ import './style/geocoder.css';
 import { latLngToCell } from 'h3-js';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 
-import {
-  MAP_OPTIONS,
-  FRICTION_COSTS,
-  getSurface,
-  SIMULATION_PARAMS,
-} from './helpers/constants.js';
+import { MAP_OPTIONS, FRICTION_COSTS, getSurface, SIMULATION_PARAMS } from './helpers/constants.js';
 import { getHexes, triggerFastScan, mapPolygonCells, mapLineCells } from './helpers/grid.js';
 import {
   renderInterfacePins,
@@ -343,7 +338,7 @@ const init = () => {
           });
         },
       },
-      { maplibregl , collapsed: true}
+      { maplibregl, collapsed: true }
     )
   );
   setMapCursor(desireMap, 'crosshair');
@@ -495,7 +490,8 @@ const isAccessible = async (mapInstance, clickEvent) => {
       }
       const retryCosts = Object.values(retryLayerCosts);
       if (retryCosts.length > 0) {
-        const groundCost = typeof retryLayerCosts['0'] === 'number' ? retryLayerCosts['0'] : Math.min(...retryCosts);
+        const groundCost =
+          typeof retryLayerCosts['0'] === 'number' ? retryLayerCosts['0'] : Math.min(...retryCosts);
         return groundCost < FRICTION_COSTS.IMPASSABLE;
       }
       // Still no features after retry — allow placement

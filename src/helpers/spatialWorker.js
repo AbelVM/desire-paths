@@ -322,13 +322,11 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
-  if (kind === 'visibility-bearing-indexed')
-    return computeVisibilityBearingCSRIndexed(payload);
+  if (kind === 'visibility-bearing-indexed') return computeVisibilityBearingCSRIndexed(payload);
   if (kind === 'mapping-graph') return buildMappingGraph(payload);
   if (kind === 'r1-adjacency') return buildR1Adjacency(payload);
   if (kind === 'merge-cells') return mergeCellsChunk(payload);
-  if (kind === 'aoi-hexes')
-    return computeAoiHexes(payload?.polygon || null, payload?.resolution);
+  if (kind === 'aoi-hexes') return computeAoiHexes(payload?.polygon || null, payload?.resolution);
   throw new Error(`Unknown spatial task: ${kind}`);
 }
 
@@ -921,7 +919,13 @@ export async function runBuildR1Adjacency(viewHexes) {
 
 export async function runBuildMappingGraph(frictionSource, viewHexes, r1Adjacency) {
   if (!viewHexes || viewHexes.length === 0) {
-    return { N: 0, adjOffsets: new Int32Array(0), adjNeighbors: new Int32Array(0), frictionArr: new Float32Array(0), latLngArr: new Float32Array(0) };
+    return {
+      N: 0,
+      adjOffsets: new Int32Array(0),
+      adjNeighbors: new Int32Array(0),
+      frictionArr: new Float32Array(0),
+      latLngArr: new Float32Array(0),
+    };
   }
   const frictionEntries =
     frictionSource && typeof frictionSource.entries !== 'function'
@@ -993,58 +997,37 @@ export async function runMergeCellsTask({
   blurWeights,
 }) {
   if (!cells || cells.length === 0) {
-    return { cells: [], frictionArr: new Float64Array(0), affArr: new Float64Array(0), multiArr: [] };
+    return {
+      cells: [],
+      frictionArr: new Float64Array(0),
+      affArr: new Float64Array(0),
+      multiArr: [],
+    };
   }
 
-  const workerCount = Math.min(MAX_WORKERS, cells.length);
-  if (workerCount <= 1) {
-    return mergeCellsChunk({ cells, multiEntries, cellFrictionEntries, blurUpdateMap, blurWeights });
-  }
-
-  // Build per-chunk subsets so each worker only receives its own cells' data
-  // (keeps the cross-boundary payload small instead of cloning the full maps N×).
-  const chunks = splitIntoChunks(cells, workerCount);
-  const payloads = chunks.map((chunk) => {
-    const me = Object.create(null);
-    const cf = Object.create(null);
-    const bu = blurUpdateMap ? Object.create(null) : null;
-    const bw = blurWeights ? Object.create(null) : null;
-    for (let i = 0; i < chunk.length; i++) {
-      const c = chunk[i];
-      if (multiEntries[c] !== undefined) me[c] = multiEntries[c];
-      if (cellFrictionEntries[c] !== undefined) cf[c] = cellFrictionEntries[c];
-      if (bu && blurUpdateMap[c] !== undefined) bu[c] = blurUpdateMap[c];
-      if (bw && blurWeights[c] !== undefined) bw[c] = blurWeights[c];
-    }
-    return { cells: chunk, multiEntries: me, cellFrictionEntries: cf, blurUpdateMap: bu, blurWeights: bw };
+  // Run the whole merge in ONE worker with the full maps. The per-cell work is
+  // O(N) and trivial (a few comparisons + typed-array writes), so sharding only
+  // added a main-thread O(N) slicing loop (building per-chunk subsets) plus a
+  // result-concatenation loop for no real speedup — the full maps are cloned
+  // once either way. A single off-main-thread call removes all main-thread
+  // per-cell work. `runWorker` falls back to inline execution when Workers are
+  // unavailable.
+  return runWorker('merge-cells', {
+    cells,
+    multiEntries,
+    cellFrictionEntries,
+    blurUpdateMap,
+    blurWeights,
   });
-
-  const results = await Promise.all(payloads.map((p) => runWorker('merge-cells', p)));
-
-  let total = 0;
-  for (let r = 0; r < results.length; r++) total += results[r].cells.length;
-  const outCells = new Array(total);
-  const outFr = new Float64Array(total);
-  const outAff = new Float64Array(total);
-  const outMulti = new Array(total);
-  let o = 0;
-  for (let r = 0; r < results.length; r++) {
-    const res = results[r];
-    for (let i = 0; i < res.cells.length; i++) {
-      outCells[o] = res.cells[i];
-      outFr[o] = res.frictionArr[i];
-      outAff[o] = res.affArr[i];
-      outMulti[o] = res.multiArr[i];
-      o++;
-    }
-  }
-  return { cells: outCells, frictionArr: outFr, affArr: outAff, multiArr: outMulti };
 }
 
 /**
  * Compute AOI hexes in a worker — runs off the main thread.
  */
-export async function runAoiHexesTask(aoiPolygon, resolution = SIMULATION_PARAMS.h3StrideResolution) {
+export async function runAoiHexesTask(
+  aoiPolygon,
+  resolution = SIMULATION_PARAMS.h3StrideResolution
+) {
   if (!aoiPolygon || !aoiPolygon.length) return [];
   return runWorker('aoi-hexes', { polygon: aoiPolygon, resolution });
 }

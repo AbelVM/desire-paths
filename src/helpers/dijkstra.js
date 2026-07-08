@@ -67,8 +67,7 @@ export function invalidateGradientGraph() {
 export function getGradientGraph(cellSource) {
   if (_graphCache && _graphCacheKey === cellSource) return _graphCache;
 
-  const isMap =
-    typeof cellSource !== 'undefined' && typeof cellSource.entries === 'function';
+  const isMap = typeof cellSource !== 'undefined' && typeof cellSource.entries === 'function';
   const cellKeys = isMap ? Array.from(cellSource.keys()) : Object.keys(cellSource || {});
   const getF = (c) => (isMap ? cellSource.get(c) : cellSource[c]);
   const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
@@ -126,34 +125,24 @@ export function getGradientGraph(cellSource) {
     for (let e = start; e < end; e++) adjNeighbors[w++] = temp[e];
   }
 
-  // Precompute cell-id → r=1 neighbor cell-id array for O(1) reuse in the sim
-  // path (getGradientDirection, BFS detour). Mirrors the CSR adjacency but in
-  // cell-id space so callers avoid per-call idxToCell mapping. It already
-  // excludes the center and impassable/out-of-AOI neighbors — exactly the set
-  // the sim path filters gridDisk(cell, 1) down to — so it is a drop-in
-  // replacement for gridDisk(cell, 1) followed by the impassable/AOI filter.
-  const cellNeighbors = Object.create(null);
-  for (let i = 0; i < V; i++) {
-    const start = adjOffsets[i];
-    const end = adjOffsets[i + 1];
-    const arr = new Array(end - start);
-    for (let e = start; e < end; e++) arr[e - start] = cells[adjNeighbors[e]];
-    cellNeighbors[cells[i]] = arr;
-  }
-
-  _graphCache = { V, cellToIdx, idxToCell: cells, adjOffsets, adjNeighbors, cellNeighbors };
+  _graphCache = { V, cellToIdx, idxToCell: cells, adjOffsets, adjNeighbors };
   _graphCacheKey = cellSource;
   return _graphCache;
 }
 
-// Return the distance-1 neighbors of `cell` from the canonical gradient graph
-// (passable, in-AOI, center excluded). This is the CSR adjacency reused for the
-// sim path so we never call gridDisk(cell, 1) again. Returns an empty array for
+// Return the distance-1 neighbor *indices* of `cell` from the canonical gradient
+// graph (passable, in-AOI, center excluded) as a zero-copy Int32Array view into
+// the CSR `adjNeighbors` buffer. Callers map an index back to its cell id via
+// `graph.idxToCell[ni]`. This replaces the old `cellNeighbors` plain object
+// (V arrays of ~6 neighbor *cell strings* — ~3M string refs at city scale, held
+// for the whole simulation) with a reuse of the CSR adjacency that already
+// exists, eliminating that memory entirely. Returns an empty Int32Array for
 // impassable / out-of-AOI cells (which agents never occupy).
-const EMPTY_NEIGHBORS = Object.freeze([]);
-export function getGraphNeighborsR1(graph, cell) {
-  const arr = graph && graph.cellNeighbors[cell];
-  return arr || EMPTY_NEIGHBORS;
+const EMPTY_IDX = new Int32Array(0);
+export function getGraphNeighborIndicesR1(graph, cell) {
+  const idx = graph && graph.cellToIdx[cell];
+  if (idx === undefined) return EMPTY_IDX;
+  return graph.adjNeighbors.subarray(graph.adjOffsets[idx], graph.adjOffsets[idx + 1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,24 +355,27 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
     typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
   const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
 
-  // Build the exact (Float64) per-cell weight array. Impassable / missing cells
-  // are encoded as -1 and skipped during relaxation.
+  // Build the exact (Float64) per-cell weight array AND track the max weight in
+  // a single V-pass (the old code did these as two separate loops). Impassable /
+  // missing cells are encoded as -1 and skipped during relaxation.
   const frictionArr = new Float64Array(V);
+  let C = 0;
   for (let i = 0; i < V; i++) {
     const f = resolveFriction(idxToCell[i]);
-    frictionArr[i] = typeof f === 'number' && f < IMPASSABLE ? f : -1;
+    const w = typeof f === 'number' && f < IMPASSABLE ? f : -1;
+    frictionArr[i] = w;
+    if (w > C) C = w;
   }
 
   // Decide the queue. Dial's is only worthwhile when the max weight is small;
   // worn friction can reach IMPASSABLE, which would make its bucket count C huge.
-  let C = 0;
-  for (let i = 0; i < V; i++) if (frictionArr[i] > C) C = frictionArr[i];
   const useDial = GRADIENT_ALGO === 'dial' && C <= DIAL_MAX_C;
 
   let dist;
   if (useDial) {
     const q = new Int32Array(V);
-    for (let i = 0; i < V; i++) q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
+    for (let i = 0; i < V; i++)
+      q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
     dist = computeDijkstraDial(targetIdx, q, graph);
   } else {
     const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;

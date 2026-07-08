@@ -1,6 +1,10 @@
 import { clearComputeCaches, clearLatLngCache } from './compute.js';
 import { latLngToCell } from 'h3-js';
-import { SIMULATION_PARAMS, updateSimulationParams, DEFAULT_SIMULATION_PARAMS } from './constants.js';
+import {
+  SIMULATION_PARAMS,
+  updateSimulationParams,
+  DEFAULT_SIMULATION_PARAMS,
+} from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
 import { createIcons, icons } from 'lucide';
 
@@ -513,7 +517,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
           : currentType === 'destination'
             ? 'dual'
             : 'origin';
-      const label = nextType === 'origin' ? 'Start' : nextType === 'destination' ? 'End' : 'Both ends';
+      const label =
+        nextType === 'origin' ? 'Start' : nextType === 'destination' ? 'End' : 'Both ends';
 
       const nodeCellKey = cell;
       const handler = (ev) => {
@@ -738,7 +743,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.onboardingDismissed && uiState.onboardingOverlay) {
       uiState.onboardingOverlay.hidden = true;
     }
-
   };
 
   const syncWeightUI = () => {
@@ -825,7 +829,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const mappingReady = map.mappingReady === true;
     const canBuild = hasBuildInputs(map.simulationNodes);
     const canCompute = mappingReady && canBuild;
-    const canExport = map.flowsReady === true && (map.pathDesireScores instanceof Map ? map.pathDesireScores.size : Object.keys(map.pathDesireScores ?? {}).length) > 0;
+    const canExport =
+      map.flowsReady === true &&
+      (map.pathDesireScores instanceof Map
+        ? map.pathDesireScores.size
+        : Object.keys(map.pathDesireScores ?? {}).length) > 0;
     const hasGrid = Object.keys(map.simulationNodes ?? {}).length > 0;
 
     // Build Mapping button removed — simulation auto-builds on demand
@@ -1294,7 +1302,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       const syntheticEvent = {
         originalEvent: { clientX: touch.clientX, clientY: touch.clientY },
         point: [touch.clientX, touch.clientY],
-        lngLat: map.unproject?.([touch.clientX - (uiState.mapContainer?.getBoundingClientRect().left ?? 0), touch.clientY - (uiState.mapContainer?.getBoundingClientRect().top ?? 0)]),
+        lngLat: map.unproject?.([
+          touch.clientX - (uiState.mapContainer?.getBoundingClientRect().left ?? 0),
+          touch.clientY - (uiState.mapContainer?.getBoundingClientRect().top ?? 0),
+        ]),
       };
 
       showContextMenu(syntheticEvent, node, longPressNodeCell);
@@ -1383,7 +1394,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
               }
             }
             if (closest) {
-              const cell = latLngToCell(closest.lat, closest.lng, SIMULATION_PARAMS.h3StrideResolution);
+              const cell = latLngToCell(
+                closest.lat,
+                closest.lng,
+                SIMULATION_PARAMS.h3StrideResolution
+              );
               node = map.simulationNodes?.[cell];
             }
           }

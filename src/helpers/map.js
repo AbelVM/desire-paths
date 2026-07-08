@@ -24,9 +24,14 @@ export function handleFlowHover(info, flowData) {
     const friction = entry.f;
     const affordance = entry.a;
     const cellType = getCellType(friction);
-    const typeLabel = cellType === 'pavement' ? 'Pavement' :
-      cellType === 'light_park' ? 'Light park' :
-      cellType === 'heavy_grass' ? 'Heavy grass' : 'Impassable';
+    const typeLabel =
+      cellType === 'pavement'
+        ? 'Pavement'
+        : cellType === 'light_park'
+          ? 'Light park'
+          : cellType === 'heavy_grass'
+            ? 'Heavy grass'
+            : 'Impassable';
     tooltip.innerHTML = `<strong>Flow:</strong> ${score} paths<br><strong>Affordance:</strong> ${affordance.toFixed(2)}<br><strong>Type:</strong> ${typeLabel}<br><strong>Friction:</strong> ${friction}`;
     tooltip.style.left = `${info.x}px`;
     tooltip.style.top = `${info.y}px`;
