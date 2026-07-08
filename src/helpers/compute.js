@@ -12,6 +12,7 @@ import {
   COMPUTE_PATH_CACHE_MAX,
   COMPUTE_DISK_CACHE_MAX,
   COMPUTE_VISIBILITY_CACHE_MAX,
+  NEIGHBOR_DISK_CACHE_MAX,
   CELL_LATLNG_CACHE_MAX,
   GRADIENT_CACHE_MAX_ENTRIES,
   SIMULATION_PARAMS,
@@ -215,12 +216,14 @@ function _getCachedDisk(ctx, center, r) {
 // simulation and cached, so the mapping stage pays nothing and the total number
 // of `gridDisk` calls is unchanged (≤ N distinct cells are ever visited).
 let _neighborDiskCache = Object.create(null);
+let _neighborDiskOrder = [];
 let _neighborDiskGen = -1;
 let _neighborDiskDepth = -1;
 
 function getNeighborDisk(cell, visualDepth, gen) {
   if (_neighborDiskGen !== gen || _neighborDiskDepth !== visualDepth) {
     _neighborDiskCache = Object.create(null);
+    _neighborDiskOrder = [];
     _neighborDiskGen = gen;
     _neighborDiskDepth = visualDepth;
   }
@@ -228,6 +231,11 @@ function getNeighborDisk(cell, visualDepth, gen) {
   if (d === undefined) {
     d = gridDisk(cell, visualDepth);
     _neighborDiskCache[cell] = d;
+    _neighborDiskOrder.push(cell);
+    if (_neighborDiskOrder.length > NEIGHBOR_DISK_CACHE_MAX) {
+      const old = _neighborDiskOrder.shift();
+      delete _neighborDiskCache[old];
+    }
   }
   return d;
 }

@@ -419,6 +419,11 @@ export const CELL_LATLNG_CACHE_MAX = 1024;
 export const COMPUTE_PATH_CACHE_MAX = 256;
 export const COMPUTE_DISK_CACHE_MAX = 256;
 export const COMPUTE_VISIBILITY_CACHE_MAX = 2048;
+// Cap on the lazy neighbor-disk cache. At city scale (≈5e5 cells) an uncapped
+// cache would hold one ~720-cell array per distinct visited cell — multiple GB.
+// LRU eviction keeps memory bounded; recomputation on miss is cheap and rare
+// once the working set of frequently-visited cells fits within the cap.
+export const NEIGHBOR_DISK_CACHE_MAX = 4096;
 export const GRADIENT_CACHE_MAX_ENTRIES = 16;
 
 // Cache size limit for path and polygon caches (used in compute-heavy operations)
