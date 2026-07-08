@@ -5,7 +5,7 @@ import {
   POLY_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
-import { runFastScanTask, runAoiHexesTask, runBuildMappingGraph, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
+import { runFastScanTask, runAoiHexesTask, runBuildMappingGraph, runBuildR1Adjacency, runVisibilityBearingTask, runMergeCellsTask } from './spatialWorker.js';
 import {
   clearComputeCaches,
   buildCellStateEntry,
@@ -109,6 +109,11 @@ export async function triggerFastScan(state, mapInstance) {
   const viewHexes = await aoiHexPromise;
   if (!viewHexes || viewHexes.length === 0) return;
 
+  // Build the shared r=1 adjacency (pure geometry, off the main thread) in
+  // parallel with the fast scan. It is reused by the impassable-blur BFS and the
+  // mapping graph, replacing two separate `gridDisk` passes (P1 + P3).
+  const r1AdjacencyPromise = runBuildR1Adjacency(viewHexes);
+
   // Preprocess features into the format expected by workers
   const buildFeatures = [];
   for (let i = 0; i < rawFeatures.length; i++) {
@@ -124,7 +129,7 @@ export async function triggerFastScan(state, mapInstance) {
     });
   }
 
-  const build = await runFastScanTask(viewHexes, buildFeatures);
+  const build = await runFastScanTask(viewHexes, buildFeatures, r1AdjacencyPromise);
 
   state._mappingGeneration = (state._mappingGeneration ?? 0) + 1;
   clearComputeCaches(state);
@@ -161,8 +166,6 @@ export async function triggerFastScan(state, mapInstance) {
   }
 
   state._frictionObj = Object.create(null);
-  state._multiFrictionObj = Object.create(null);
-  state.affordanceMap.clear();
   state._affordanceObj = Object.create(null);
   state._cellState = Object.create(null);
   state._cellStateMappingGen = state._mappingGeneration;
@@ -185,13 +188,14 @@ export async function triggerFastScan(state, mapInstance) {
     const target = merged.multiArr[i];
     state._frictionObj[cell] = fr;
     state.cellFrictionMap.set(cell, fr);
-    state._multiFrictionObj[cell] = target;
-    // Keep multiFrictionMap consistent with _multiFrictionObj (same reference).
     state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
     state._affordanceObj[cell] = aff;
     state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target, null, cell);
   }
+  // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
+  // so we don't hold a second N-entry container at steady state.
+  state._multiFrictionObj = state.multiFrictionMap;
 
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
 
@@ -208,7 +212,7 @@ export async function triggerFastScan(state, mapInstance) {
   // cross-boundary clone), so the simulation's consumers are untouched.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
   // lazily and cached during the simulation via getNeighborDisk (see compute.js).
-  const mappingGraph = await runBuildMappingGraph(state._frictionObj, viewHexes);
+  const mappingGraph = await runBuildMappingGraph(state._frictionObj, viewHexes, await r1AdjacencyPromise);
   const csr = await runVisibilityBearingTask(mappingGraph, viewHexes, visionDepth);
   const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
   state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };

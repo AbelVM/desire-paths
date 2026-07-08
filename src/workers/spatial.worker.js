@@ -6,6 +6,7 @@ import {
   computeImpassableBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
   buildMappingGraph,
+  buildR1Adjacency,
   mergeCellsChunk,
 } from '../helpers/spatialTasks.js';
 import { handleAgentBatch } from './agent.worker.js';
@@ -54,6 +55,8 @@ self.onmessage = (event) => {
       result = computeVisibilityBearingCSRIndexed(data.payload || {});
     } else if (data.kind === 'mapping-graph') {
       result = buildMappingGraph(data.payload || {});
+    } else if (data.kind === 'r1-adjacency') {
+      result = buildR1Adjacency(data.payload || {});
     } else if (data.kind === 'merge-cells') {
       result = mergeCellsChunk(data.payload || {});
     } else if (data.kind === 'aoi-hexes') {

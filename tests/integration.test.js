@@ -131,6 +131,12 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     if (!aoiPolygon || !aoiPolygon.length) return [];
     return mockHexes;
   }),
+  runBuildR1Adjacency: vi.fn(async (viewHexes) => {
+    // Mock the shared r=1 adjacency build. Returns an empty CSR shape; the
+    // (also mocked) fast-scan and mapping-graph tasks ignore it.
+    const N = viewHexes ? viewHexes.length : 0;
+    return { N, offsets: new Int32Array(N + 1), neighbors: new Int32Array(0) };
+  }),
   runFastScanTask: vi.fn(async (viewHexes, _features) => {
     const multiFrictionEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);

@@ -818,14 +818,11 @@ export async function computeDesirePaths(state, mapInstance) {
     for (const [k, v] of state.cellFrictionMap) state._frictionObj[k] = v;
     state._frictionSnapshotGen = mappingGen;
   }
+  // `_multiFrictionObj` is a view over `multiFrictionMap` (same cell→layer-map
+  // references), not a second copy — this avoids holding N object references in
+  // a separate plain-object container at steady state.
   if (!state._multiFrictionObj || state._multiFrictionSnapshotGen !== mappingGen) {
-    state._multiFrictionObj = Object.create(null);
-    if (state.multiFrictionMap && typeof state.multiFrictionMap.entries === 'function') {
-      for (const [k, v] of state.multiFrictionMap) state._multiFrictionObj[k] = v;
-    } else if (state.multiFrictionMap) {
-      for (const k in state.multiFrictionMap)
-        state._multiFrictionObj[k] = state.multiFrictionMap[k];
-    }
+    state._multiFrictionObj = state.multiFrictionMap || Object.create(null);
     state._multiFrictionSnapshotGen = mappingGen;
   }
 
@@ -844,7 +841,7 @@ export async function computeDesirePaths(state, mapInstance) {
     const fr = frictionObj[k];
     const aff = affordanceObj?.[k] ?? 0.1;
     const desire = desireScores?.[k] ?? 0;
-    const multi = multiFrictionObj?.[k] ?? null;
+    const multi = multiFrictionObj?.get?.(k) ?? null;
     state._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
   }
   state._cellStateMappingGen = mappingGen;

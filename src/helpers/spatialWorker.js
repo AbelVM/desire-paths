@@ -5,6 +5,7 @@ import {
   computeImpassableBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
   buildMappingGraph,
+  buildR1Adjacency,
   mergeCellsChunk,
   normalizeFrictionEntries,
   computeAoiHexes,
@@ -324,6 +325,7 @@ function runLocally(kind, payload) {
   if (kind === 'visibility-bearing-indexed')
     return computeVisibilityBearingCSRIndexed(payload);
   if (kind === 'mapping-graph') return buildMappingGraph(payload);
+  if (kind === 'r1-adjacency') return buildR1Adjacency(payload);
   if (kind === 'merge-cells') return mergeCellsChunk(payload);
   if (kind === 'aoi-hexes')
     return computeAoiHexes(payload?.polygon || null, payload?.resolution);
@@ -696,7 +698,7 @@ export async function runAgentBatches(
   return { pathDesire: mergedPath, perTargetContribs: mergedPer, processed, total };
 }
 
-export async function runFastScanTask(viewHexes, features) {
+export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   if (!viewHexes || viewHexes.length === 0) {
     return {
       multiFrictionEntries: Object.create(null),
@@ -776,8 +778,14 @@ export async function runFastScanTask(viewHexes, features) {
     mergeScalarEntries(cellFrictionEntries, batch.cellFrictionEntries ?? Object.create(null));
   }
 
-  // Run blur with complete data (re-run if early version already started)
-  const blur = await runImpassableBlurTask(cellFrictionEntries);
+  // Run blur with complete data (re-run if early version already started).
+  // Resolve the r1 adjacency promise here (it was launched in parallel with the
+  // chunk computation above) so the blur BFS reuses the shared CSR.
+  const r1 = r1Adjacency instanceof Promise ? await r1Adjacency : r1Adjacency;
+  const blur = await runImpassableBlurTask(cellFrictionEntries, {
+    viewHexes,
+    r1Adjacency: r1,
+  });
   return {
     multiFrictionEntries,
     cellFrictionEntries,
@@ -904,7 +912,14 @@ function mergeVisibilityBearingShards(shards, N) {
  * posted back without a transfer list so a SharedArrayBuffer (when the page is
  * cross-origin isolated) is shared zero-copy, and an ArrayBuffer is copied once.
  */
-export async function runBuildMappingGraph(frictionSource, viewHexes) {
+export async function runBuildR1Adjacency(viewHexes) {
+  if (!viewHexes || viewHexes.length === 0) {
+    return { N: 0, offsets: new Int32Array(0), neighbors: new Int32Array(0) };
+  }
+  return runWorker('r1-adjacency', { viewHexes });
+}
+
+export async function runBuildMappingGraph(frictionSource, viewHexes, r1Adjacency) {
   if (!viewHexes || viewHexes.length === 0) {
     return { N: 0, adjOffsets: new Int32Array(0), adjNeighbors: new Int32Array(0), frictionArr: new Float32Array(0), latLngArr: new Float32Array(0) };
   }
@@ -912,7 +927,7 @@ export async function runBuildMappingGraph(frictionSource, viewHexes) {
     frictionSource && typeof frictionSource.entries !== 'function'
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
-  return runWorker('mapping-graph', { frictionEntries, viewHexes });
+  return runWorker('mapping-graph', { frictionEntries, viewHexes, r1Adjacency });
 }
 
 /**
