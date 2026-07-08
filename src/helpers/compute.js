@@ -208,18 +208,6 @@ function _getCachedDisk(ctx, center, r) {
   return arr;
 }
 
-// Precompute neighbor disks for all AOI cells at mapping time.
-// Stores gridDisk(cell, VISUAL_DEPTH) for each cell to avoid millions of redundant calls.
-// Keyed by mapping generation so it invalidates on remap.
-function precomputeNeighborDisks(cells, visualDepth) {
-  const result = Object.create(null);
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    result[cell] = gridDisk(cell, visualDepth);
-  }
-  return result;
-}
-
 // Lazy, generation-keyed neighbor-disk cache (uncapped).
 // Replaces the upfront `precomputeNeighborDisks` pass that used to run N
 // `gridDisk(cell, visionDepth)` calls synchronously during the mapping stage and
@@ -1688,7 +1676,6 @@ export {
   yieldToMain as _yieldToMain,
   buildCellStateEntry,
   precomputeVisibilitySets,
-  precomputeNeighborDisks,
   precomputeBearingMap,
   precomputeOriginDestDistances,
 };

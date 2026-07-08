@@ -249,7 +249,6 @@ const init = () => {
 
   desireMap.multiFrictionMap = new Map();
   desireMap.cellFrictionMap = new Map();
-  // desireMap.cachedCoordinates = new Map();
   desireMap.pathDesireScores = new Map();
   desireMap.affordanceMap = new Map();
   desireMap.globalPeakFlow = 1;
@@ -355,7 +354,6 @@ const init = () => {
       (l) => l.type === 'symbol' && (l.id.includes('label') || l.id.includes('place'))
     );
     if (match) e.target.targetLabelLayerId = match.id;
-    // e.target.triggerFastScan();
   });
 
   desireMap.on('mousemove', (e) => {
@@ -386,8 +384,6 @@ const init = () => {
     const tooltip = document.getElementById('hex-tooltip');
     if (tooltip) tooltip.hidden = true;
   });
-
-  // desireMap.on('moveend', e => { e.target.triggerFastScan(); });
 
   // Click handler — place new nodes only (weight managed via context menu)
   desireMap.on('click', async (e) => {
