@@ -24,7 +24,7 @@ import {
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
-import { computeDijkstra } from './dijkstra.js';
+import { computeDijkstra, getGradientGraph, getGraphNeighborsR1 } from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
 
 // Re-export for backward compatibility with existing code references
@@ -546,7 +546,9 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
 
-  const neighbors = _getCachedDisk(ctx, curr, 1);
+  // Reuse the canonical gradient graph's r=1 adjacency (CSR) instead of a
+  // separate gridDisk(cell, 1) call — same passable, in-AOI neighbor set.
+  const neighbors = getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), curr);
   // _frictionObj is always the canonical lookup — already built once per sim run.
   // Direct property access on plain object is faster than iterating Map.entries().
   const frictionLookup = ctx._frictionObj;
@@ -1264,7 +1266,12 @@ function getBestNextStep(ctx, curr, gradient, currentDirection, agentId = '', ac
 
   if (cellsArr.length === 0) {
     for (let depth = 1; depth <= 3; depth++) {
-      const neighbors = _getCachedDisk(ctx, curr, depth);
+      // depth=1 reuses the canonical graph's r=1 adjacency; deeper rings fall
+      // back to the disk cache (the graph only encodes distance-1 edges).
+      const neighbors =
+        depth === 1
+          ? getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), curr)
+          : _getCachedDisk(ctx, curr, depth);
       let bestGrad = Infinity;
       let bestCandidate = null;
 
@@ -1434,7 +1441,11 @@ function computeDijkstraGradient(ctx, targetCell) {
 
   const getNeighbors = (cell) => _getCachedDisk(ctx, cell, 1);
 
-  return computeDijkstra(targetCell, getFriction, getNeighbors);
+  // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
+  // cellFrictionMap reference. Topology is static per mapping generation; only
+  // the per-cell friction (which can change via emergent wear) is rebuilt.
+  const graph = getGradientGraph(ctx.cellFrictionMap);
+  return computeDijkstra(targetCell, getFriction, null, graph);
 }
 
 /**
@@ -1492,7 +1503,8 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
       found = true;
       break;
     }
-    const nb = _getCachedDisk(ctx, node, 1);
+    // Reuse the canonical graph's r=1 adjacency for the BFS expansion.
+    const nb = getGraphNeighborsR1(getGradientGraph(ctx.cellFrictionMap), node);
     for (let i = 0; i < nb.length; i++) {
       const m = nb[i];
       if (m === node || seen[m]) continue;

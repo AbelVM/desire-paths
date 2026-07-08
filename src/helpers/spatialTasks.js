@@ -10,7 +10,7 @@ import {
   getSurface,
   POLY_CELLS_CACHE_MAX,
 } from './constants.js';
-import { computeDijkstra } from './dijkstra.js';
+import { computeDijkstra, getGradientGraph } from './dijkstra.js';
 // Visibility/bearing precomputes are shared with the main-thread simulation code
 // (compute.js). Importing them here lets the mapping stage run them off the main
 // thread. All usages are function-level, so the compute.js <-> spatialWorker.js
@@ -136,7 +136,11 @@ export function normalizeFrictionEntries(source) {
 }
 
 function computeDijkstraGradientForLookup(targetCell, frictionLookup) {
-  return computeDijkstra(targetCell, frictionLookup, (cell) => gridDisk(cell, 1));
+  // Build the gradient graph (CSR adjacency) once per friction source and cache
+  // it, so every gradient Dijkstra reuses the mapping-stage neighbor topology
+  // instead of recomputing gridDisk(cell, 1) per visited cell.
+  const graph = getGradientGraph(frictionLookup);
+  return computeDijkstra(targetCell, frictionLookup, null, graph);
 }
 
 export function computeDijkstraGradientSnapshot(targetCell, frictionSource) {

@@ -1,5 +1,6 @@
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
+import { getGradientGraph, getGraphNeighborsR1 } from './dijkstra.js';
 import {
   FRICTION_COSTS,
   WEIGHTS,
@@ -164,12 +165,16 @@ function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
   return true;
 }
 
-function getGradientDirection(curr, gradientObj, frictionLookup, cellState, neighborDisks, bearingMap) {
+function getGradientDirection(curr, gradientObj, frictionLookup, cellState, neighborDisks, bearingMap, graph) {
   if (!gradientObj) return null;
   const gCurr = gradientObj[curr];
   if (typeof gCurr !== 'number') return null;
 
-  const neighbors = _getCachedDisk(curr, 1, neighborDisks);
+  // Reuse the canonical gradient graph's r=1 adjacency when available; fall
+  // back to the disk cache otherwise (same passable, in-AOI neighbor set).
+  const neighbors = graph
+    ? getGraphNeighborsR1(graph, curr)
+    : _getCachedDisk(curr, 1, neighborDisks);
   let bestNeighbor = null;
   let bestGrad = gCurr;
 
@@ -203,7 +208,8 @@ function getBestNextStep(
   visibilityMap,
   neighborDisks,
   accumulatedFootprints,
-  bearingMap
+  bearingMap,
+  graph
 ) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
   const weights = {
@@ -325,7 +331,12 @@ function getBestNextStep(
 
   if (cellsArr.length === 0) {
     for (let depth = 1; depth <= 3; depth++) {
-      const neighbors = _getCachedDisk(curr, depth, neighborDisks);
+      // depth=1 reuses the canonical graph's r=1 adjacency; deeper rings fall
+      // back to the disk cache (the graph only encodes distance-1 edges).
+      const neighbors =
+        depth === 1 && graph
+          ? getGraphNeighborsR1(graph, curr)
+          : _getCachedDisk(curr, depth, neighborDisks);
       let bestGrad = Infinity;
       let bestCandidate = null;
 
@@ -422,7 +433,7 @@ function getBestNextStep(
 // cells and does not cut a building corner. Otherwise performs a bounded BFS
 // detour over the local neighborhood so the agent walks *around* the obstacle
 // instead of jumping over it or stalling against the building.
-function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDisks) {
+function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDisks, graph) {
   const straight = _getCachedPathCells(curr, nextStep);
   let clear = true;
   for (let i = 1; i < straight.length; i++) {
@@ -455,7 +466,8 @@ function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDis
       found = true;
       break;
     }
-    const nb = _getCachedDisk(node, 1, neighborDisks);
+    // Reuse the canonical graph's r=1 adjacency for the BFS expansion.
+    const nb = graph ? getGraphNeighborsR1(graph, node) : _getCachedDisk(node, 1, neighborDisks);
     for (let i = 0; i < nb.length; i++) {
       const m = nb[i];
       if (m === node || seen[m]) continue;
@@ -538,7 +550,8 @@ function runAgentPath(
   accumulatedFootprints,
   bearingMap,
   originDestDistances,
-  simulationParams
+  simulationParams,
+  graph
 ) {
   const params = simulationParams || SIMULATION_PARAMS;
   let simCurrent = originCell;
@@ -546,7 +559,7 @@ function runAgentPath(
 
   let distToTarget = 0;
   let simDirection =
-    getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks, bearingMap) ??
+    getGradientDirection(simCurrent, destGradientObj, frictionLookup, cellState, neighborDisks, bearingMap, graph) ??
     getBearingFast(simCurrent, simTarget, bearingMap);
   const simPath = [originCell];
   if (pathDesireMap) recordTraversal(pathDesireMap, originCell);
@@ -585,7 +598,8 @@ function runAgentPath(
       visibilityMap,
       neighborDisks,
       accumulatedFootprints,
-      bearingMap
+      bearingMap,
+      graph
     );
     if (!nextStep || nextStep === simCurrent) {
       stuckCount++;
@@ -599,7 +613,7 @@ function runAgentPath(
     // by an impassable cell or would cut a building corner, route a local
     // detour around the obstacle so the agent walks *around* the corner
     // instead of jumping over it or stalling against the building.
-    const line = _resolveStepLine(simCurrent, nextStep, frictionLookup, cellState, neighborDisks);
+    const line = _resolveStepLine(simCurrent, nextStep, frictionLookup, cellState, neighborDisks, graph);
     let hitTarget = false;
     let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
@@ -648,6 +662,13 @@ export function computeAgentBatch({
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
   const visibilityMap = visibilityEntries || null;
+
+  // Build the canonical gradient graph (CSR r=1 adjacency) once per batch from
+  // the friction source. spatialTasks.js already builds the same graph keyed by
+  // this exact object, so this is a cache hit when the module instance is shared
+  // and at most one gridDisk pass otherwise. The sim path reuses it for every
+  // distance-1 neighbor lookup instead of calling gridDisk(cell, 1) repeatedly.
+  const graph = getGradientGraph(frictionLookup);
 
   // Total agents for progress reporting
   let totalAgents = 0;
@@ -722,7 +743,8 @@ export function computeAgentBatch({
           abmFootprints,
           bearingMap,
           originDestDistances,
-          simulationParams
+          simulationParams,
+          graph
         );
 
         for (let k = 0; k < simPath.length; k++) {

@@ -3,24 +3,388 @@ import { FRICTION_COSTS } from './constants.js';
 import { gridDisk } from 'h3-js';
 
 /**
+ * Gradient Dijkstra — selected algorithm + tuning.
+ *
+ * The graph is a degree-6 H3 hex grid. Friction wears within [1, 4]
+ * (PAVEMENT=1, LIGHT_PARK=2.5, HEAVY_GRASS=4) plus the impassable-blur
+ * addition (≤3), so every PASSABLE cell stays in [1, ~7]. IMPASSABLE (999999)
+ * is a hard barrier that is never traversed (encoded as -1 and skipped), so it
+ * does not contribute to edge weights.
+ *
+ * Because passable edge weights are small, Dial's Algorithm is the most
+ * performant priority queue: O(E + V·C) with C = max (quantized) edge weight.
+ * The bucket count is always C+1, computed from the actual max weight, so it
+ * always covers the full range (no overflow risk) regardless of wear. The
+ * RESOLUTION is set by GRADIENT_DIAL_SCALE: distances are quantized to
+ * 1/SCALE. We use SCALE=8 (step 0.125) so that the fine friction differences
+ * produced by wear (friction varies continuously in [1,4]) are preserved —
+ * sub-0.125 differences are below the wear step and safely rounded. With max
+ * weight ~5.8 (HEAVY_GRASS 4 + blur ~1.8) ×8 ≈ 47, C≈47, so Dial's does ~47V
+ * bucket ops with zero comparisons, still ~3× fewer ops than a 4-ary heap
+ * (~170V), so Dial's remains the fastest choice even at this resolution.
+ *
+ * A 4-ary heap fallback (exact, handles any weight range) is kept as a safety
+ * net for unexpectedly large weights (see DIAL_MAX_C); it should not trigger
+ * for normal friction. Set GRADIENT_ALGO to '4ary' or 'binary' to force it.
+ */
+export const GRADIENT_ALGO = 'dial'; // 'dial' | '4ary' | 'binary'
+// Quantization scale for Dial's. Distances are rounded to 1/SCALE. SCALE=8
+// (step 0.125) preserves the fine friction differences produced by wear while
+// keeping C small enough that Dial's stays faster than a 4-ary heap.
+const GRADIENT_DIAL_SCALE = 8;
+const INF_INT = 0x3fffffff;
+// Dial's bucket count is C = max edge weight. For normal friction passable
+// cells stay in [1, ~7] (quantized ×2 -> 14), so C is always small and Dial's
+// is optimal. This guard keeps a 4-ary heap fallback for any unexpectedly large
+// weight (e.g. if friction modeling changes), so Dial's never degrades.
+const DIAL_MAX_C = 128;
+
+// ---------------------------------------------------------------------------
+// Gradient graph: precomputed distance-1 adjacency (CSR) + cell<->index maps.
+// Topology depends only on the AOI cell set, which is stable for a mapping
+// generation, so it is built once per cell-source and reused across every
+// gradient Dijkstra (this is what eliminates the per-cell gridDisk calls that
+// used to dominate gradient cost).
+// ---------------------------------------------------------------------------
+let _graphCacheKey = null;
+let _graphCache = null;
+
+export function getGradientGraph(cellSource) {
+  if (_graphCache && _graphCacheKey === cellSource) return _graphCache;
+
+  const isMap =
+    typeof cellSource !== 'undefined' && typeof cellSource.entries === 'function';
+  const cellKeys = isMap ? Array.from(cellSource.keys()) : Object.keys(cellSource || {});
+  const getF = (c) => (isMap ? cellSource.get(c) : cellSource[c]);
+  const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
+
+  // Only PASSABLE cells participate in routing. Impassable cells are static
+  // barriers (friction never wears into/out of IMPASSABLE) that are never
+  // traversed, so they are excluded from the graph entirely. This shrinks both
+  // V and E; the result is identical to the legacy path, which skipped
+  // impassable neighbors during relaxation.
+  const cells = [];
+  for (let i = 0; i < cellKeys.length; i++) {
+    const c = cellKeys[i];
+    const f = getF(c);
+    if (typeof f === 'number' && f < IMPASSABLE) cells.push(c);
+  }
+  const V = cells.length;
+
+  const cellToIdx = Object.create(null);
+  for (let i = 0; i < V; i++) cellToIdx[cells[i]] = i;
+
+  const adjOffsets = new Int32Array(V + 1);
+  const lists = new Array(V);
+  for (let i = 0; i < V; i++) {
+    const cell = cells[i];
+    const disk = gridDisk(cell, 1);
+    const list = [];
+    for (let k = 0; k < disk.length; k++) {
+      const nb = disk[k];
+      if (nb === cell) continue; // skip the center
+      const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
+      if (j !== undefined) list.push(j); // keep only passable, in-AOI neighbors
+    }
+    lists[i] = list;
+    adjOffsets[i + 1] = adjOffsets[i] + list.length;
+  }
+
+  const adjNeighbors = new Int32Array(adjOffsets[V]);
+  let p = 0;
+  for (let i = 0; i < V; i++) {
+    const list = lists[i];
+    for (let k = 0; k < list.length; k++) adjNeighbors[p++] = list[k];
+  }
+
+  // Precompute cell-id → r=1 neighbor cell-id array for O(1) reuse in the sim
+  // path (getGradientDirection, BFS detour). Mirrors the CSR adjacency but in
+  // cell-id space so callers avoid per-call idxToCell mapping. It already
+  // excludes the center and impassable/out-of-AOI neighbors — exactly the set
+  // the sim path filters gridDisk(cell, 1) down to — so it is a drop-in
+  // replacement for gridDisk(cell, 1) followed by the impassable/AOI filter.
+  const cellNeighbors = Object.create(null);
+  for (let i = 0; i < V; i++) {
+    const start = adjOffsets[i];
+    const end = adjOffsets[i + 1];
+    const arr = new Array(end - start);
+    for (let e = start; e < end; e++) arr[e - start] = cells[adjNeighbors[e]];
+    cellNeighbors[cells[i]] = arr;
+  }
+
+  _graphCache = { V, cellToIdx, idxToCell: cells, adjOffsets, adjNeighbors, cellNeighbors };
+  _graphCacheKey = cellSource;
+  return _graphCache;
+}
+
+// Return the distance-1 neighbors of `cell` from the canonical gradient graph
+// (passable, in-AOI, center excluded). This is the CSR adjacency reused for the
+// sim path so we never call gridDisk(cell, 1) again. Returns an empty array for
+// impassable / out-of-AOI cells (which agents never occupy).
+const EMPTY_NEIGHBORS = Object.freeze([]);
+export function getGraphNeighborsR1(graph, cell) {
+  const arr = graph && graph.cellNeighbors[cell];
+  return arr || EMPTY_NEIGHBORS;
+}
+
+// ---------------------------------------------------------------------------
+// d-ary min-heap (integer node ids, Float64 scores, zero-alloc typed arrays).
+// arity=2 reproduces the old binary MinHeap; arity=4 is the Dijkstra optimum.
+// ---------------------------------------------------------------------------
+class DaryHeap {
+  #d;
+  #nodes;
+  #scores;
+  #size = 0;
+
+  constructor(arity = 4, capacityHint = 1024) {
+    this.#d = arity;
+    this.#nodes = new Int32Array(capacityHint);
+    this.#scores = new Float64Array(capacityHint);
+  }
+
+  get size() {
+    return this.#size;
+  }
+
+  #grow() {
+    const cap = this.#nodes.length * 2;
+    const n = new Int32Array(cap);
+    n.set(this.#nodes);
+    const s = new Float64Array(cap);
+    s.set(this.#scores);
+    this.#nodes = n;
+    this.#scores = s;
+  }
+
+  insert(node, score) {
+    if (this.#size >= this.#nodes.length) this.#grow();
+    let i = this.#size++;
+    this.#nodes[i] = node;
+    this.#scores[i] = score;
+    const d = this.#d;
+    while (i > 0) {
+      const par = ((i - 1) / d) | 0;
+      if (this.#scores[i] >= this.#scores[par]) break;
+      const tn = this.#nodes[i];
+      const ts = this.#scores[i];
+      this.#nodes[i] = this.#nodes[par];
+      this.#scores[i] = this.#scores[par];
+      this.#nodes[par] = tn;
+      this.#scores[par] = ts;
+      i = par;
+    }
+  }
+
+  extractMin() {
+    if (this.#size === 0) return -1;
+    const minNode = this.#nodes[0];
+    this.#size--;
+    if (this.#size > 0) {
+      this.#nodes[0] = this.#nodes[this.#size];
+      this.#scores[0] = this.#scores[this.#size];
+      this.#down(0);
+    }
+    return minNode;
+  }
+
+  #down(i) {
+    const d = this.#d;
+    const len = this.#size;
+    const nodes = this.#nodes;
+    const scores = this.#scores;
+    for (;;) {
+      const first = i * d + 1;
+      if (first >= len) break;
+      let best = first;
+      const last = first + d < len ? first + d : len;
+      for (let c = first + 1; c < last; c++) {
+        if (scores[c] < scores[best]) best = c;
+      }
+      if (scores[i] <= scores[best]) break;
+      const tn = nodes[i];
+      const ts = scores[i];
+      nodes[i] = nodes[best];
+      scores[i] = scores[best];
+      nodes[best] = tn;
+      scores[best] = ts;
+      i = best;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Indexed Dijkstra variants (operate on integer cell indices + typed arrays).
+// `frictionArr` holds per-cell edge weight (cost of ENTERING the cell).
+// Impassable / missing cells are encoded as -1 and skipped.
+// ---------------------------------------------------------------------------
+
+// Dial's Algorithm with circular buckets. C = max edge weight (integer); the
+// bucket count is C+1. Because every edge weight w satisfies 1 <= w <= C, a
+// relaxed neighbor at distance du+w always lands in a bucket strictly ahead of
+// du in the circular order, so lazy deletion (stale duplicates skipped via
+// `visited`) is correct. Termination is tracked by nodeCount.
+function computeDijkstraDial(targetIdx, frictionArr, graph) {
+  const { V, adjOffsets, adjNeighbors } = graph;
+
+  let C = 1;
+  for (let i = 0; i < V; i++) {
+    const f = frictionArr[i];
+    if (f > C) C = f;
+  }
+  const B = C + 1;
+  const buckets = new Array(B);
+  for (let i = 0; i < B; i++) buckets[i] = [];
+
+  const dist = new Int32Array(V).fill(INF_INT);
+  const visited = new Uint8Array(V);
+  dist[targetIdx] = 0;
+  buckets[0].push(targetIdx);
+  let nodeCount = 1;
+  let d = 0;
+
+  while (nodeCount > 0) {
+    let guard = 0;
+    while (buckets[d % B].length === 0) {
+      d++;
+      if (++guard > B) break; // no nodes left (nodeCount should be 0)
+    }
+    if (buckets[d % B].length === 0) break;
+
+    const bucket = buckets[d % B];
+    const u = bucket.pop();
+    nodeCount--;
+    if (visited[u]) continue;
+    visited[u] = 1;
+
+    const du = dist[u];
+    const start = adjOffsets[u];
+    const end = adjOffsets[u + 1];
+    for (let e = start; e < end; e++) {
+      const v = adjNeighbors[e];
+      if (visited[v]) continue;
+      const w = frictionArr[v];
+      if (w < 0) continue; // impassable / missing
+      const nd = du + w;
+      if (nd < dist[v]) {
+        dist[v] = nd;
+        buckets[nd % B].push(v);
+        nodeCount++;
+      }
+    }
+  }
+  return dist;
+}
+
+function computeDijkstraHeap(targetIdx, frictionArr, graph, arity) {
+  const { V, adjOffsets, adjNeighbors } = graph;
+  const dist = new Float64Array(V).fill(Infinity);
+  const visited = new Uint8Array(V);
+  const heap = new DaryHeap(arity);
+  dist[targetIdx] = 0;
+  heap.insert(targetIdx, 0);
+
+  while (heap.size > 0) {
+    const u = heap.extractMin();
+    if (visited[u]) continue;
+    visited[u] = 1;
+
+    const du = dist[u];
+    const start = adjOffsets[u];
+    const end = adjOffsets[u + 1];
+    for (let e = start; e < end; e++) {
+      const v = adjNeighbors[e];
+      if (visited[v]) continue;
+      const w = frictionArr[v];
+      if (w < 0) continue; // impassable / missing
+      const nd = du + w;
+      if (nd < dist[v]) {
+        dist[v] = nd;
+        heap.insert(v, nd);
+      }
+    }
+  }
+  return dist;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
  * Core Dijkstra gradient computation.
  *
  * @param {string} targetCell - The H3 cell ID to compute distances from.
- * @param {Object|Function} frictionLookup - Either a plain object mapping cell IDs to friction costs,
- *   or a function `(cell) => frictionCost` that returns the friction for a given cell.
- * @param {Function} [getNeighbors] - Optional function `(cell) => neighborCellIds` that returns
- *   the neighbors for a given cell. Defaults to H3 `gridDisk(cell, 1)`.
- * @returns {Object} A plain object mapping reachable cell IDs to their distance from `targetCell`.
+ * @param {Object|Function} frictionLookup - Plain object (cell->friction) or
+ *   function (cell)->friction. Used to build the per-cell weight array.
+ * @param {Function} [getNeighbors] - Optional neighbor resolver (legacy path).
+ * @param {Object} [graph] - Optional precomputed gradient graph from
+ *   getGradientGraph(). When provided, the indexed (CSR + typed-array) path is
+ *   used, which is dramatically faster and reuses mapping-stage neighbor data.
+ * @returns {Object} Plain object mapping reachable cell IDs to distance.
  */
-export function computeDijkstra(targetCell, frictionLookup, getNeighbors) {
+export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph) {
+  if (!graph) return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
+
+  const targetIdx = graph.cellToIdx[targetCell];
+  if (targetIdx === undefined) {
+    // Target outside the graph's cell set — fall back to the legacy path.
+    return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
+  }
+
+  const { V, idxToCell } = graph;
+  const resolveFriction =
+    typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
+  const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
+
+  // Build the exact (Float64) per-cell weight array. Impassable / missing cells
+  // are encoded as -1 and skipped during relaxation.
+  const frictionArr = new Float64Array(V);
+  for (let i = 0; i < V; i++) {
+    const f = resolveFriction(idxToCell[i]);
+    frictionArr[i] = typeof f === 'number' && f < IMPASSABLE ? f : -1;
+  }
+
+  // Decide the queue. Dial's is only worthwhile when the max weight is small;
+  // worn friction can reach IMPASSABLE, which would make its bucket count C huge.
+  let C = 0;
+  for (let i = 0; i < V; i++) if (frictionArr[i] > C) C = frictionArr[i];
+  const useDial = GRADIENT_ALGO === 'dial' && C <= DIAL_MAX_C;
+
+  let dist;
+  if (useDial) {
+    const q = new Int32Array(V);
+    for (let i = 0; i < V; i++) q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
+    dist = computeDijkstraDial(targetIdx, q, graph);
+  } else {
+    const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;
+    dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity);
+  }
+
+  const out = Object.create(null);
+  for (let i = 0; i < V; i++) {
+    const dv = dist[i];
+    if (useDial) {
+      if (dv !== INF_INT) out[idxToCell[i]] = dv / GRADIENT_DIAL_SCALE;
+    } else if (dv !== Infinity) {
+      out[idxToCell[i]] = dv;
+    }
+  }
+  return out;
+}
+
+/**
+ * Legacy string-keyed Dijkstra (binary MinHeap, on-the-fly neighbor lookup).
+ * Kept for backward compatibility and as the exact fallback when no graph is
+ * supplied.
+ */
+export function computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors) {
   const distances = Object.create(null);
-  // Plain object is faster than Set for string-keyed H3 cell IDs (no hashing overhead)
   const visited = Object.create(null);
   const heap = new MinHeap();
 
   const resolveFriction =
     typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
-
   const resolveNeighbors =
     typeof getNeighbors === 'function' ? getNeighbors : (cell) => gridDisk(cell, 1);
 
