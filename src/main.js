@@ -438,10 +438,19 @@ const isReadyToCompute = (mapInstance) => {
 };
 
 // Check if any tile source on the map is currently fetching data.
+// `getStyleSourceEntries`/`isSourceLoading` do not exist in maplibre-gl@5.x,
+// so we enumerate sources via getStyle() and use isSourceLoaded() (true once a
+// source's tiles have finished loading). areTilesLoaded() is a robust fallback
+// that reports false while any tile is still in flight.
 const sourcesLoading = (mapInstance) => {
-  const sourceIds = mapInstance.getStyleSourceEntries?.() ?? [];
-  for (const entry of sourceIds) {
-    if (mapInstance.isSourceLoading(entry.id)) return true;
+  if (typeof mapInstance.areTilesLoaded === 'function' && !mapInstance.areTilesLoaded()) {
+    return true;
+  }
+  const sources = mapInstance.getStyle?.()?.sources ?? {};
+  for (const id in sources) {
+    if (typeof mapInstance.isSourceLoaded === 'function' && !mapInstance.isSourceLoaded(id)) {
+      return true;
+    }
   }
   return false;
 };
