@@ -1162,27 +1162,54 @@ function getBestNextStep(
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
-  // Inline friction/affordance lookups — direct property access is ~3× faster than function calls
-  const getFriction = stateEnabled
-    ? (n) => {
-        const s = cellState[n];
-        return s ? s.friction : undefined;
-      }
-    : (n) => frictionLookup[n];
-  const getAffordance = stateEnabled
-    ? (n) => {
-        const s = cellState[n];
-        return s ? (s.affordance ?? 0.1) : 0.1;
-      }
-    : (n) => affordanceLookup?.[n] ?? 0.1;
+  // Hoist friction/affordance lookups out of the per-call hot path. They only
+  // depend on cellState/frictionLookup/affordanceLookup, which are stable for
+  // the lifetime of a sim run, so build them once and cache on ctx instead of
+  // re-allocating two closures on every one of the millions of invocations.
+  let getFriction = ctx._getFriction;
+  let getAffordance = ctx._getAffordance;
+  if (!getFriction || !getAffordance) {
+    getFriction = stateEnabled
+      ? (n) => {
+          const s = cellState[n];
+          return s ? s.friction : undefined;
+        }
+      : (n) => frictionLookup[n];
+    getAffordance = stateEnabled
+      ? (n) => {
+          const s = cellState[n];
+          return s ? (s.affordance ?? 0.1) : 0.1;
+        }
+      : (n) => affordanceLookup?.[n] ?? 0.1;
+    ctx._getFriction = getFriction;
+    ctx._getAffordance = getAffordance;
+  }
 
-  const cellsArr = [];
-  const anglesArr = [];
-  const affsArr = [];
-  const frictionArr = [];
-  const gNsArr = useGradient ? [] : null;
+  // Reuse preallocated candidate buffers across calls instead of allocating
+  // fresh arrays on every invocation. cells are H3 strings (no typed-array
+  // equivalent), so cellsArr stays a plain array; the numeric sets use
+  // Float64Arrays. Buffers are grown only when a larger disk is encountered.
+  const diskLen = disk.length;
+  let cellsArr = ctx._candCells;
+  let anglesArr = ctx._candAngles;
+  let affsArr = ctx._candAffs;
+  let frictionArr = ctx._candFriction;
+  let gNsArr = ctx._candGNs;
+  if (!cellsArr || cellsArr.length < diskLen) {
+    cellsArr = new Array(diskLen);
+    anglesArr = new Float64Array(diskLen);
+    affsArr = new Float64Array(diskLen);
+    frictionArr = new Float64Array(diskLen);
+    gNsArr = new Float64Array(diskLen);
+    ctx._candCells = cellsArr;
+    ctx._candAngles = anglesArr;
+    ctx._candAffs = affsArr;
+    ctx._candFriction = frictionArr;
+    ctx._candGNs = gNsArr;
+  }
+  let candCount = 0;
 
-  for (let i = 0; i < disk.length; i++) {
+  for (let i = 0; i < diskLen; i++) {
     const n = disk[i];
     if (n === curr) continue;
 
@@ -1210,21 +1237,22 @@ function getBestNextStep(
     if (useGradient) {
       const gN = gradientLookup(n);
       if (typeof gN !== 'number') continue;
-      cellsArr.push(n);
-      anglesArr.push(ang);
-      affsArr.push(aff);
-      frictionArr.push(f);
-      gNsArr.push(gN);
+      cellsArr[candCount] = n;
+      anglesArr[candCount] = ang;
+      affsArr[candCount] = aff;
+      frictionArr[candCount] = f;
+      gNsArr[candCount] = gN;
     } else {
-      cellsArr.push(n);
-      anglesArr.push(ang);
-      affsArr.push(aff);
-      frictionArr.push(f);
+      cellsArr[candCount] = n;
+      anglesArr[candCount] = ang;
+      affsArr[candCount] = aff;
+      frictionArr[candCount] = f;
     }
+    candCount++;
   }
 
   let hardCount = 0;
-  for (let i = 0; i < cellsArr.length; i++) {
+  for (let i = 0; i < candCount; i++) {
     if (anglesArr[i] <= visualAngleHalf) {
       if (hardCount !== i) {
         const swap = (arr) => {
@@ -1241,8 +1269,15 @@ function getBestNextStep(
       hardCount++;
     }
   }
-  const cLen = hardCount > 0 ? hardCount : cellsArr.length;
-  const scores = useGradient ? new Array(cLen) : null;
+  const cLen = hardCount > 0 ? hardCount : candCount;
+  let scores = null;
+  if (useGradient) {
+    scores = ctx._candScores;
+    if (!scores || scores.length < cLen) {
+      scores = new Float64Array(cLen);
+      ctx._candScores = scores;
+    }
+  }
 
   if (useGradient) {
     for (let i = 0; i < cLen; i++) {
@@ -1279,7 +1314,7 @@ function getBestNextStep(
     }
   }
 
-  if (cellsArr.length === 0) {
+  if (candCount === 0) {
     // depth=1 reuses the canonical graph's r=1 adjacency (CSR indices); deeper
     // rings fall back to the disk cache (the graph only encodes distance-1 edges).
     const graph = getGradientGraph(ctx.cellFrictionMap);
@@ -1342,7 +1377,11 @@ function getBestNextStep(
       if (v > maxS) maxS = v;
     }
 
-    const weightsArr = new Array(scores.length);
+    let weightsArr = ctx._candWeights;
+    if (!weightsArr || weightsArr.length < scores.length) {
+      weightsArr = new Float64Array(scores.length);
+      ctx._candWeights = weightsArr;
+    }
     let sum = 0;
     for (let i = 0; i < scores.length; i++) {
       const w = Math.exp((scores[i] - maxS) / simParams.temperature);
@@ -1380,7 +1419,7 @@ function getBestNextStep(
         return chosen;
       }
     }
-    return cellsArr[cellsArr.length - 1];
+    return cellsArr[cLen - 1];
   }
 
   let bestScore = -Infinity;
