@@ -240,142 +240,6 @@ function getNeighborDisk(cell, visualDepth, gen) {
   return d;
 }
 
-// Precompute visibility sets for all cells within the AOI.
-// For each cell, stores a plain-object map of visible neighbor -> true.
-// This eliminates O(N^2) gridPathCells lookups during simulation.
-// Keyed by mapping generation so it invalidates on remap.
-//
-// PERF: `originCells` lets callers compute a subset of origins (used to shard
-// the work across workers). `cells` still defines the full AOI membership so the
-// BFS never escapes the AOI. Neighbor disks are computed lazily and cached
-// per-cell: every cell is expanded at most once, so this removes the old
-// up-front O(N) `gridDisk` precompute and makes sharding cost-free (a shard
-// only pays `gridDisk` for cells it actually visits).
-function precomputeVisibilitySets(frictionLookup, cells, maxDepth, precomputedDisks, originCells) {
-  const result = Object.create(null);
-  const impassable = FRICTION_COSTS.IMPASSABLE;
-
-  // Pre-build a passable lookup for O(1) checks — eliminates repeated friction lookups.
-  // Also serves as the AOI membership test: cells absent from `cells` are treated
-  // as non-passable so the flood-fill stays inside the AOI.
-  const isPassable = Object.create(null);
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    isPassable[cell] = (frictionLookup[cell] ?? 0) < impassable;
-  }
-
-  // Lazy, per-cell distance-1 neighbor cache. gridDisk(cell, 1) is constant per
-  // cell, so caching avoids recomputation when the same cell is reached from
-  // multiple directions and removes the old eager O(N) precompute pass.
-  const nbrCache = Object.create(null);
-  const getNeighbors = (c) => {
-    let d = nbrCache[c];
-    if (d === undefined) {
-      d = gridDisk(c, 1);
-      nbrCache[c] = d;
-    }
-    return d;
-  };
-
-  // Reuse visited object with generation counter to reduce GC pressure.
-  // Instead of creating a new visited object per BFS, we mark cells with a generation ID.
-  const visited = Object.create(null);
-  let gen = 0;
-
-  // Single BFS queue reused across all origins (sized to the max possible
-  // frontier: every passable cell is enqueued at most once per generation). This
-  // replaces the per-origin / per-level `nextQueue` array churn that previously
-  // allocated ~maxDepth small arrays per origin — a major GC source at city scale.
-  const queue = new Array(cells.length);
-
-  const origins = originCells && originCells.length ? originCells : cells;
-  for (let i = 0; i < origins.length; i++) {
-    const cell = origins[i];
-    if (!isPassable[cell]) continue; // origin must be passable
-
-    gen++;
-    const visible = Object.create(null);
-    let visibleCount = 0;
-
-    // Ring-buffer BFS: head/tail pointers over `queue`, with level counting so we
-    // stop expanding once we reach `maxDepth` (cells at exactly maxDepth are still
-    // marked visible, just not expanded).
-    let head = 0;
-    let tail = 0;
-    queue[tail++] = cell;
-    visited[cell] = gen;
-
-    let levelRemaining = 1;
-    let nextLevelCount = 0;
-    let currentDist = 0;
-    while (currentDist < maxDepth && head < tail) {
-      const current = queue[head++];
-      levelRemaining--;
-      // Get immediate neighbors from the lazy cache
-      const neighbors = getNeighbors(current);
-      for (let n = 0; n < neighbors.length; n++) {
-        const neighbor = neighbors[n];
-        if (neighbor === current) continue;
-        if (visited[neighbor] === gen) continue;
-        if (!isPassable[neighbor]) continue;
-
-        visited[neighbor] = gen;
-        visible[neighbor] = true;
-        visibleCount++;
-        queue[tail++] = neighbor;
-        nextLevelCount++;
-      }
-      if (levelRemaining === 0) {
-        currentDist++;
-        levelRemaining = nextLevelCount;
-        nextLevelCount = 0;
-      }
-    }
-
-    if (visibleCount > 0) result[cell] = visible;
-  }
-
-  return result;
-}
-
-// Precompute bearings between all AOI cell pairs within VISUAL_DEPTH radius.
-// Returns a Map with string keys "center::neighbor" → bearing (degrees).
-// Uses Map instead of plain object to avoid V8 "too many properties to enumerate"
-// error when the bearing cache is transferred to Web Workers via postMessage.
-// OPTIMIZATION: Reuses precomputed visibility sets so bearings are only computed
-// for cell pairs an agent can actually see. During simulation, bearings are only
-// ever queried for *visible* neighbors (the visibility check precedes the bearing
-// lookup in getBestNextStep), so precomputing the full gridDisk(cell, visionDepth)
-// was computing and storing a large number of bearings that are never read.
-//
-// IMPORTANT: agents can never stand on impassable cells, so bearings *from* an
-// impassable cell are never queried, and bearings *to* an impassable cell are never
-// used (agents never step there). Skipping impassable cells here roughly halves the
-// map size, which matters because this map is structured-cloned into every agent
-// worker — cloning the full (impassable-inclusive) map across 2+ workers was the
-// memory pressure that triggered SIGILL with 2+ origins.
-function precomputeBearingMap(cells, visibilityData, frictionLookup) {
-  const result = new Map();
-  const impassable = FRICTION_COSTS.IMPASSABLE;
-  const isPassable = (c) => (frictionLookup ? (frictionLookup[c] ?? 0) : 0) < impassable;
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    // No bearings FROM impassable cells — agents are never positioned there.
-    if (!isPassable(cell)) continue;
-    const sLatLng = _getCachedLatLng(cell);
-    // Only compute bearings for cells actually visible from `cell`. The visibility
-    // BFS already excludes impassable cells, so no extra impassable check is needed.
-    const visible = visibilityData ? visibilityData[cell] : null;
-    if (!visible) continue;
-    for (const n in visible) {
-      if (!isPassable(n)) continue;
-      const eLatLng = _getCachedLatLng(n);
-      result.set(cell + '::' + n, _bearingFromLatLngs(sLatLng, eLatLng));
-    }
-  }
-  return result;
-}
-
 // Precompute grid distances for all origin-destination pairs.
 // Returns a flat string-keyed map: "origin::dest" → distance (H3 grid units).
 // Eliminates per-tick gridDistance calls in runSingleAgentPath termination checks.
@@ -470,7 +334,6 @@ export function clearComputeCaches(ctx) {
   ctx._perTargetContribs = null;
   ctx._assignedCounts = null;
   ctx._targetWeights = null;
-  ctx._pathCache = Object.create(null);
 
   // Reset compute cache instrumentation and LRU structures
   ctx._computePathCacheObj = undefined;
@@ -845,11 +708,18 @@ export async function computeDesirePaths(state, mapInstance) {
   }
 
   // Consolidated per-cell state object for hot-path reads/writes.
-  // Always rebuild to ensure affordance/desire are fresh for this run.
-  // The affordance decay step below updates values in-place, so we must start
-  // from the current affordanceMap rather than reusing a stale _cellState.
+  // Reuse the existing container (and its per-cell entry objects) across runs
+  // when the AOI cell set is unchanged (same mapping generation) to avoid
+  // allocating a fresh ~V-entry object every simulation run — a meaningful GC
+  // source at city scale. The per-cell entries are refreshed in place by
+  // buildCellStateEntry (affordance/desire are re-read from the current
+  // snapshots), so reusing the container does not carry stale values forward.
+  // A new container is only allocated when the cell set changes (remap), since
+  // the old container may hold entries for cells no longer in the AOI.
   const existingState = state._cellState;
-  state._cellState = Object.create(null);
+  if (!(existingState && state._cellStateMappingGen === mappingGen)) {
+    state._cellState = Object.create(null);
+  }
   const frictionObj = state._frictionObj;
   const affordanceObj = state._affordanceObj;
   const desireScores = state.pathDesireScores;
@@ -1746,8 +1616,6 @@ export {
   estimateMaxTicks as _estimateMaxTicks,
   yieldToMain as _yieldToMain,
   buildCellStateEntry,
-  precomputeVisibilitySets,
-  precomputeBearingMap,
   precomputeOriginDestDistances,
 };
 

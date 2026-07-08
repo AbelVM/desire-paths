@@ -149,16 +149,21 @@ class DesireMap {
         return false;
       },
       ownKeys(target) {
-        return Reflect.ownKeys(target).concat([...target._knownStateKeys]);
+        // Expose only the DesireMap instance's real own keys. The consolidated
+        // state keys are intentionally omitted here so libraries that enumerate
+        // the map object (deck.gl/maplibre internals, serialization, spread,
+        // JSON.stringify, for...in) never see the large synthetic property set.
+        // They remain fully accessible via get/set/has.
+        return Reflect.ownKeys(target);
       },
       getOwnPropertyDescriptor(target, prop) {
         if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
-          return {
-            configurable: true,
-            enumerable: true,
-            writable: true,
-            value: target._state[prop],
-          };
+          // Not an own property of the proxy: hidden from Object.keys/for...in/
+          // spread/JSON.stringify and from Object.getOwnPropertyNames. Still
+          // fully accessible via get/set/has. Returning undefined (rather than a
+          // descriptor) preserves the Proxy invariant because these keys are not
+          // listed in ownKeys.
+          return undefined;
         }
         return (
           Reflect.getOwnPropertyDescriptor(target, prop) ||

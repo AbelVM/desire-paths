@@ -509,8 +509,7 @@ export function computeImpassableBlurSnapshot({
 // Index-space mapping graph (P1 + P3).
 //
 // The previous gridDisk-based approach rebuilt r=1 adjacency per shard via
-// `gridDisk(cell, 1)` (see precomputeVisibilitySets) and looked friction up in a
-// plain-object map. That paid ~shards×V `gridDisk` calls and re-flattened the
+// `gridDisk(cell, 1)` and looked friction up in a plain-object map. That paid ~shards×V `gridDisk` calls and re-flattened the
 // friction object once per shard. This module builds the adjacency + an
 // index-aligned friction/lat-lng representation ONCE, off the main thread, and
 // the visibility shards then run entirely in integer index space — no `gridDisk`,
