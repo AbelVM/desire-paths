@@ -8,7 +8,8 @@ import {
   runVisibilityBearingTask,
   runMergeCellsTask,
 } from './spatialWorker.js';
-import { clearComputeCaches, buildCellStateEntry } from './compute.js';
+import { clearComputeCaches, clearGradientCache, buildCellStateEntry } from './compute.js';
+import { invalidateGradientGraph } from './dijkstra.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -245,7 +246,13 @@ export function mapPolygonCells(state, mapInstance, coords, surface) {
       state._polyCache.delete(oldest);
     }
   }
-  mapCells(state.multiFrictionMap, cells, surface);
+  mapCells(state, cells, surface);
+  // Drawing obstacles mutates friction outside a remap. The gradient graph
+  // topology and per-target gradient cache are keyed by the (stable)
+  // cellFrictionMap reference / mapping generation, so drop them so the next
+  // run reflects the new barriers instead of reusing a stale gradient (C5).
+  invalidateGradientGraph();
+  clearGradientCache(state);
 }
 
 export function mapLineCells(state, mapInstance, coords, surface) {
@@ -274,15 +281,23 @@ export function mapLineCells(state, mapInstance, coords, surface) {
         state._pathCache.delete(oldest);
       }
     }
-    mapCells(state.multiFrictionMap, path, surface);
+    mapCells(state, path, surface);
   }
+  // Drawing obstacles mutates friction outside a remap — drop the cached
+  // gradient graph topology and per-target gradient cache so the next run
+  // reflects the new barriers (C5).
+  invalidateGradientGraph();
+  clearGradientCache(state);
 }
 
 // Note: This function is designed to be used internally by the mapPolygonCells and mapLineCells functions,
 // which handle the geometry parsing and cell generation. It takes a list of cells and a surface type,
 // and updates the friction maps accordingly, ensuring that we account for the highest friction
 // per level
-function mapCells(frictionMap, cells, surface) {
+function mapCells(state, cells, surface) {
+  const frictionMap = state.multiFrictionMap;
+  const cellFrictionMap = state.cellFrictionMap;
+  const frictionObj = state._frictionObj;
   const layerKey = surface.layer;
   const layerVal = FRICTION_COSTS[surface.cost];
   for (let i = 0, cLen = cells.length; i < cLen; i++) {
@@ -290,6 +305,18 @@ function mapCells(frictionMap, cells, surface) {
     const val = frictionMap.get(cell);
     if (!val) continue; // outside AOI
     if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) val[layerKey] = layerVal;
+    // Recompute the per-cell min friction (cellFrictionMap) from the updated
+    // layer map. The gradient graph / Dijkstra read cellFrictionMap (and its
+    // snapshot _frictionObj), so without this the drawn barrier is invisible to
+    // routing until a full remap (C5).
+    let min = Infinity;
+    for (const k in val) {
+      const v = val[k];
+      if (typeof v === 'number' && v < min) min = v;
+    }
+    const fr = isFinite(min) ? min : 0;
+    if (cellFrictionMap) cellFrictionMap.set(cell, fr);
+    if (frictionObj) frictionObj[cell] = fr;
   }
 }
 
