@@ -598,7 +598,7 @@ export function computeVisibilityBearingCSRIndexed({
   let gen = 0;
 
   // First pass: BFS per origin, count visible pairs → localOffsets.
-  let P = 0;
+  let P;
   const visibleLists = new Array(M);
   for (let j = 0; j < M; j++) {
     const start = origins ? origins[j] : j;
@@ -715,7 +715,7 @@ export function mergeCellsChunk({
 
     // Merge multi-friction layers (max-keeping) into a fresh map.
     let target = null;
-    let fr = 0;
+    let fr;
     if (layerMap) {
       target = Object.create(null);
       let min = Infinity;

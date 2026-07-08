@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { latLngToCell, gridPathCells, gridDisk, polygonToCells } from 'h3-js';
-import { FRICTION_COSTS, AFFORDANCE, H3_STRIDE_RESOLUTION } from '../src/helpers/constants.js';
+import { describe, it, expect, vi } from 'vitest';
+import { latLngToCell } from 'h3-js';
+import { FRICTION_COSTS, AFFORDANCE } from '../src/helpers/constants.js';
 
 // ── DOM Mock ──────────────────────────────────────────────────────────
 const mockElements = new Map();
-const mockEventListeners = new Map();
 
 function mockQuerySelector(selector) {
   if (selector === '.panel') return mockElements.get('.panel') || { classList: { toggle: vi.fn() }, hidden: false };
@@ -132,7 +131,7 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     if (!aoiPolygon || !aoiPolygon.length) return [];
     return mockHexes;
   }),
-  runFastScanTask: vi.fn(async (viewHexes, features) => {
+  runFastScanTask: vi.fn(async (viewHexes, _features) => {
     const multiFrictionEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);
     const blurWeights = Object.create(null);
@@ -144,19 +143,19 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     }
     return { multiFrictionEntries, cellFrictionEntries, blurWeights, blurUpdates };
   }),
-  runGradientBatches: vi.fn(async (targets, frictionSource) => {
+  runGradientBatches: vi.fn(async (targets, _frictionSource) => {
     const result = Object.create(null);
     for (const t of targets) {
       result[t] = Object.create(null);
     }
     return result;
   }),
-  runVisibilityBearingTask: vi.fn(async (frictionSource, viewHexes, visionDepth) => {
+  runVisibilityBearingTask: vi.fn(async (_frictionSource, _viewHexes, _visionDepth) => {
     // Mock visibility/bearing precompute — returns an empty CSR payload so the
     // mapping stage reconstructs empty structures without exercising the real BFS.
     return { buffer: null, N: 0, P: 0, offsetsBytes: 0, neighborsBytes: 0 };
   }),
-  runBuildMappingGraph: vi.fn(async (frictionSource, viewHexes) => {
+  runBuildMappingGraph: vi.fn(async (_frictionSource, viewHexes) => {
     // Mock the one-time mapping-graph build (P1+P3). Returns an empty graph so
     // the (also mocked) visibility task receives a valid shape without running
     // the real gridDisk/cellToLatLng graph construction.
@@ -179,7 +178,7 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
       const layerMap = multiEntries[cell];
-      let fr = 0;
+      let fr;
       if (layerMap) {
         let min = Infinity;
         for (const k in layerMap) if (layerMap[k] < min) min = layerMap[k];
@@ -188,7 +187,7 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
         fr = cellFrictionEntries[cell] ?? 0;
       }
       if (blurUpdateMap && blurUpdateMap[cell] !== undefined) fr = blurUpdateMap[cell];
-      let aff = 1;
+      let aff;
       if (fr >= 999999) aff = 0.1;
       else if (fr < 1.5) aff = 1;
       else if (fr < 3) aff = 2.5;
@@ -451,7 +450,6 @@ describe('grid.js', () => {
         [-3.7035, 40.4169],
       ];
       mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      const firstCall = map._polyCache.get(map._polyCache.keys().next().value);
       mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
       // Cache should still have the entry
       expect(map._polyCache.size).toBe(1);
@@ -756,7 +754,6 @@ describe('map.js', () => {
     });
 
     it('should reset canvas cursor', async () => {
-      const cursorSpy = vi.fn();
       const map = createMockMap();
       map.getCanvas = () => ({ style: { cursor: 'crosshair' } });
       map.deckOverlayInstance = { setProps: vi.fn() };
@@ -1454,7 +1451,6 @@ describe('ui.js', () => {
     setupUI(map);
 
     // Get the friction button and trigger its click handler
-    const frictionButton = doc.getElementById('btn-toggle-friction');
     // The click handler is registered via addEventListener
     // We can simulate the toggle by directly calling the handler logic
     map.showFrictionMesh = map.showFrictionMesh === false;
@@ -2232,7 +2228,6 @@ describe('main.js', () => {
 
     it('should return false for impassable ground level', async () => {
       const { isAccessible } = await import('../src/main.js');
-      const { FRICTION_COSTS } = await import('../src/helpers/constants.js');
       const mapInstance = {
         queryRenderedFeatures: () => [
           {
@@ -2410,7 +2405,6 @@ describe('main.js', () => {
       const simulationNodes = {
         hex1: { type: 'origin', weight: 1 },
       };
-      const placementMode = 'origin';
       const cell = 'hex1';
 
       // Decrease weight

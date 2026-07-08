@@ -454,7 +454,6 @@ function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDis
   if (clear) return straight;
 
   // BFS detour within the local disk (bounded by VISUAL_DEPTH for cost).
-  const frontier = _getCachedDisk(curr, VISUAL_DEPTH, neighborDisks);
   const prev = Object.create(null);
   const seen = Object.create(null);
   const queue = [curr];

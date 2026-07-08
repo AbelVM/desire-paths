@@ -69,7 +69,7 @@ function _polyKey(coords) {
   return `${minx.toFixed(6)}:${miny.toFixed(6)}:${maxx.toFixed(6)}:${maxy.toFixed(6)}:${points}:${firstLng.toFixed(6)}:${firstLat.toFixed(6)}:${lastLng.toFixed(6)}:${lastLat.toFixed(6)}`;
 }
 
-export function getHexes(state, mapInstance) {
+export function getHexes(state, _mapInstance) {
   const aoiKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';
   const cacheKey = `${aoiKey}:${SIMULATION_PARAMS.h3StrideResolution}`;
   // Return cached hexes when AOI and resolution haven't changed to avoid repeated expensive H3 calls

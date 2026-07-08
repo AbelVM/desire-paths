@@ -128,7 +128,7 @@ class DesireMap {
           if (mp && prop in mp) {
             try {
               mp[prop] = value;
-            } catch (e) {}
+            } catch (_e) {}
           }
           return true;
         }
@@ -138,7 +138,7 @@ class DesireMap {
           try {
             mp[prop] = value;
             return true;
-          } catch (e) {}
+          } catch (_e) {}
         }
         // As a last resort, store private-like props in state bag
         if (typeof prop === 'string' && prop.startsWith('_')) {

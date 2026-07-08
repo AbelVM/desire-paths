@@ -31,14 +31,14 @@ try {
             console.debug('agent.worker: received agent-batch', {
               planLength: payload?.plan?.length ?? null,
             });
-        } catch (e) {}
+        } catch (_e) {}
         const ret = computeAgentBatch(payload || {});
         try {
           console.debug &&
             console.debug('agent.worker: finished computeAgentBatch', {
               processed: ret?.result?.processed ?? ret?.processed ?? 0,
             });
-        } catch (e) {}
+        } catch (_e) {}
         if (ret && Array.isArray(ret.transfers)) {
           self.postMessage({ ok: true, result: ret.result }, ret.transfers);
         } else {

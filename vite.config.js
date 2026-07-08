@@ -7,7 +7,7 @@ function copyPublicFiles() {
   return {
     name: "copy-public-files",
     enforce: "post",
-    writeBundle(options, bundle) {
+    writeBundle(options) {
       const srcDir = path.resolve("public");
       const destDir = options.dir;
 

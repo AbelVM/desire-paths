@@ -1,4 +1,4 @@
-import { gridPathCells, gridDisk, gridRing, cellToLatLng, gridDistance } from 'h3-js';
+import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
   WEIGHTS,
@@ -9,8 +9,6 @@ import {
   SOFT_CAP,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
-  YIELD_EVERY_AGENTS,
-  SIM_YIELD_MS,
   COMPUTE_PATH_CACHE_MAX,
   COMPUTE_DISK_CACHE_MAX,
   COMPUTE_VISIBILITY_CACHE_MAX,
@@ -541,16 +539,6 @@ function estimateMaxTicks(origin, dest, hexCount) {
   return Math.min(MAX_SIM_TICKS, pathBudget, globalBudget);
 }
 
-function nowMs() {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
-}
-
-function resetYieldDeadline() {
-  return nowMs() + SIM_YIELD_MS;
-}
-
 export async function yieldToMain() {
   const scheduler = globalThis.scheduler;
   if (scheduler && typeof scheduler.yield === 'function') {
@@ -996,7 +984,7 @@ export async function computeDesirePaths(state, mapInstance) {
   // difference from Monte-Carlo sampling where every agent plans independently.
   const accumulatedFootprints = Object.create(null);
 
-  let perTargetContribs = Object.create(null);
+  let perTargetContribs;
   const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
     state,
     agents,
@@ -1048,8 +1036,6 @@ export async function computeDesirePaths(state, mapInstance) {
       }
     }
   }
-  let agentsProcessed = 0;
-  let nextYieldAt = resetYieldDeadline();
   updateSimulationProgress(state, 0, totalAgents);
 
   // Precompute origin-destination grid distances to eliminate per-tick H3 calls
@@ -1459,8 +1445,6 @@ function computeDijkstraGradient(ctx, targetCell) {
       }
     : (n) => frictionLookup?.[n];
 
-  const getNeighbors = (cell) => _getCachedDisk(ctx, cell, 1);
-
   // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
   // cellFrictionMap reference. Topology is static per mapping generation; only
   // the per-cell friction (which can change via emergent wear) is rebuilt.
@@ -1510,8 +1494,6 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
   if (clear) return straight;
 
   // BFS detour within the local disk (bounded by visionDepth for cost).
-  const radius = ctx.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
-  const frontier = _getCachedDisk(ctx, curr, radius);
   const prev = Object.create(null);
   const seen = Object.create(null);
   const queue = [curr];

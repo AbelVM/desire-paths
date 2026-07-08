@@ -49,5 +49,5 @@ import { FRICTION_COSTS } from '../src/helpers/constants.js';
     // Avoid printing during `--prof` runs to reduce profiler I/O noise
     const profiling = Array.isArray(process.execArgv) && process.execArgv.some((a) => a && a.includes('--prof'));
     if (!profiling) console.log('CACHE_STATS:' + JSON.stringify(stats));
-  } catch (e) {}
+  } catch (_e) {}
 })();

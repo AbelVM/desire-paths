@@ -1,6 +1,6 @@
 import { clearComputeCaches, clearLatLngCache } from './compute.js';
 import { latLngToCell } from 'h3-js';
-import { SIMULATION_PARAMS, updateSimulationParams } from './constants.js';
+import { SIMULATION_PARAMS, updateSimulationParams, DEFAULT_SIMULATION_PARAMS } from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
 import { createIcons, icons } from 'lucide';
 
@@ -126,7 +126,7 @@ async function fitAoiBounds(mapInstance) {
 // Centralized UI State Store
 // ──────────────────────────────────────────────
 
-function createUIState(map) {
+function createUIState(_map) {
   const state = {
     // DOM element references (populated once, reused everywhere)
     panel: null,
@@ -274,7 +274,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   cleanupUIListeners();
 
   const uiState = createUIState(map);
-  let alertTimer;
 
   map.simulationParams = { ...SIMULATION_PARAMS };
   try {
@@ -678,7 +677,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     const hasDestinations = destCount > 0;
     const readyToCompute = map.readyToCompute === true;
 
-    let modeText = '';
+    let modeText;
     if (map.placementMode === 'origin') {
       modeText = `Starts · ${hasOrigins ? originCount + ' placed' : '0 placed'}`;
       uiState.modeLabel.className = 'mode-indicator mode-origin';
@@ -844,13 +843,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     syncModeUI();
   };
 
-  const showAlertCard = (message, { title = 'Notice', tone = 'warning', timeout = 5000 } = {}) => {
+  const showAlertCard = (message, { tone = 'warning', timeout = 5000 } = {}) => {
     showToastNotification(message, tone, timeout);
   };
 
   const hideAlertCard = () => {
     if (!uiState.alertCard) return;
-    window.clearTimeout(alertTimer);
     uiState.alertCard.hidden = true;
     uiState.alertCard.dataset.tone = '';
   };

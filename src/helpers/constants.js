@@ -2,7 +2,7 @@ export const MAP_OPTIONS = {
   container: 'map',
   style: 'https://tiles.openfreemap.org/styles/bright',
   center: [-3.7035, 40.4169],
-  zoom: 19,
+  zoom: 18,
   maxZoom: 24,
 };
 
@@ -182,13 +182,6 @@ function isIndoorIndoors(properties) {
 function isFootRestricted(properties) {
   const { foot, access } = properties;
   return foot === 'no' || foot === 'private' || access === 'no' || access === 'private';
-}
-
-/**
- * Check if a surface is under construction.
- */
-function isUnderConstruction(cls) {
-  return cls.includes('_construction');
 }
 
 /**
