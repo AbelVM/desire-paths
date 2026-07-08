@@ -3,7 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder';
 import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css';
 import './style/geocoder.css';
-import { latLngToCell } from 'h3-js';
+import { latLngToCell, cellToLatLng } from 'h3-js';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 
 import { MAP_OPTIONS, FRICTION_COSTS, getSurface, SIMULATION_PARAMS } from './helpers/constants.js';
@@ -236,9 +236,33 @@ export function setMapCursorWait(mapInstance, waiting) {
   }
 }
 
-const init = () => {
-  const pointLayerIds = ['pin-circles', 'pin-labels'];
+// Pick the cursor from cached simulation-node positions instead of a per-event
+// queryRenderedFeatures GPU readback. Pins are draggable, so we show a grab
+// cursor when the pointer is within a node's rendered radius.
+const PIN_HIT_PADDING_PX = 4;
+function updateCursorFromNodes(mapInstance, point) {
+  const nodes = mapInstance.simulationNodes ?? {};
+  const keys = Object.keys(nodes);
+  if (keys.length === 0) {
+    setMapCursor(mapInstance, 'crosshair');
+    return;
+  }
+  let hit = false;
+  for (const k of keys) {
+    const pt = cellToLatLng(k);
+    const p = mapInstance.project([pt[1], pt[0]]);
+    const radius = 7 + nodes[k].weight * 2.5 + PIN_HIT_PADDING_PX;
+    const dx = p.x - point.x;
+    const dy = p.y - point.y;
+    if (dx * dx + dy * dy <= radius * radius) {
+      hit = true;
+      break;
+    }
+  }
+  setMapCursor(mapInstance, hit ? 'grab' : 'crosshair');
+}
 
+const init = () => {
   const map = new maplibregl.Map(MAP_OPTIONS);
   const desireMap = new DesireMap(map);
 
@@ -351,6 +375,13 @@ const init = () => {
     if (match) e.target.targetLabelLayerId = match.id;
   });
 
+  // Coalesce mousemove into a single rAF so we do at most one cursor update per
+  // frame. We avoid queryRenderedFeatures entirely (no per-event GPU readback):
+  // instead we test the pointer against the cached simulation-node positions
+  // projected to screen space. Pins are draggable, so show a grab cursor while
+  // hovering one.
+  let mouseMovePending = false;
+  let lastMousePoint = null;
   desireMap.on('mousemove', (e) => {
     // Respect isDragging flag set by ui.js — don't override cursor during drag
     if (desireMap.isDragging) return;
@@ -358,16 +389,13 @@ const init = () => {
     // During computation, always show wait cursor regardless of hover target
     if (desireMap.isComputing) return;
 
-    const availablePointLayerIds = pointLayerIds.filter((layerId) => desireMap.getLayer(layerId));
-    if (availablePointLayerIds.length === 0) {
-      setMapCursor(desireMap, 'crosshair');
-    } else {
-      const features = desireMap.queryRenderedFeatures(e.point, {
-        layers: availablePointLayerIds,
-      });
-      // Pins are draggable — show grab cursor when hovering them
-      setMapCursor(desireMap, features.length > 0 ? 'grab' : 'crosshair');
-    }
+    lastMousePoint = e.point;
+    if (mouseMovePending) return;
+    mouseMovePending = true;
+    requestAnimationFrame(() => {
+      mouseMovePending = false;
+      if (lastMousePoint) updateCursorFromNodes(desireMap, lastMousePoint);
+    });
   });
 
   desireMap.on('mouseout', () => {

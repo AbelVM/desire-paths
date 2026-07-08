@@ -237,6 +237,7 @@ function createUIState(_map) {
     simParamH3Stride: 'sim-param-h3-stride',
     simParamH3StrideValue: 'sim-param-h3-stride-value',
     simParamEmergentWear: 'sim-param-emergent-wear',
+    resetSimParamsBtn: 'btn-reset-sim-params',
   };
 
   for (const [prop, id] of Object.entries(idMap)) {
