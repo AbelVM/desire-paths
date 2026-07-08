@@ -490,8 +490,16 @@ export async function runAgentBatches(
   const accumulatedFootprints = options?.accumulatedFootprints || null;
   // Precomputed origin-destination grid distances — eliminates per-tick H3 calls
   const originDestDistances = options?.originDestDistances || null;
-  // Precomputed bearing map — eliminates per-tick trig calls in getBestNextStep
-  const bearingMap = options?.bearingMap || null;
+  // Precomputed bearing map — eliminates per-tick trig calls in getBestNextStep.
+  // It is stored as a Map (rebuilt in-process to avoid the SIGILL cross-boundary
+  // clone), but the agent simulation kernel reads it with bracket access, which
+  // is always undefined for a Map. Convert it to a plain object once here so the
+  // cache is actually hit on the hot path.
+  const bearingMapRaw = options?.bearingMap || null;
+  const bearingMap =
+    bearingMapRaw && typeof bearingMapRaw.get === 'function'
+      ? Object.fromEntries(bearingMapRaw)
+      : bearingMapRaw;
 
   // Normalize gradients into a plain object for structured-clone
   const gradientsObj = Object.create(null);
