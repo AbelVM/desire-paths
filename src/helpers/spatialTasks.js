@@ -712,6 +712,39 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
 }
 
 /**
+ * In-place quicksort of `order[lo..hi]` by the key `arr[base + order[k]]`
+ * (neighbor index). Used to sort each origin's CSR slice so bearings/visibility
+ * can be binary-searched (O(log P_i) per neighbor) instead of materializing a
+ * per-pair Map. Recurses into the smaller side only to bound stack depth.
+ */
+function sortNeighborsSlice(order, lo, hi, arr, base) {
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const pivot = arr[base + order[mid]];
+    let i = lo;
+    let j = hi;
+    while (i <= j) {
+      while (arr[base + order[i]] < pivot) i++;
+      while (arr[base + order[j]] > pivot) j--;
+      if (i <= j) {
+        const t = order[i];
+        order[i] = order[j];
+        order[j] = t;
+        i++;
+        j--;
+      }
+    }
+    if (j - lo < hi - i) {
+      if (lo < j) sortNeighborsSlice(order, lo, j, arr, base);
+      lo = i;
+    } else {
+      if (i < hi) sortNeighborsSlice(order, i, hi, arr, base);
+      hi = j;
+    }
+  }
+}
+
+/**
  * Index-space visibility + bearing (shard). Equivalent output to the previous
  * gridDisk-based approach but operates purely on integer indices using the
  * prebuilt CSR adjacency, aligned friction, and lat/lng arrays — no `gridDisk`,
@@ -756,6 +789,12 @@ export function computeVisibilityBearingCSRIndexed({
   let visNeighbors = new Int32Array(cap);
   let bearings = new Float32Array(cap);
   let writePos = 0;
+
+  // Scratch for sorting each origin's neighbor slice by index (see below). Sized
+  // to the worst-case pairs for one origin, so no per-origin allocation/GC churn.
+  const sortIdx = new Int32Array(maxPairsPerOrigin);
+  const sortNbr = new Int32Array(maxPairsPerOrigin);
+  const sortBrg = new Float32Array(maxPairsPerOrigin);
 
   for (let j = 0; j < M; j++) {
     const start = origins ? origins[j] : j;
@@ -803,7 +842,7 @@ export function computeVisibilityBearingCSRIndexed({
           const n = nb * 4;
           const nLatR = latLngArr[n + 2];
           const nLngR = latLngArr[n + 3];
-          const y = Math.sin(nLngR - sLatR) * Math.cos(nLatR);
+          const y = Math.sin(nLngR - sLngR) * Math.cos(nLatR);
           const bx =
             Math.cos(sLatR) * Math.sin(nLatR) -
             Math.sin(sLatR) * Math.cos(nLatR) * Math.cos(nLngR - sLngR);
@@ -815,6 +854,29 @@ export function computeVisibilityBearingCSRIndexed({
       levelSize = tail - head;
       dist++;
     }
+
+    // Sort this origin's [start, end) slice by neighbor index so the CSR can be
+    // binary-searched in getBestNextStep (O(log P_i) per neighbor) instead of
+    // materializing a per-pair Map. The slice is contiguous and fully written
+    // here (writePos === localOffsets[j] + count); later origins only append
+    // after writePos, so sorting now is safe and the order survives the
+    // merge/pack steps that copy slices in place.
+    const s0 = localOffsets[j];
+    const e0 = writePos;
+    const len = e0 - s0;
+    if (len > 1) {
+      for (let k = 0; k < len; k++) sortIdx[k] = k;
+      sortNeighborsSlice(sortIdx, 0, len - 1, visNeighbors, s0);
+      for (let k = 0; k < len; k++) {
+        sortNbr[k] = visNeighbors[s0 + sortIdx[k]];
+        sortBrg[k] = bearings[s0 + sortIdx[k]];
+      }
+      for (let k = 0; k < len; k++) {
+        visNeighbors[s0 + k] = sortNbr[k];
+        bearings[s0 + k] = sortBrg[k];
+      }
+    }
+
     // Proper prefix sum: localOffsets[j+1] = localOffsets[j] + count_j, so
     // localOffsets[M] is the TOTAL pair count P and (localOffsets[j+1] -
     // localOffsets[j]) is exactly this origin's pair count for the merge.

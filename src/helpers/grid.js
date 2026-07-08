@@ -291,37 +291,140 @@ function mapCells(frictionMap, cells, surface) {
 }
 
 /**
- * Rebuild the plain-object visibility map and the bearing Map from the flat CSR
- * buffer produced by `computeVisibilityBearingCSRIndexed`. This runs IN-PROCESS on the
- * main thread: it constructs the structures directly (no cross-worker structured
- * clone of a Map), so it cannot trigger the SIGILL that cloning a large Map does.
+ * Binary search for `target` within `neighbors[start..end)`. Returns its
+ * position, or -1 if absent. Requires the slice to be sorted by neighbor index
+ * (the worker sorts each origin's slice — see `computeVisibilityBearingCSRIndexed`).
+ */
+function _binarySearchNeighbors(neighbors, start, end, target) {
+  let lo = start;
+  let hi = end - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const v = neighbors[mid];
+    if (v === target) return mid;
+    if (v < target) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+}
+
+/**
+ * CSR-backed visibility accessor. Exposes `data[a]` returning a truthy object for
+ * origins (so `_getCachedVisibility`'s `if (visible)` guard still works and falls
+ * through to the legacy cache for cells outside the AOI) that supports
+ * `visible[b]` → boolean. Lookups are O(log P_i) binary searches over the origin's
+ * sorted neighbor slice, not O(P_i) object property walks.
+ *
+ * The only auxiliary structure is `originCache` (O(N) entries), which replaces
+ * the O(P) nested plain object the legacy path built per visible pair.
+ */
+function createVisibilityIndex(offsets, neighbors, cellToIndex) {
+  const originCache = new Map(); // origin cell → per-origin accessor (O(N))
+  const data = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (typeof prop !== 'string') return undefined;
+        const i = cellToIndex.get(prop);
+        if (i === undefined) return undefined; // not an origin → falsy → legacy fallback
+        let accessor = originCache.get(prop);
+        if (!accessor) {
+          const s = offsets[i];
+          const e = offsets[i + 1];
+          accessor = new Proxy(
+            {},
+            {
+              get(_t2, p2) {
+                if (typeof p2 !== 'string') return undefined;
+                const j = cellToIndex.get(p2);
+                if (j === undefined) return false;
+                return _binarySearchNeighbors(neighbors, s, e, j) !== -1;
+              },
+            }
+          );
+          originCache.set(prop, accessor);
+        }
+        return accessor;
+      },
+    }
+  );
+  return { data, isVisibilityIndex: true };
+}
+
+/**
+ * CSR-backed bearing accessor. Supports BOTH the `bearingMap.get?.(a + '::' + b)`
+ * calls used by compute.js and the `bearingMap[a + '::' + b]` bracket access used
+ * by agentTasks.js. Lookups resolve via a binary search over the origin's sorted
+ * neighbor slice — O(log P_i) instead of an O(P) Map.
+ */
+function createBearingIndex(offsets, neighbors, bearings, cellToIndex) {
+  function getBearing(currCell, nCell) {
+    const i = cellToIndex.get(currCell);
+    if (i === undefined) return undefined;
+    const j = cellToIndex.get(nCell);
+    if (j === undefined) return undefined;
+    const s = offsets[i];
+    const e = offsets[i + 1];
+    const pos = _binarySearchNeighbors(neighbors, s, e, j);
+    return pos === -1 ? undefined : bearings[pos];
+  }
+  function get(key) {
+    const sep = key.indexOf('::');
+    if (sep < 0) return undefined;
+    return getBearing(key.slice(0, sep), key.slice(sep + 2));
+  }
+  return new Proxy(
+    { isBearingIndex: true, getBearing, get },
+    {
+      get(target, prop, receiver) {
+        if (prop === 'get') return get;
+        if (prop === 'getBearing') return getBearing;
+        if (prop === 'isBearingIndex') return true;
+        if (typeof prop === 'string' && prop.indexOf('::') !== -1) return get(prop);
+        return Reflect.get(target, prop, receiver);
+      },
+    }
+  );
+}
+
+/**
+ * Rebuild CSR-backed visibility + bearing accessors from the flat CSR buffer
+ * produced by `computeVisibilityBearingCSRIndexed`.
+ *
+ * The legacy version materialized a `Map` (and a nested plain object) with ONE
+ * entry per visible pair — O(V·(1+3·d(d+1))) entries, which is ~3.6e8 for a
+ * city-scale AOI (V=5e5, d=15) and OOMs / is pathologically slow. Instead we keep
+ * the data in the typed-array CSR (O(N + P) bytes) and expose it through the
+ * lightweight Proxy wrappers above, which resolve `a::b` lookups via a binary
+ * search over each origin's (sorted) neighbor slice. The only auxiliary structure
+ * is `cellToIndex` (O(N) entries), which is orders of magnitude smaller than the
+ * per-pair Map the legacy path built.
  *
  * `viewHexes` supplies the integer-index → H3 cellId mapping used to turn the
  * CSR's integer neighbor indices back into the string keys the simulation expects.
  */
-function reconstructVisibilityBearing(csr, viewHexes) {
+export function reconstructVisibilityBearing(csr, viewHexes) {
   const { buffer, N, P, offsetsBytes, neighborsBytes } = csr;
   if (!buffer || N === 0) {
-    return { visibilityData: Object.create(null), bearingMap: new Map() };
+    const emptyOffsets = new Int32Array(0);
+    const emptyNeighbors = new Int32Array(0);
+    const emptyBearings = new Float32Array(0);
+    const emptyCellToIndex = new Map();
+    return {
+      visibilityData: createVisibilityIndex(emptyOffsets, emptyNeighbors, emptyCellToIndex),
+      bearingMap: createBearingIndex(emptyOffsets, emptyNeighbors, emptyBearings, emptyCellToIndex),
+    };
   }
   const visOffsets = new Int32Array(buffer, 0, N + 1);
   const visNeighbors = new Int32Array(buffer, offsetsBytes, P);
   const bearings = new Float32Array(buffer, offsetsBytes + neighborsBytes, P);
 
-  const visibilityData = Object.create(null);
-  const bearingMap = new Map();
-  for (let i = 0; i < N; i++) {
-    const origin = viewHexes[i];
-    const start = visOffsets[i];
-    const end = visOffsets[i + 1];
-    if (end <= start) continue;
-    const visObj = Object.create(null);
-    for (let p = start; p < end; p++) {
-      const neighbor = viewHexes[visNeighbors[p]];
-      visObj[neighbor] = true;
-      bearingMap.set(origin + '::' + neighbor, bearings[p]);
-    }
-    visibilityData[origin] = visObj;
-  }
+  // O(N) cell-string → index map. This is the ONLY per-cell structure we keep;
+  // it replaces the O(P) per-pair Map/object the legacy path built.
+  const cellToIndex = new Map();
+  for (let i = 0; i < N; i++) cellToIndex.set(viewHexes[i], i);
+
+  const visibilityData = createVisibilityIndex(visOffsets, visNeighbors, cellToIndex);
+  const bearingMap = createBearingIndex(visOffsets, visNeighbors, bearings, cellToIndex);
   return { visibilityData, bearingMap };
 }
