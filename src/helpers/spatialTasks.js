@@ -1,3 +1,4 @@
+import { logger } from './logger.js';
 import { gridDisk, polygonToCells, cellToLatLng } from 'h3-js';
 import {
   FRICTION_COSTS,
@@ -107,8 +108,7 @@ function getCachedPolyCells(coords) {
     result = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
   } catch (err) {
     try {
-      console.warn &&
-        console.warn('computeFastScan: polygonToCells failed for coords', { key, err });
+      logger.warn('computeFastScan: polygonToCells failed for coords', { key, err });
     } catch (_e) {}
     result = [];
   }

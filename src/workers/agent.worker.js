@@ -1,3 +1,4 @@
+import { logger } from '../helpers/logger.js';
 import { computeAgentBatch } from '../helpers/agentTasks.js';
 
 /**
@@ -27,15 +28,13 @@ try {
       const payload = data && data.kind === 'agent-batch' && data.payload ? data.payload : data;
       try {
         try {
-          console.debug &&
-            console.debug('agent.worker: received agent-batch', {
+          logger.debug('agent.worker: received agent-batch', {
               planLength: payload?.plan?.length ?? null,
             });
         } catch (_e) {}
         const ret = computeAgentBatch(payload || {});
         try {
-          console.debug &&
-            console.debug('agent.worker: finished computeAgentBatch', {
+          logger.debug('agent.worker: finished computeAgentBatch', {
               processed: ret?.result?.processed ?? ret?.processed ?? 0,
             });
         } catch (_e) {}

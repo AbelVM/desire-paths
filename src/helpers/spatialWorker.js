@@ -1,3 +1,4 @@
+import { logger } from './logger.js';
 import {
   computeFastScanChunkSnapshot,
   computeFastScanSnapshot,
@@ -108,8 +109,7 @@ function createWorkerSlot(kind = 'spatial') {
   try {
     const worker = new Worker(new URL(script, import.meta.url), { type: 'module' });
     try {
-      console.debug &&
-        console.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
+      logger.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
     } catch (_e) {}
     const slot = { worker, kind };
     _touchWorker(slot);
@@ -133,8 +133,7 @@ function releaseWorkerSlot(slot) {
   const next = waiting.shift();
   if (next) {
     try {
-      console.debug &&
-        console.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
+      logger.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
     } catch (_e) {}
     _touchWorker(slot);
     next(slot);
@@ -144,8 +143,7 @@ function releaseWorkerSlot(slot) {
     idleWorkersByKind.set(kind, idle);
     _touchWorker(slot);
     try {
-      console.debug &&
-        console.debug(
+      logger.debug(
           `spatialWorker: released slot to idle pool for kind=${kind} idleCount=${idle.length}`
         );
     } catch (_e) {}
@@ -155,12 +153,12 @@ function releaseWorkerSlot(slot) {
 
 function acquireWorkerSlot(kind = 'spatial') {
   try {
-    console.debug && console.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`);
+    logger.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`);
   } catch (_e) {}
   const idle = (idleWorkersByKind.get(kind) || []).pop();
   if (idle) {
     try {
-      console.debug && console.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
+      logger.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
     } catch (_e) {}
     _touchWorker(idle);
     return Promise.resolve(idle);
@@ -178,8 +176,7 @@ function acquireWorkerSlot(kind = 'spatial') {
     pool.push(slot);
     workerPoolByKind.set(kind, pool);
     try {
-      console.debug &&
-        console.debug(
+      logger.debug(
           `spatialWorker: created new worker slot kind=${kind} poolSize=${pool.length}/${maxForKind}`
         );
     } catch (_e) {}
@@ -187,8 +184,7 @@ function acquireWorkerSlot(kind = 'spatial') {
   }
 
   try {
-    console.debug &&
-      console.debug(
+    logger.debug(
         `spatialWorker: no slots available, enqueuing acquirer for kind=${kind} poolSize=${pool.length}/${maxForKind}`
       );
   } catch (_e) {}
@@ -213,7 +209,7 @@ function retireWorkerSlot(slot) {
 
   try {
     try {
-      console.debug && console.debug(`spatialWorker: retiring worker slot kind=${kind}`);
+      logger.debug(`spatialWorker: retiring worker slot kind=${kind}`);
     } catch (_e) {}
     slot.worker.terminate();
   } catch {
@@ -338,8 +334,7 @@ function runWorker(kind, payload) {
     slotPromise = acquireWorkerSlot(kind);
   } catch (err) {
     try {
-      console.warn &&
-        console.warn(
+      logger.warn(
           `spatialWorker: failed to acquire worker slot for kind=${kind}, running locally`,
           err
         );
@@ -373,8 +368,7 @@ function runWorker(kind, payload) {
           cleanup();
           releaseWorkerSlot(slot);
           try {
-            console.debug &&
-              console.debug(
+            logger.debug(
                 `spatialWorker: worker slot returned result kind=${slot.kind} ok=${Boolean(data.ok)}`
               );
           } catch (_e) {}
@@ -408,8 +402,7 @@ function runWorker(kind, payload) {
         try {
           const { payload: sendPayload, transfer } = flattenPayloadAndTransfers(payload);
           try {
-            console.debug &&
-              console.debug(
+            logger.debug(
                 `spatialWorker: posting task to worker kind=${kind} transferCount=${transfer?.length || 0}`
               );
           } catch (_e) {}
@@ -535,8 +528,7 @@ export async function runAgentBatches(
 
     if (missingTargets.size > 0) {
       try {
-        console.debug &&
-          console.debug(
+        logger.debug(
             'runAgentBatches: missing gradients for targets',
             Array.from(missingTargets)
           );
@@ -552,8 +544,7 @@ export async function runAgentBatches(
       }
       if (stillMissing.length > 0)
         try {
-          console.warn &&
-            console.warn(
+          logger.warn(
               'runAgentBatches: still missing gradients after fallback compute',
               stillMissing
             );
@@ -561,7 +552,7 @@ export async function runAgentBatches(
     }
   } catch (_e) {
     try {
-      console.warn && console.warn('runAgentBatches: error while computing missing gradients', _e);
+      logger.warn('runAgentBatches: error while computing missing gradients', _e);
     } catch (_e2) {}
   }
 
@@ -575,8 +566,7 @@ export async function runAgentBatches(
   // (runGradientBatches) remain parallel because they are independent per destination.
   const workerCount = 1;
   try {
-    console.debug &&
-      console.debug(
+    logger.debug(
         `runAgentBatches: dispatching agent-batches workerCount=${workerCount} planLength=${plan.length}`
       );
   } catch (_e) {}
@@ -631,8 +621,7 @@ export async function runAgentBatches(
 
   const chunks = splitIntoChunks(plan, workerCount);
   try {
-    console.debug &&
-      console.debug(
+    logger.debug(
         'runAgentBatches: chunks',
         chunks.map((c) => c.length)
       );
@@ -724,8 +713,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
 
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
-    console.debug &&
-      console.debug(
+    logger.debug(
         `spatialWorker: fast-scan-chunk dispatch workerCount=${chunks.length} featureCount=${featureCount}`
       );
   } catch (_e) {}
@@ -734,8 +722,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
     runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err) => {
       try {
-        console.warn &&
-          console.warn('spatialWorker: fast-scan-chunk failed, retrying', { chunkIndex, err });
+        logger.warn('spatialWorker: fast-scan-chunk failed, retrying', { chunkIndex, err });
       } catch (_e) {}
       return runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err2) => {
         try {
@@ -769,8 +756,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
 
   if (t0) {
     try {
-      console.debug &&
-        console.debug(
+      logger.debug(
           `spatialWorker: fast-scan-chunk done in ${(performance.now() - t0).toFixed(1)}ms`
         );
     } catch (_e) {}

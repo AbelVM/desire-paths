@@ -1,3 +1,4 @@
+import { logger } from './logger.js';
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
@@ -30,6 +31,13 @@ import {
   invalidateGradientGraph,
 } from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
+import { _bearingFromLatLngs, angleDiff } from './bearing.js';
+import {
+  gatherCandidates,
+  partitionVisibleCone,
+  scoreCandidates,
+  selectBestCandidate,
+} from './agentStep.js';
 
 // Re-export for backward compatibility with existing code references
 export { createLCG as _lcg, strHash as _strHash };
@@ -86,18 +94,6 @@ function buildCellStateEntry(
     desire: pathDesireSource ?? 0,
     multi: multiFrictionObj !== undefined ? multiFrictionObj : null,
   };
-}
-
-// Bearing between two cells, given their precomputed [lat, lng, latRad, lngRad]
-// lat/lng arrays (as returned by _getCachedLatLng). Assumes radians are present.
-function _bearingFromLatLngs(s, e) {
-  const lat1 = s[2];
-  const lon1 = s[3];
-  const lat2 = e[2];
-  const lon2 = e[3];
-  let y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-  let x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
 function _getCachedLatLng(cell) {
@@ -555,8 +551,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
     const grad = goalGradients.get(destCell);
     if (!grad) {
       try {
-        console.debug &&
-          console.debug('getReachableDestinations: missing gradient', { originCell, destCell });
+        logger.debug('getReachableDestinations: missing gradient', { originCell, destCell });
       } catch (_e) {}
       continue;
     }
@@ -564,8 +559,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
       typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number';
     if (!hasOrigin) {
       try {
-        console.debug &&
-          console.debug('getReachableDestinations: origin not in gradient', {
+        logger.debug('getReachableDestinations: origin not in gradient', {
             originCell,
             destCell,
           });
@@ -865,8 +859,7 @@ export async function computeDesirePaths(state, mapInstance) {
     goalGradients
   );
   try {
-    console.debug &&
-      console.debug('computeDesirePaths: plan built', {
+    logger.debug('computeDesirePaths: plan built', {
         agentsCount: agents.length,
         destinationsCount: destinations.length,
         planLength: plan.length,
@@ -893,8 +886,7 @@ export async function computeDesirePaths(state, mapInstance) {
           : typeof grad[originCell] === 'number');
       if (!hasOrigin) {
         try {
-          console.warn &&
-            console.warn('computeDesirePaths: aborting - missing gradient for plan entry', {
+          logger.warn('computeDesirePaths: aborting - missing gradient for plan entry', {
               originCell,
               destCell,
             });
@@ -1084,68 +1076,43 @@ function getBestNextStep(
     ctx._candFriction = frictionArr;
     ctx._candGNs = gNsArr;
   }
-  let candCount = 0;
-
-  for (let i = 0; i < diskLen; i++) {
-    const n = disk[i];
-    if (n === curr) continue;
-
-    const f = getFriction(n);
-    if (f === undefined || f >= impassableVal) continue;
-    if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
-
-    // Use precomputed bearing map — eliminates trig call per neighbor
-    let ang;
+  const isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup);
+  const computeAngle = (n) => {
     if (bearingMap) {
       const bng = bearingMap.get?.(curr + '::' + n);
-      if (typeof bng === 'number') {
-        ang = angleDiff(bng, currentDirection);
-      } else {
-        // Fallback: compute bearing for uncached pair
-        const eLatLng = _getCachedLatLng(n);
-        ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-      }
-    } else {
-      const eLatLng = _getCachedLatLng(n);
-      ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+      if (typeof bng === 'number') return angleDiff(bng, currentDirection);
     }
-    const aff = getAffordance(n);
+    const eLatLng = _getCachedLatLng(n);
+    return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+  };
 
-    if (useGradient) {
-      const gN = gradientLookup(n);
-      if (typeof gN !== 'number') continue;
-      cellsArr[candCount] = n;
-      anglesArr[candCount] = ang;
-      affsArr[candCount] = aff;
-      frictionArr[candCount] = f;
-      gNsArr[candCount] = gN;
-    } else {
-      cellsArr[candCount] = n;
-      anglesArr[candCount] = ang;
-      affsArr[candCount] = aff;
-      frictionArr[candCount] = f;
-    }
-    candCount++;
-  }
+  const candCount = gatherCandidates({
+    disk,
+    curr,
+    getFriction,
+    isVisible,
+    computeAngle,
+    getAffordance,
+    gradientLookup,
+    useGradient,
+    impassableVal,
+    cellsArr,
+    anglesArr,
+    affsArr,
+    frictionArr,
+    gNsArr,
+  });
 
-  let hardCount = 0;
-  for (let i = 0; i < candCount; i++) {
-    if (anglesArr[i] <= visualAngleHalf) {
-      if (hardCount !== i) {
-        const swap = (arr) => {
-          const temp = arr[i];
-          arr[i] = arr[hardCount];
-          arr[hardCount] = temp;
-        };
-        swap(cellsArr);
-        swap(anglesArr);
-        swap(affsArr);
-        swap(frictionArr);
-        if (useGradient) swap(gNsArr);
-      }
-      hardCount++;
-    }
-  }
+  const hardCount = partitionVisibleCone({
+    cellsArr,
+    anglesArr,
+    affsArr,
+    frictionArr,
+    gNsArr,
+    useGradient,
+    cLen: candCount,
+    visualAngleHalf,
+  });
   const cLen = hardCount > 0 ? hardCount : candCount;
   let scores = null;
   if (useGradient) {
@@ -1157,24 +1124,18 @@ function getBestNextStep(
   }
 
   if (useGradient) {
-    for (let i = 0; i < cLen; i++) {
-      const gN = gNsArr[i];
-      let aff = affsArr[i];
-      const stepCost = frictionArr[i] || 0;
-
-      // True ABM: boost effective affordance by accumulated footprints.
-      // Cells that more agents have traversed become easier to enter,
-      // creating positive feedback that produces emergent path formation.
-      if (accumulatedFootprints) {
-        const fp = accumulatedFootprints[cellsArr[i]] || 0;
-        aff += Math.log1p(fp) * 0.05;
-      }
-
-      const delta = stepCost + gN - gCurr;
-      let S_ij = weights.w_a * aff - weights.w_d * delta;
-      S_ij -= (weights.w_theta || 0) * (anglesArr[i] / 180);
-      scores[i] = S_ij;
-    }
+    scoreCandidates({
+      cLen,
+      gNsArr,
+      affsArr,
+      frictionArr,
+      anglesArr,
+      cellsArr,
+      weights,
+      gCurr,
+      accumulatedFootprints,
+      scores,
+    });
   }
 
   if (ctx.debugCompute) {
@@ -1299,47 +1260,22 @@ function getBestNextStep(
     return cellsArr[cLen - 1];
   }
 
-  let bestScore = -Infinity;
-  let bestIndex = -1;
-  for (let i = 0; i < cLen; i++) {
-    const S_ij = scores?.[i];
-    const isScoreValid = typeof S_ij === 'number';
-    if (isScoreValid && S_ij > bestScore) {
-      bestScore = S_ij;
-      bestIndex = i;
-    } else if (!isScoreValid) {
-      // No gradient: fall back to affordance, boosted by accumulated footprints.
-      let effAff = affsArr[i];
-      if (accumulatedFootprints) {
-        const fp = accumulatedFootprints[cellsArr[i]] || 0;
-        effAff += Math.log1p(fp) * 0.05;
-      }
-      if (effAff > bestScore) {
-        bestScore = effAff;
-        bestIndex = i;
-      } else if (Math.abs(effAff - bestScore) < 1e-9) {
-        // Tiebreak: prefer lower cost when affordance is equal.
-        const currentBestCost =
-          (frictionArr[bestIndex] || 0) + (useGradient ? (gNsArr[bestIndex] ?? Infinity) : 0);
-        const candidateCost = (frictionArr[i] || 0) + (useGradient ? (gNsArr[i] ?? Infinity) : 0);
-        if (candidateCost < currentBestCost) {
-          bestIndex = i;
-        } else if (candidateCost === currentBestCost) {
-          // Compute grid distance once per candidate instead of twice.
-          const dCandidate = gridDistance(curr, cellsArr[i]);
-          const dBest = gridDistance(curr, cellsArr[bestIndex]);
-          if (dCandidate < dBest) {
-            bestIndex = i;
-          }
-        }
-      }
-    }
-  }
+  const bestIndex = selectBestCandidate({
+    cLen,
+    scores,
+    affsArr,
+    frictionArr,
+    gNsArr,
+    useGradient,
+    accumulatedFootprints,
+    cellsArr,
+    curr,
+  });
 
   const chosen = bestIndex >= 0 ? cellsArr[bestIndex] : null;
   if (ctx.debugCompute) {
     try {
-      console.log('getBestNextStep: chosen', { curr, chosen, bestScore });
+      console.log('getBestNextStep: chosen', { curr, chosen });
     } catch (_e) {
       // debug logging is non-critical
     }
@@ -1506,13 +1442,6 @@ function getBearingFast(ctx, a, b, bearingMap) {
   const s = _getCachedLatLng(a);
   const e = _getCachedLatLng(b);
   return _bearingFromLatLngs(s, e);
-}
-
-// Smallest absolute angular difference between two bearings (degrees)
-function angleDiff(a, b) {
-  // normalize to [0,360), then compute minimal signed diff
-  const diff = Math.abs(((a - b + 540) % 360) - 180);
-  return diff;
 }
 
 /**
