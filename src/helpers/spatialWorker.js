@@ -784,6 +784,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
     cellFrictionEntries,
     blurWeights: blur.blurWeights,
     blurUpdates: blur.updates,
+    blurUpdateMap: blur.blurUpdateMap,
   };
 }
 

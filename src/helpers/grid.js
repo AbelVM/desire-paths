@@ -155,14 +155,9 @@ export async function triggerFastScan(state, mapInstance) {
 
   // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
   const blurWeights = build.blurWeights ?? Object.create(null);
-  const blurUpdates = build.blurUpdates ?? null;
-  // Index blur updates by cell for O(1) lookup in the per-cell loop.
-  const blurUpdateMap = blurUpdates ? Object.create(null) : null;
-  if (blurUpdateMap) {
-    for (let u = 0; u < blurUpdates.length; u++) {
-      blurUpdateMap[blurUpdates[u][0]] = blurUpdates[u][1];
-    }
-  }
+  // `blurUpdateMap` is returned by the worker (cell→blurred friction), so we use
+  // it directly instead of rebuilding an equivalent object from `blurUpdates`.
+  const blurUpdateMap = build.blurUpdateMap ?? null;
 
   state._frictionObj = Object.create(null);
   state._affordanceObj = Object.create(null);
