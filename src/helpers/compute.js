@@ -34,9 +34,12 @@ import { createLCG, strHash } from './rng.js';
 // Re-export for backward compatibility with existing code references
 export { createLCG as _lcg, strHash as _strHash };
 
-// Module-level lat/lng cache (FIFO object-based cache to avoid Map hotspots)
-const _cellLatLngCacheObj = Object.create(null);
-const _cellLatLngCacheOrder = [];
+// Module-level lat/lng cache. Uses a Map so its insertion order gives us an
+// O(1) LRU for free: on a hit we delete+re-set the key to move it to the
+// most-recently-used end, and on eviction we drop the first (oldest) key.
+// This replaces the old object+order-array design whose per-hit `indexOf`
+// scan was O(n) for a 1024-entry cache.
+const _cellLatLngCache = new Map();
 // Instrumentation counters for lat/lng cache
 let _cellLatLngCacheHits = 0;
 let _cellLatLngCacheMisses = 0;
@@ -98,16 +101,13 @@ function _bearingFromLatLngs(s, e) {
 }
 
 function _getCachedLatLng(cell) {
-  const c = _cellLatLngCacheObj[cell];
+  const c = _cellLatLngCache.get(cell);
   if (c) {
     _cellLatLngCacheHits++;
-    // LRU: move the accessed cell to the most-recently-used end so
-    // frequently requested cells survive eviction when the AOI pans.
-    const idx = _cellLatLngCacheOrder.indexOf(cell);
-    if (idx !== -1 && idx !== _cellLatLngCacheOrder.length - 1) {
-      _cellLatLngCacheOrder.splice(idx, 1);
-      _cellLatLngCacheOrder.push(cell);
-    }
+    // LRU: re-insert the accessed cell so it moves to the most-recently-used
+    // end (Map preserves insertion order). This is O(1) — no index scan.
+    _cellLatLngCache.delete(cell);
+    _cellLatLngCache.set(cell, c);
     return c;
   }
   const v = cellToLatLng(cell);
@@ -117,14 +117,14 @@ function _getCachedLatLng(cell) {
   const latRad = (lat * Math.PI) / 180;
   const lngRad = (lng * Math.PI) / 180;
   const stored = [lat, lng, latRad, lngRad];
-  _cellLatLngCacheObj[cell] = stored;
+  _cellLatLngCache.set(cell, stored);
   _cellLatLngCacheMisses++;
-  _cellLatLngCacheOrder.push(cell);
-  // LRU eviction: drop the least-recently-used entry once over the cap.
-  // No periodic full reset, so useful entries are retained across AOI pans.
-  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX) {
-    const old = _cellLatLngCacheOrder.shift();
-    delete _cellLatLngCacheObj[old];
+  // LRU eviction: drop the least-recently-used entry (the first key in
+  // insertion order) once over the cap. No periodic full reset, so useful
+  // entries are retained across AOI pans.
+  if (_cellLatLngCache.size > CELL_LATLNG_CACHE_MAX) {
+    const old = _cellLatLngCache.keys().next().value;
+    _cellLatLngCache.delete(old);
   }
   return stored;
 }
@@ -503,10 +503,7 @@ export function clearComputeCaches(ctx) {
 
 /** Clear the module-level lat/lng cache to prevent unbounded memory growth. */
 export function clearLatLngCache() {
-  for (const key in _cellLatLngCacheObj) {
-    delete _cellLatLngCacheObj[key];
-  }
-  _cellLatLngCacheOrder.length = 0;
+  _cellLatLngCache.clear();
   _cellLatLngCacheHits = 0;
   _cellLatLngCacheMisses = 0;
 }
@@ -1757,7 +1754,7 @@ export {
 // Diagnostic helper to inspect cache instrumentation
 export function getComputeCacheStats(ctx = {}) {
   return {
-    cellLatLngCacheSize: Object.keys(_cellLatLngCacheObj).length,
+    cellLatLngCacheSize: _cellLatLngCache.size,
     cellLatLngCacheHits: _cellLatLngCacheHits,
     cellLatLngCacheMisses: _cellLatLngCacheMisses,
     computePathCacheSize: ctx._computePathCacheObj
