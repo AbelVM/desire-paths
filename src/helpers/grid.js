@@ -11,8 +11,6 @@ import {
 import { clearComputeCaches, clearGradientCache } from './compute.js';
 import { invalidateGradientGraph } from './dijkstra.js';
 import { reconstructVisibilityBearing } from './bearingIndex.js';
-// Re-export for backward compatibility (tests / callers imported it from here).
-export { reconstructVisibilityBearing };
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {

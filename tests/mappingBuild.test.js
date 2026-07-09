@@ -9,7 +9,7 @@ import {
   computeVisibilityBearingCSRIndexed,
 } from '../src/helpers/spatialTasks.js';
 import { runVisibilityBearingTask } from '../src/helpers/spatialWorker.js';
-import { reconstructVisibilityBearing } from '../src/helpers/grid.js';
+import { reconstructVisibilityBearing } from '../src/helpers/bearingIndex.js';
 import {
   getGradientGraph,
   invalidateGradientGraph,

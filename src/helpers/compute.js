@@ -42,9 +42,6 @@ import {
   resolveStepLine,
 } from './agentStep.js';
 
-// Re-export for backward compatibility with existing code references
-export { createLCG as _lcg, strHash as _strHash };
-
 // Module-level lat/lng cache. Uses a Map so its insertion order gives us an
 // O(1) LRU for free: on a hit we delete+re-set the key to move it to the
 // most-recently-used end, and on eviction we drop the first (oldest) key.
@@ -62,41 +59,9 @@ function recordTraversal(pathDesireDeltas, cell) {
 function applyPathDesireDeltas(ctx, pathDesireDeltas) {
   for (const cell in pathDesireDeltas) {
     const v = pathDesireDeltas[cell];
-    let newDesire;
-    const cs = ctx._cellState?.[cell];
-    if (cs) {
-      newDesire = (cs.desire ?? 0) + v;
-      cs.desire = newDesire;
-    } else {
-      newDesire = (ctx.pathDesireScores?.[cell] ?? 0) + v;
-    }
+    const newDesire = (ctx.pathDesireScores?.[cell] ?? 0) + v;
     ctx.pathDesireScores[cell] = newDesire;
   }
-}
-
-// --- Cell state builder: creates/updates per-cell state objects ---
-function buildCellStateEntry(
-  friction,
-  affordanceSource,
-  pathDesireSource,
-  multiFrictionObj,
-  existingState,
-  cellKey
-) {
-  let es = existingState && existingState[cellKey];
-  if (es) {
-    es.friction = friction;
-    es.affordance = affordanceSource !== undefined ? affordanceSource : 0.1;
-    es.desire = pathDesireSource ?? 0;
-    es.multi = multiFrictionObj !== undefined ? multiFrictionObj : null;
-    return es;
-  }
-  return {
-    friction,
-    affordance: affordanceSource !== undefined ? affordanceSource : 0.1,
-    desire: pathDesireSource ?? 0,
-    multi: multiFrictionObj !== undefined ? multiFrictionObj : null,
-  };
 }
 
 function _getCachedLatLng(cell) {
@@ -318,25 +283,16 @@ export function clearComputeCaches(ctx) {
   if (ctx.pathDesireScores) {
     for (const k in ctx.pathDesireScores) delete ctx.pathDesireScores[k];
   }
-  // Legacy `_cellState` desire reset (kept for callers that still build it).
-  if (ctx._cellState) {
-    for (const cell in ctx._cellState) {
-      const cs = ctx._cellState[cell];
-      if (cs && typeof cs.desire === 'number') cs.desire = 0;
-    }
-  }
 
   // Drop per-compute data structures
   ctx._gradientCacheObj = null;
-  ctx._cellState = null;
   ctx._frictionObj = null;
   ctx._affordanceObj = null;
   ctx._perTargetContribs = null;
   ctx._assignedCounts = null;
   ctx._targetWeights = null;
-  // Drop cached hot-path closures — they capture `_frictionObj`/`_affordanceObj`
-  // (or a legacy `_cellState`), which are being replaced, so stale closures would
-  // read a detached snapshot on the next run.
+  // Drop cached hot-path closures — they capture `_frictionObj`/`_affordanceObj`,
+  // so stale closures would read a detached snapshot on the next run.
   ctx._getFriction = null;
   ctx._getAffordance = null;
 
@@ -356,8 +312,6 @@ export function clearComputeCaches(ctx) {
   ctx._visibilityCacheHits = 0;
   ctx._visibilityCacheMisses = 0;
   ctx._visibilityCacheGen = undefined;
-
-  ctx._cellStateMappingGen = undefined;
 
   // Clear gradient cache and module-level lat/lng cache
   clearGradientCache(ctx);
@@ -427,15 +381,13 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   // _frictionObj is always the canonical lookup — already built once per sim run.
   // Direct property access on plain object is faster than iterating Map.entries().
   const frictionLookup = ctx._frictionObj;
-  const cellState = ctx._cellState;
   let bestNeighbor = null;
   let bestGrad = gCurr;
 
   for (let i = 0; i < nbrIdxs.length; i++) {
     const n = idxToCell[nbrIdxs[i]];
     if (n === curr) continue;
-    // Prefer _cellState.friction (updated during sim); fall back to frictionLookup.
-    let f = cellState?.[n]?.friction ?? frictionLookup?.[n];
+    const f = frictionLookup?.[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
     const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
@@ -503,7 +455,6 @@ function runSingleAgentPath(
 
   // _frictionObj is the canonical lookup — already built once per sim run.
   const frictionLookup = ctx._frictionObj;
-  const cellState = ctx._cellState;
 
   for (let tick = 0; tick < maxTicks; tick++) {
     // Update dynamic distance to target — the precomputed origin-to-destination
@@ -545,13 +496,12 @@ function runSingleAgentPath(
     // by an impassable cell or would cut a building corner, route a local
     // detour around the obstacle so the agent walks *around* the corner
     // instead of jumping over it or stalling against the building.
-    const line = _resolveStepLine(ctx, simCurrent, nextStep, frictionLookup, cellState);
+    const line = _resolveStepLine(ctx, simCurrent, nextStep, frictionLookup);
     let hitTarget = false;
     let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
-      const stepState = cellState && cellState[stepCell];
-      const f = stepState ? stepState.friction : frictionLookup[stepCell];
+      const f = frictionLookup[stepCell];
       if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireDeltas) recordTraversal(pathDesireDeltas, stepCell);
@@ -682,17 +632,7 @@ export async function computeDesirePaths(state, mapInstance) {
 
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.
-  // This fresh object is the authoritative desire reset now that `_cellState` is
-  // not built (M5); the legacy `_cellState` zeroing below is a no-op in production
-  // and kept only for callers/tests that still construct `_cellState`.
   state.pathDesireScores = Object.create(null);
-
-  if (state._cellState) {
-    for (const cell in state._cellState) {
-      const cs = state._cellState[cell];
-      if (cs && typeof cs.desire === 'number') cs.desire = 0;
-    }
-  }
 
   // Guard: ensure the friction map has been built before simulating
   if (!state.cellFrictionMap || state.cellFrictionMap.size === 0) {
@@ -744,20 +684,9 @@ export async function computeDesirePaths(state, mapInstance) {
     state._multiFrictionSnapshotGen = mappingGen;
   }
 
-  // M5: the per-cell `_cellState` object is no longer built. friction lives in
-  // `_frictionObj` (mirror of `cellFrictionMap`), affordance in `_affordanceObj`,
-  // and desire in `pathDesireScores` — the exact flat lookups the batch sim path
-  // already consumes (`runAgentBatches` is called with `_frictionObj`/`_affordanceObj`
-  // below, and `computeAgentBatch` passes `cellState=null`). Every remaining
-  // `_cellState` reader keeps its `cellState?.[cell] ?? flatObj[cell]` fallback,
-  // so dropping the ~V per-cell objects is byte-identical and saves steady-state
-  // memory. `_affordanceObj` is guaranteed present here (built by grid.js mapCells,
-  // or from `affordanceMap` on the incremental path).
-
   // Grass recovery between user-triggered simulation runs (not after wear in the
-  // same pass). Iterate the friction-object key set (the exact cells the old
-  // `_cellState` covered). decayAffordance reads/writes `_affordanceObj` when no
-  // `_cellState` is present, so the effect is identical.
+  // same pass). Iterate the friction-object key set. decayAffordance reads/writes
+  // `_affordanceObj`.
   if (state._frictionObj) {
     for (const cell in state._frictionObj) {
       decayAffordance(state, cell);
@@ -1057,9 +986,6 @@ function getBestNextStep(
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simParams.fieldOfView / 2;
 
-  const cellState = ctx._cellState || null;
-  const stateEnabled = !!cellState;
-
   // _frictionObj is the canonical lookup — already built once per sim run.
   // For tests/incremental paths where it may not exist, build lazily (non-IIFE).
   let frictionLookup = ctx._frictionObj;
@@ -1079,24 +1005,14 @@ function getBestNextStep(
   const useGradient = typeof gCurr === 'number';
 
   // Hoist friction/affordance lookups out of the per-call hot path. They only
-  // depend on cellState/frictionLookup/affordanceLookup, which are stable for
+  // depend on frictionLookup/affordanceLookup, which are stable for
   // the lifetime of a sim run, so build them once and cache on ctx instead of
   // re-allocating two closures on every one of the millions of invocations.
   let getFriction = ctx._getFriction;
   let getAffordance = ctx._getAffordance;
   if (!getFriction || !getAffordance) {
-    getFriction = stateEnabled
-      ? (n) => {
-          const s = cellState[n];
-          return s ? s.friction : undefined;
-        }
-      : (n) => frictionLookup[n];
-    getAffordance = stateEnabled
-      ? (n) => {
-          const s = cellState[n];
-          return s ? (s.affordance ?? 0.1) : 0.1;
-        }
-      : (n) => affordanceLookup?.[n] ?? 0.1;
+    getFriction = (n) => frictionLookup[n];
+    getAffordance = (n) => affordanceLookup?.[n] ?? 0.1;
     ctx._getFriction = getFriction;
     ctx._getAffordance = getAffordance;
   }
@@ -1363,15 +1279,7 @@ function computeDijkstraGradient(ctx, targetCell) {
     ctx._frictionObj = frictionLookup;
   }
 
-  const cellState = ctx._cellState || null;
-  const stateEnabled = !!cellState;
-
-  const getFriction = stateEnabled
-    ? (n) => {
-        const s = cellState[n];
-        return s ? s.friction : undefined;
-      }
-    : (n) => frictionLookup?.[n];
+  const getFriction = (n) => frictionLookup?.[n];
 
   // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
   // cellFrictionMap reference. Topology is static per mapping generation; only
@@ -1383,29 +1291,18 @@ function computeDijkstraGradient(ctx, targetCell) {
 /**
  * Geometric Helpers (Visibility & Bearing)
  */
-function isVisible(ctx, start, end) {
-  // _frictionObj is the canonical lookup; build once from cellFrictionMap if absent.
-  // Using a simple check (not IIFE) to avoid repeated overhead in hot path.
-  let frictionLookup = ctx._frictionObj;
-  if (!frictionLookup && ctx.cellFrictionMap) {
-    frictionLookup = Object.create(null);
-    for (const [k, v] of ctx.cellFrictionMap) frictionLookup[k] = v;
-    ctx._frictionObj = frictionLookup;
-  }
-  return _getCachedVisibility(ctx, start, end, frictionLookup);
-}
 
 // Resolve the actual cell-by-cell line the agent walks from `curr` to
 // `nextStep`. Thin adapter over the shared `resolveStepLine` (agentStep.js) —
 // the obstacle-avoidance geometry lives there so this kernel and the worker
 // kernel cannot drift. The cache-accessor closures are memoized on ctx so no
 // closures are allocated on the hot per-step path.
-function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
+function _resolveStepLine(ctx, curr, nextStep, frictionLookup) {
   let getPathCells = ctx._rslGetPathCells;
   let getDisk = ctx._rslGetDisk;
   if (!getPathCells || !getDisk) {
     getPathCells = (a, b) => _getCachedPathCells(ctx, a, b);
-    getDisk = (center, r) => _getCachedDisk(ctx, center, r);
+    getDisk = (center, r) => _getCachedDisk(center, r);
     ctx._rslGetPathCells = getPathCells;
     ctx._rslGetDisk = getDisk;
   }
@@ -1414,7 +1311,6 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
     curr,
     nextStep,
     frictionLookup,
-    cellState,
     getPathCells,
     getDisk,
     graph,
@@ -1425,11 +1321,6 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
 // Returns true if the straight H3 line from `curr` to `n` would cut across an
 // impassable cell at any diagonal transition. Used to reject `nextStep`
 // candidates the agent cannot actually reach without jumping a building corner.
-function getBearing(start, end) {
-  const s = _getCachedLatLng(start);
-  const e = _getCachedLatLng(end);
-  return _bearingFromLatLngs(s, e);
-}
 
 // Fast bearing lookup: uses precomputed bearing map when available,
 // falls back to trig-based calculation otherwise.
@@ -1450,20 +1341,18 @@ function getBearingFast(ctx, a, b, bearingMap) {
  * LIGHT_PARK is easily worn (more wear)
  */
 function updateAffordance(ctx, cell, volume = 1) {
-  const cs = ctx._cellState?.[cell];
-  const friction = cs?.friction ?? ctx._frictionObj?.[cell];
+  const friction = ctx._frictionObj?.[cell];
 
   // Skip update for permanent infrastructure
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
-  const current = cs?.affordance ?? ctx._affordanceObj?.[cell] ?? 0.1;
+  const current = ctx._affordanceObj?.[cell] ?? 0.1;
   const newVal = Math.min(
     SOFT_CAP,
     current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor)
   );
 
-  if (cs) cs.affordance = newVal;
   if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
 }
 
@@ -1473,19 +1362,17 @@ function updateAffordance(ctx, cell, volume = 1) {
  * LIGHT_PARK recovers faster (path fades quickly)
  */
 function decayAffordance(ctx, cell) {
-  const cs = ctx._cellState?.[cell];
-  const friction = cs?.friction ?? ctx._frictionObj?.[cell];
+  const friction = ctx._frictionObj?.[cell];
 
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
-  const current = cs?.affordance ?? ctx._affordanceObj?.[cell] ?? 0.1;
+  const current = ctx._affordanceObj?.[cell] ?? 0.1;
   // Exponential decay: vegetation recovers quickly at first, then slows as
   // roots reestablish — producing a realistic non-linear persistence curve.
   // Heavy grass (recoveryFactor 0.5) decays slower than light park (1.5).
   const newVal = Math.max(0.1, current * Math.exp(-DECAY_RATE * recoveryFactor));
 
-  if (cs) cs.affordance = newVal;
   if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
 }
 
@@ -1518,26 +1405,7 @@ export function initializeAffordanceMap(ctx) {
     const { affordance } = classifyAffordance(friction);
     ctx.affordanceMap.set(cell, affordance);
 
-    // Keep the authoritative flat affordance snapshot in sync (M5 — this is what
-    // the sim path reads now that `_cellState` is not built). Previously this
-    // function only refreshed `_cellState`, leaving `_affordanceObj` stale.
     if (ctx._affordanceObj) ctx._affordanceObj[cell] = affordance;
-
-    // Legacy `_cellState` support retained for callers/tests that still construct
-    // it; production no longer builds `_cellState`, so this block is skipped.
-    if (ctx._cellState) {
-      const cs = ctx._cellState[cell];
-      const existingDesire = cs ? cs.desire : 0;
-      const existingMulti = cs ? cs.multi : null;
-      ctx._cellState[cell] = buildCellStateEntry(
-        friction,
-        affordance,
-        existingDesire,
-        existingMulti,
-        ctx._cellState,
-        cell
-      );
-    }
   }
 }
 
@@ -1545,14 +1413,11 @@ export function initializeAffordanceMap(ctx) {
 export {
   getBestNextStep as _getBestNextStep,
   computeDijkstraGradient as _computeDijkstraGradient,
-  getBearing as _getBearing,
   getGradientDirection as _getGradientDirection,
   runSingleAgentPath as _runSingleAgentPath,
   angleDiff as _angleDiff,
-  isVisible as _isVisible,
   estimateMaxTicks as _estimateMaxTicks,
   yieldToMain as _yieldToMain,
-  buildCellStateEntry,
   precomputeOriginDestDistances,
 };
 
@@ -1692,9 +1557,7 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
   // _gradientCacheObj always stores plain objects
   const destGradientObj = ctx._gradientCacheObj[targetCell];
 
-  // Ensure snapshot state exists for safe inner-loop reads. `runSingleAgentPath`
-  // reads friction/affordance via `cellState?.[cell] ?? _frictionObj/_affordanceObj`,
-  // so the flat objects below are the authoritative source (M5 — no `_cellState`).
+  // Ensure snapshot state exists for safe inner-loop reads.
   if (!ctx._frictionObj) {
     ctx._frictionObj = Object.create(null);
     for (const [k, v] of ctx.cellFrictionMap) ctx._frictionObj[k] = v;
@@ -1754,14 +1617,8 @@ function _applyTargetContribDelta(ctx, targetCell, newContribs) {
     if (delta === 0) continue;
     affected.add(cell);
 
-    if (ctx._cellState && ctx._cellState[cell]) {
-      ctx._cellState[cell].desire = (ctx._cellState[cell].desire || 0) + delta;
-      const newDes = ctx._cellState[cell].desire;
-      if (ctx.pathDesireScores) ctx.pathDesireScores[cell] = newDes;
-    } else {
-      const cur = ctx.pathDesireScores?.[cell] || 0;
-      if (ctx.pathDesireScores) ctx.pathDesireScores[cell] = cur + delta;
-    }
+    const cur = ctx.pathDesireScores?.[cell] || 0;
+    if (ctx.pathDesireScores) ctx.pathDesireScores[cell] = cur + delta;
   }
 
   // persist new contrib snapshot (or remove if empty)
@@ -1782,8 +1639,6 @@ function _recomputeAffordanceForCells(ctx, cells) {
       for (const [k, v] of ctx.cellFrictionMap || []) obj[k] = v;
       return (ctx._frictionObj = obj);
     })();
-  const cellState = ctx._cellState || null;
-  const stateEnabled = !!cellState;
 
   for (const cell of cells) {
     // aggregate totalVolume across all targets
@@ -1795,30 +1650,12 @@ function _recomputeAffordanceForCells(ctx, cells) {
       }
     }
 
-    let friction;
-    if (stateEnabled && cellState[cell] && typeof cellState[cell].friction !== 'undefined')
-      friction = cellState[cell].friction;
-    else friction = frictionLookup[cell];
+    const friction = frictionLookup[cell];
 
     if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) continue;
     const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
     const wear = (totalVolume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor);
     const newVal = Math.min(SOFT_CAP, 0.1 + wear);
-
-    if (stateEnabled) {
-      const cs = cellState[cell];
-      const existingFriction = cs ? cs.friction : friction;
-      const existingDesire = cs ? cs.desire : 0;
-      const existingMulti = cs ? cs.multi : null;
-      cellState[cell] = buildCellStateEntry(
-        existingFriction,
-        newVal,
-        existingDesire,
-        existingMulti,
-        cellState,
-        cell
-      );
-    }
 
     if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
   }

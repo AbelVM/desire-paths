@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   _angleDiff as angleDiff,
   _computeDijkstraGradient,
-  _isVisible,
-  _getBearing,
   _getBestNextStep,
   _getGradientDirection,
   _estimateMaxTicks,
@@ -118,35 +116,6 @@ describe('initializeAffordanceMap', () => {
     };
     initializeAffordanceMap(map);
     expect(map.affordanceMap.get('a')).toBe(0.3);
-  });
-
-  it('should update _cellState when provided', () => {
-    const map = {
-      affordanceMap: new Map(),
-      cellFrictionMap: new Map([
-        ['a', 1],
-        ['b', 999999],
-      ]),
-      _cellState: Object.create(null),
-    };
-    initializeAffordanceMap(map);
-    expect(map._cellState['a'].affordance).toBe(1.0);
-    expect(map._cellState['b'].affordance).toBe(0.0);
-    expect(map._cellState['a'].desire).toBe(0);
-    expect(map._cellState['b'].multi).toBeNull();
-  });
-
-  it('should update existing _cellState entries', () => {
-    const map = {
-      affordanceMap: new Map(),
-      cellFrictionMap: new Map([['a', 1]]),
-      _cellState: {
-        a: { friction: 1, affordance: 0.5, desire: 10, multi: null },
-      },
-    };
-    initializeAffordanceMap(map);
-    expect(map._cellState['a'].affordance).toBe(1.0);
-    expect(map._cellState['a'].desire).toBe(10); // desire preserved
   });
 
   it('should handle empty cellFrictionMap', () => {
@@ -596,31 +565,6 @@ describe('_computeDijkstraGradient', () => {
     }
   });
 
-  it('should use _cellState friction when available', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const neighbors = gridDisk(h3, 1);
-    const frictionMap = new Map();
-    frictionMap.set(h3, 1);
-    const cellState = Object.create(null);
-    cellState[h3] = { friction: 1 };
-    for (const n of neighbors) {
-      frictionMap.set(n, 1);
-      cellState[n] = { friction: 1 };
-    }
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: cellState,
-    };
-    const result = _computeDijkstraGradient(map, h3);
-    const graph = getGradientGraph(frictionMap);
-    expect(gradientGet(result, h3, graph)).toBe(0);
-    for (const n of neighbors) {
-      if (n !== h3) {
-        expect(gradientGet(result, n, graph)).toBe(1);
-      }
-    }
-  });
-
   it('should exclude impassable cells from gradient', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
@@ -647,65 +591,6 @@ describe('_computeDijkstraGradient', () => {
     const result = _computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(new Map());
     expect(gradientGet(result, h3, graph)).toBe(0);
-  });
-});
-
-describe('_isVisible', () => {
-  it('should return a boolean', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const map = {
-      cellFrictionMap: new Map([[h3, 1]]),
-      _cellState: Object.create(null),
-    };
-    const result = _isVisible(map, h3, h3);
-    expect(typeof result).toBe('boolean');
-  });
-
-  it('should handle cells with _frictionObj', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const map = {
-      _frictionObj: { [h3]: 1 },
-      _cellState: Object.create(null),
-    };
-    const result = _isVisible(map, h3, h3);
-    expect(typeof result).toBe('boolean');
-  });
-
-  it('should handle cells with _cellState', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const map = {
-      _frictionObj: { [h3]: 1 },
-      _cellState: { [h3]: { friction: 1 } },
-    };
-    const result = _isVisible(map, h3, h3);
-    expect(typeof result).toBe('boolean');
-  });
-
-  it('should handle Map frictionLookup', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const frictionMap = new Map([[h3, 1]]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-    };
-    const result = _isVisible(map, h3, h3);
-    expect(typeof result).toBe('boolean');
-  });
-});
-
-describe('_getBearing', () => {
-  it('should return a bearing between 0 and 360', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const bearing = _getBearing(h3, h3);
-    expect(typeof bearing).toBe('number');
-    expect(bearing).toBeGreaterThanOrEqual(0);
-    expect(bearing).toBeLessThan(360);
-  });
-
-  it('should return 0 when start equals end', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const bearing = _getBearing(h3, h3);
-    expect(bearing).toBe(0);
   });
 });
 
@@ -752,26 +637,6 @@ describe('_getBestNextStep', () => {
     const map = {
       _frictionObj: frictionObj,
       _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = _getBestNextStep(map, h3, {}, 0);
-    expect(result === null || typeof result === 'string').toBe(true);
-  });
-
-  it('should use _cellState friction when available', () => {
-    const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const neighbors = gridDisk(h3, 1);
-    const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    const cellState = Object.create(null);
-    cellState[h3] = { friction: 1 };
-    cellState[neighborCell] = { friction: 1 };
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: cellState,
       _affordanceObj: Object.create(null),
     };
     const result = _getBestNextStep(map, h3, {}, 0);

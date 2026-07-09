@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeVisibilityBearingCSRIndexed } from '../src/helpers/spatialTasks.js';
-import { reconstructVisibilityBearing } from '../src/helpers/grid.js';
+import { reconstructVisibilityBearing } from '../src/helpers/bearingIndex.js';
 import { latLngToCell, gridDisk, cellToLatLng } from 'h3-js';
 
 // Correct great-circle bearing (matches the worker's formula after the P5 bearing

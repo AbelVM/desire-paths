@@ -30,7 +30,6 @@ export const AFFORDANCE = {
 export const WEIGHTS = {
   // Set to the paper-recommended weighted preference ratio (wa:wd = 1:4)
   w_a: 1.0, // Affordance weight
-  w_f: 1.0, // Friction weight (reserved for future use)
   w_d: 4.0, // Distance penalty weight (favours shorter detours)
   w_theta: 0.6, // Angular penalty: discourages large steering deviations
 };

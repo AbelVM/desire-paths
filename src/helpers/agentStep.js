@@ -10,9 +10,9 @@ import { getGraphNeighborIndicesR1 } from './dijkstra.js';
 // corner. Two diagonal H3 cells share exactly one common neighbor; if that
 // neighbor is impassable the agent must walk around the corner rather than
 // cutting across it. `getDisk(center, r)` is a stable cache accessor and
-// `cellState`/`frictionLookup` are the friction sources (cellState wins when a
-// per-cell entry exists), so this stays agnostic to each kernel's cache home.
-export function cornersImpassable({ a, b, frictionLookup, cellState, getDisk, impassableVal }) {
+// `frictionLookup` is the friction source, so this stays agnostic to each
+// kernel's cache home.
+export function cornersImpassable({ a, b, frictionLookup, getDisk, impassableVal }) {
   const neighborsA = getDisk(a, 1);
   const neighborsB = getDisk(b, 1);
   for (let i = 0; i < neighborsA.length; i++) {
@@ -26,8 +26,7 @@ export function cornersImpassable({ a, b, frictionLookup, cellState, getDisk, im
       }
     }
     if (!isNeighbor) continue;
-    const s = cellState && cellState[c];
-    const f = s ? s.friction : frictionLookup[c];
+    const f = frictionLookup[c];
     if (typeof f !== 'undefined' && f >= impassableVal) return true;
   }
   return false;
@@ -44,7 +43,6 @@ export function resolveStepLine({
   curr,
   nextStep,
   frictionLookup,
-  cellState,
   getPathCells,
   getDisk,
   graph,
@@ -54,8 +52,7 @@ export function resolveStepLine({
   let clear = true;
   for (let i = 1; i < straight.length; i++) {
     const c = straight[i];
-    const s = cellState && cellState[c];
-    const f = s ? s.friction : frictionLookup[c];
+    const f = frictionLookup[c];
     if (typeof f === 'undefined' || f >= impassableVal) {
       clear = false;
       break;
@@ -67,7 +64,6 @@ export function resolveStepLine({
           a: straight[i - 1],
           b: c,
           frictionLookup,
-          cellState,
           getDisk,
           impassableVal,
         })
@@ -98,8 +94,7 @@ export function resolveStepLine({
     for (let i = 0; i < count; i++) {
       const m = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
       if (m === node || seen[m]) continue;
-      const ms = cellState && cellState[m];
-      const mf = ms ? ms.friction : frictionLookup[m];
+      const mf = frictionLookup[m];
       if (typeof mf === 'undefined' || mf >= impassableVal) continue;
       seen[m] = true;
       prev[m] = node;

@@ -1706,7 +1706,6 @@ describe('main.js', () => {
       dm._frictionObj = { hex1: 1 };
       dm._affordanceObj = { hex1: 0.5 };
       dm._multiFrictionObj = { hex1: { '0': 1 } };
-      dm._cellState = { hex1: {} };
       dm._computePathCacheObj = {};
       dm._computePathCacheOrder = [];
       dm._computeDiskCacheObj = {};
@@ -1891,9 +1890,6 @@ describe('main.js', () => {
 
       dm._multiFrictionObj = { hex1: { '0': 1 } };
       expect(dm._multiFrictionObj).toEqual({ hex1: { '0': 1 } });
-
-      dm._cellState = { hex1: { friction: 1 } };
-      expect(dm._cellState).toEqual({ hex1: { friction: 1 } });
 
       dm._computePathCacheObj = { a: { b: ['c'] } };
       expect(dm._computePathCacheObj).toEqual({ a: { b: ['c'] } });

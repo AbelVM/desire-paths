@@ -904,7 +904,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._frictionObj = undefined;
     map._affordanceObj = undefined;
     map._multiFrictionObj = undefined;
-    map._cellState = undefined;
     map._perTargetContribs = undefined;
     map._assignedCounts = undefined;
     map._targetWeights = undefined;

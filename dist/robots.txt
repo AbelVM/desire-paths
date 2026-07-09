@@ -1,9 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /tmp/
-Disallow: /coverage/
-Disallow: /dist/
-Disallow: /node_modules/
-Disallow: /.git/
-
-Sitemap: https://abelvm.github.io/desire-paths/sitemap.xml

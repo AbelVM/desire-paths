@@ -86,7 +86,6 @@ let _knScores = null;
 let _knGetFriction = null;
 let _knGetAffordance = null;
 let _knFrictionLookup = null;
-let _knCellState = null;
 let _knIsVisible = null;
 let _knVisibilityMap = null;
 let _knIsVisibleFriction = null;
@@ -187,7 +186,6 @@ function getGradientDirection(
   curr,
   gradientObj,
   frictionLookup,
-  cellState,
   bearingMap,
   graph
 ) {
@@ -208,9 +206,7 @@ function getGradientDirection(
   for (let i = 0; i < count; i++) {
     const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
     if (n === curr) continue;
-    let f;
-    if (cellState && cellState[n]) f = cellState[n].friction;
-    else f = frictionLookup[n];
+    const f = frictionLookup[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
     const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
@@ -231,7 +227,6 @@ function getBestNextStep(
   simulationParams,
   frictionLookup,
   affordanceLookup,
-  cellState,
   visibilityMap,
   accumulatedFootprints,
   bearingMap,
@@ -273,21 +268,10 @@ function getBestNextStep(
   if (gNsArr) gNsArr.length = 0;
 
   // Cache the friction/affordance closures (stable per batch) on module state.
-  if (!_knGetFriction || _knFrictionLookup !== frictionLookup || _knCellState !== cellState) {
-    _knGetFriction = cellState
-      ? (n) => {
-          const s = cellState[n];
-          return s ? s.friction : undefined;
-        }
-      : (n) => frictionLookup[n];
-    _knGetAffordance = cellState
-      ? (n) => {
-          const s = cellState[n];
-          return s ? (s.affordance ?? 0.1) : 0.1;
-        }
-      : (n) => affordanceLookup?.[n] ?? 0.1;
+  if (!_knGetFriction || _knFrictionLookup !== frictionLookup) {
+    _knGetFriction = (n) => frictionLookup[n];
+    _knGetAffordance = (n) => affordanceLookup?.[n] ?? 0.1;
     _knFrictionLookup = frictionLookup;
-    _knCellState = cellState;
   }
   const getFriction = _knGetFriction;
   const getAffordance = _knGetAffordance;
@@ -442,7 +426,7 @@ function getBestNextStep(
 const _knRslGetPathCells = (a, b) => _getCachedPathCells(a, b);
 let _knRslGetDisk = null;
 
-function _resolveStepLine(curr, nextStep, frictionLookup, cellState, graph) {
+function _resolveStepLine(curr, nextStep, frictionLookup, graph) {
   if (!_knRslGetDisk) {
     // A single disk accessor covers both the BFS expansion and the corner check.
     _knRslGetDisk = (center, r) => _getCachedDisk(center, r);
@@ -451,7 +435,6 @@ function _resolveStepLine(curr, nextStep, frictionLookup, cellState, graph) {
     curr,
     nextStep,
     frictionLookup,
-    cellState,
     getPathCells: _knRslGetPathCells,
     getDisk: _knRslGetDisk,
     graph,
@@ -487,7 +470,6 @@ function runAgentPath(
   pathDesireMap,
   frictionLookup,
   affordanceLookup,
-  cellState,
   visibilityMap,
   accumulatedFootprints,
   bearingMap,
@@ -513,7 +495,6 @@ function runAgentPath(
       simCurrent,
       destGradientObj,
       frictionLookup,
-      cellState,
       bearingMap,
       graph
     ) ?? getBearingFast(simCurrent, simTarget, bearingMap);
@@ -555,7 +536,6 @@ function runAgentPath(
       params,
       frictionLookup,
       affordanceLookup,
-      cellState,
       visibilityMap,
       accumulatedFootprints,
       bearingMap,
@@ -577,15 +557,13 @@ function runAgentPath(
       simCurrent,
       nextStep,
       frictionLookup,
-      cellState,
       graph
     );
     let hitTarget = false;
     let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
-      const stepF =
-        cellState && cellState[stepCell] ? cellState[stepCell].friction : frictionLookup[stepCell];
+      const stepF = frictionLookup[stepCell];
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);
@@ -732,7 +710,6 @@ export function computeAgentBatch({
           pathDesireMap,
           frictionLookup,
           affordanceLookup,
-          null,
           visibilityMap,
           abmFootprints,
           bearingMap,
