@@ -566,7 +566,15 @@ function runAgentPath(
   bearingMap,
   originDestDistances,
   simulationParams,
-  graph
+  graph,
+  // `nodeSet` holds every origin/destination cell in the plan. The
+  // `originDestDistances` table is keyed ONLY by node pairs, so the per-tick
+  // `simCurrent + '::' + destCell` lookup can only ever return a number when
+  // `simCurrent` is itself a node. Gating the lookup on `nodeSet.has(simCurrent)`
+  // is therefore byte-identical to the old "always concat + read" behavior but
+  // skips the string allocation + object read for the ~99% of ticks spent on
+  // intermediate cells (millions of saved allocations per city-scale run).
+  nodeSet
 ) {
   const params = simulationParams || SIMULATION_PARAMS;
   let simCurrent = originCell;
@@ -592,9 +600,14 @@ function runAgentPath(
   for (let tick = 0; tick < maxTicks; tick++) {
     // Update dynamic distance to target — the precomputed origin-to-destination
     // distance becomes stale if the agent takes a detour around obstacles.
+    // The table is keyed only by node pairs, so the lookup can only hit when
+    // `simCurrent` is a node; gating on `nodeSet` skips the per-tick string
+    // concat + object read for intermediate cells (byte-identical, see header).
     if (originDestDistances) {
-      const currentDist = originDestDistances[simCurrent + '::' + destCell];
-      if (typeof currentDist === 'number') distToTarget = currentDist;
+      if (nodeSet && nodeSet.has(simCurrent)) {
+        const currentDist = originDestDistances[simCurrent + '::' + destCell];
+        if (typeof currentDist === 'number') distToTarget = currentDist;
+      }
     } else {
       distToTarget = gridDistance(simCurrent, simTarget);
     }
@@ -690,6 +703,7 @@ export function computeAgentBatch({
   // silently falls back to the slow trig / path-cell path.
   visibilityBearingCSR = null,
   viewHexes = null,
+  r1Adjacency = null,
 } = {}) {
   const simulationParams = {
     ...SIMULATION_PARAMS,
@@ -714,13 +728,27 @@ export function computeAgentBatch({
   // this exact object, so this is a cache hit when the module instance is shared
   // and at most one gridDisk pass otherwise. The sim path reuses it for every
   // distance-1 neighbor lookup instead of calling gridDisk(cell, 1) repeatedly.
-  const graph = getGradientGraph(frictionLookup);
+  // M3: when the shared r=1 CSR (+ AOI cell order) is supplied, filter it instead
+  // of running a per-cell gridDisk pass.
+  const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
 
   // Total agents for progress reporting
   let totalAgents = 0;
   for (let i = 0; i < plan.length; i++) {
     const assigned = plan[i].assigned || [];
     for (let j = 0; j < assigned.length; j++) totalAgents += assigned[j] || 0;
+  }
+
+  // Node set (every origin + destination in the plan) for the byte-identical
+  // per-tick OD-distance lookup gate in runAgentPath (see its header).
+  const nodeSet = new Set();
+  for (let p = 0; p < plan.length; p++) {
+    const entry = plan[p];
+    if (entry.originCell) nodeSet.add(entry.originCell);
+    const dcs = entry.destCandidates || [];
+    for (let idx = 0; idx < dcs.length; idx++) {
+      if (dcs[idx] && dcs[idx].dest) nodeSet.add(dcs[idx].dest);
+    }
   }
 
   try {
@@ -788,7 +816,8 @@ export function computeAgentBatch({
           bearingMap,
           originDestDistances,
           simulationParams,
-          graph
+          graph,
+          nodeSet
         );
 
         for (let k = 0; k < simPath.length; k++) {

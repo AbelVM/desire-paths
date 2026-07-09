@@ -211,44 +211,21 @@ function getPathScore(pathObj, h) {
   return pathObj[h] || 0;
 }
 
-// Defensive one-time fallbacks: build the canonical lookup from the raw maps
-// and cache it on state so subsequent calls reuse it instead of re-copying.
-// In production these objects are always built before updateLayers is called
-// (grid.js / compute.js), so the fallback is rarely hit.
-function _buildFrictionObj(state) {
-  const obj = Object.create(null);
-  const src = state.cellFrictionMap;
-  if (src && typeof src.entries === 'function') {
-    for (const [k, v] of src.entries()) obj[k] = v;
-  } else if (src) {
-    for (const k in src) obj[k] = src[k];
-  }
-  state._frictionObj = obj;
-  return obj;
-}
-
-function _buildAffordanceObj(state) {
-  const obj = Object.create(null);
-  const src = state.affordanceMap;
-  if (src && typeof src.entries === 'function') {
-    for (const [k, v] of src.entries()) obj[k] = v;
-  } else if (state._affordanceObj) {
-    for (const k in state._affordanceObj) obj[k] = state._affordanceObj[k];
-  }
-  state._affordanceObj = obj;
-  return obj;
-}
-
 export function updateLayers(state, mapInstance) {
   const viewHexes = mapInstance.getHexes?.() ?? Array.from(state.cellFrictionMap?.keys() ?? []);
 
-  // Use the canonical lookup objects directly instead of re-copying the full
-  // cell maps on every call. `_frictionObj` / `_affordanceObj` are built once
-  // per mapping/sim run (grid.js) and mutated in place; `pathDesireScores` is
-  // the live score map/object. Re-copying them here was O(N) over ~500k cells
-  // on every updateLayers call — including the per-frame friction toggle loop.
-  const frictionObj = state._frictionObj || _buildFrictionObj(state);
-  const affordanceObj = state._affordanceObj || _buildAffordanceObj(state);
+  // B: the Maps are the single source of truth at mapping/render time — we no
+  // longer keep a full plain-object copy (`_frictionObj`/`_affordanceObj`) of
+  // them just for the renderer. Friction is read straight from `cellFrictionMap`
+  // (it is immutable during a sim; draw-obstacle edits write the Map too).
+  // Affordance is read from the live sim working copy `_affordanceObj` when a sim
+  // has run (it holds the accumulated wear that `affordanceMap` — a pre-sim
+  // snapshot — does not), otherwise from `affordanceMap`. Both sources are read
+  // per-cell below, so we never materialize a second N-entry container here.
+  const frictionMap = state.cellFrictionMap;
+  const affObj = state._affordanceObj;
+  const useAffObj = !!affObj;
+  const affMap = state.affordanceMap;
   const pathObj = state.pathDesireScores; // Map or plain object
 
   // Only rebuild the per-view flat/flow arrays when the underlying data or the
@@ -294,9 +271,9 @@ export function updateLayers(state, mapInstance) {
       const s = getPathScore(pathObj, h);
       const entry = state._flatPool[flatCount++];
       entry.hex = h;
-      entry.f = frictionObj[h] ?? 0;
+      entry.f = (frictionMap ? frictionMap.get(h) : undefined) ?? 0;
       entry.s = s;
-      entry.a = affordanceObj[h] ?? 0.1;
+      entry.a = (useAffObj ? affObj[h] : affMap?.get(h)) ?? 0.1;
       if (s > 0) {
         while (state._flowPool.length < flowCount + 1) {
           state._flowPool.push({ hex: '', f: 0, s: 0, a: 0.1 });
@@ -405,14 +382,12 @@ export function buildSimulationGeoJSON(state, mapInstance) {
     if (!score) continue;
 
     const boundary = cellToBoundary(cell, true);
-    const frictionObj = state._frictionObj || {};
-    const affordanceObj = state._affordanceObj || {};
-    const friction =
-      typeof frictionObj[cell] === 'number'
-        ? frictionObj[cell]
-        : (state.cellFrictionMap?.get(cell) ?? 0);
+    // Friction: the Map is canonical. Affordance: prefer the live sim working
+    // copy `_affordanceObj` (accumulated wear) when present, else the Map.
+    const affordanceObj = state._affordanceObj;
+    const friction = state.cellFrictionMap?.get(cell) ?? 0;
     const affordance =
-      typeof affordanceObj[cell] === 'number'
+      affordanceObj && typeof affordanceObj[cell] === 'number'
         ? affordanceObj[cell]
         : (state.affordanceMap?.get(cell) ?? 0);
 

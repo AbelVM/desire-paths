@@ -10,6 +10,11 @@ import {
 } from '../src/helpers/spatialTasks.js';
 import { runVisibilityBearingTask } from '../src/helpers/spatialWorker.js';
 import { reconstructVisibilityBearing } from '../src/helpers/grid.js';
+import {
+  getGradientGraph,
+  invalidateGradientGraph,
+  computeDijkstra,
+} from '../src/helpers/dijkstra.js';
 import { FRICTION_COSTS, AFFORDANCE } from '../src/helpers/constants.js';
 
 // A small AOI: a center cell plus its 6 ring-1 neighbors.
@@ -45,6 +50,75 @@ describe('buildR1Adjacency', () => {
       const expected = gridDisk(cell, 1).filter((c) => c !== cell && idxOf[c] !== undefined);
       expect(nbrs.sort()).toEqual(expected.sort());
     }
+  });
+});
+
+describe('getGradientGraph M3 r1Adjacency fast path', () => {
+  const frictionEntries = Object.create(null);
+  for (const c of viewHexes) frictionEntries[c] = FRICTION_COSTS.PAVEMENT;
+  // Make one cell impassable so the passable-filtering paths must agree.
+  frictionEntries[viewHexes[2]] = FRICTION_COSTS.IMPASSABLE;
+
+  it('builds a graph byte-identical to the gridDisk path (same indices + CSR)', () => {
+    // gridDisk path (no r1Adjacency).
+    invalidateGradientGraph();
+    const gDisk = getGradientGraph(frictionEntries);
+    const snapDisk = {
+      V: gDisk.V,
+      idxToCell: gDisk.idxToCell.slice(),
+      adjOffsets: Array.from(gDisk.adjOffsets),
+      adjNeighbors: Array.from(gDisk.adjNeighbors),
+      frictionArr: Array.from(gDisk.frictionArr),
+    };
+
+    // r1Adjacency fast path.
+    invalidateGradientGraph();
+    const r1 = buildR1Adjacency({ viewHexes });
+    const gR1 = getGradientGraph(frictionEntries, r1, viewHexes);
+
+    expect(gR1.V).toBe(snapDisk.V);
+    expect(gR1.idxToCell).toEqual(snapDisk.idxToCell);
+    expect(Array.from(gR1.adjOffsets)).toEqual(snapDisk.adjOffsets);
+    expect(Array.from(gR1.frictionArr)).toEqual(snapDisk.frictionArr);
+    // Neighbor *order* may differ (gridDisk vs gridRingUnsafe ordering), but the
+    // per-cell neighbor SET must be identical — Dijkstra is order-independent.
+    const nbrSets = (g) => {
+      const sets = [];
+      for (let i = 0; i < g.V; i++) {
+        const s = g.adjOffsets[i];
+        const e = g.adjOffsets[i + 1];
+        const set = [];
+        for (let x = s; x < e; x++) set.push(g.adjNeighbors[x]);
+        sets.push(set.sort((a, b) => a - b));
+      }
+      return sets;
+    };
+    expect(nbrSets(gR1)).toEqual(nbrSets(gDisk));
+  });
+
+  it('produces identical Dijkstra gradients from both graph paths', () => {
+    const target = viewHexes[0];
+    invalidateGradientGraph();
+    const gDisk = getGradientGraph(frictionEntries);
+    const distDisk = computeDijkstra(target, frictionEntries, null, gDisk);
+
+    invalidateGradientGraph();
+    const r1 = buildR1Adjacency({ viewHexes });
+    const gR1 = getGradientGraph(frictionEntries, r1, viewHexes);
+    const distR1 = computeDijkstra(target, frictionEntries, null, gR1);
+
+    expect(Array.from(distR1)).toEqual(Array.from(distDisk));
+  });
+
+  it('ignores the r1 path when N does not match viewHexes (falls back to gridDisk)', () => {
+    invalidateGradientGraph();
+    const gDisk = getGradientGraph(frictionEntries);
+    const diskOffsets = Array.from(gDisk.adjOffsets);
+    invalidateGradientGraph();
+    // Mismatched N → useR1 is false → gridDisk path, still correct.
+    const bogus = { N: 999, offsets: new Int32Array(2), neighbors: new Int32Array(0) };
+    const g = getGradientGraph(frictionEntries, bogus, viewHexes);
+    expect(Array.from(g.adjOffsets)).toEqual(diskOffsets);
   });
 });
 

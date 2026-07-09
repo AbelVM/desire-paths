@@ -181,11 +181,13 @@ export function normalizeFrictionEntries(source) {
   return lookup;
 }
 
-function computeDijkstraGradientForLookup(targetCell, frictionLookup) {
+function computeDijkstraGradientForLookup(targetCell, frictionLookup, r1Adjacency, viewHexes) {
   // Build the gradient graph (CSR adjacency) once per friction source and cache
   // it, so every gradient Dijkstra reuses the mapping-stage neighbor topology
-  // instead of recomputing gridDisk(cell, 1) per visited cell.
-  const graph = getGradientGraph(frictionLookup);
+  // instead of recomputing gridDisk(cell, 1) per visited cell. M3: when the
+  // shared r=1 CSR (+ AOI cell order) is supplied, filter it instead of running a
+  // per-cell gridDisk pass.
+  const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
   return computeDijkstra(targetCell, frictionLookup, null, graph);
 }
 
@@ -193,7 +195,7 @@ export function computeDijkstraGradientSnapshot(targetCell, frictionSource) {
   return computeDijkstraGradientForLookup(targetCell, normalizeFrictionEntries(frictionSource));
 }
 
-export function computeGradientBatch({ frictionEntries, targets }) {
+export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, viewHexes }) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const gradients = Object.create(null);
 
@@ -201,7 +203,12 @@ export function computeGradientBatch({ frictionEntries, targets }) {
   const emitEvery = Math.max(1, Math.floor(total / 20));
   for (let i = 0; i < total; i++) {
     const targetCell = targets[i];
-    gradients[targetCell] = computeDijkstraGradientForLookup(targetCell, frictionLookup);
+    gradients[targetCell] = computeDijkstraGradientForLookup(
+      targetCell,
+      frictionLookup,
+      r1Adjacency,
+      viewHexes
+    );
     if (i % emitEvery === 0) emitProgress('gradient-batch', i + 1, total);
   }
   if (total > 0) emitProgress('gradient-batch', total, total);

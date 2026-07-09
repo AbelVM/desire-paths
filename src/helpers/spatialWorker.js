@@ -428,7 +428,7 @@ function runWorker(kind, payload) {
   );
 }
 
-export async function runGradientBatches(targets, frictionSource) {
+export async function runGradientBatches(targets, frictionSource, options = {}) {
   if (!targets || targets.length === 0) return Object.create(null);
 
   // Skip normalization when source is already a plain object (from computeDesirePaths snapshots)
@@ -439,12 +439,19 @@ export async function runGradientBatches(targets, frictionSource) {
 
   // Guard: empty friction source means no walkable cells; return empty gradients
   if (Object.keys(frictionEntries).length === 0) return Object.create(null);
+  // M3: shared r=1 CSR (+ AOI cell order) lets computeGradientBatch's
+  // getGradientGraph filter it instead of running a per-cell gridDisk pass.
+  const r1Adjacency = options?.r1Adjacency || null;
+  const viewHexes = options?.viewHexes || null;
   const workerCount = Math.min(MAX_WORKERS, targets.length);
-  if (workerCount <= 1) return runLocally('gradient-batch', { targets, frictionEntries });
+  if (workerCount <= 1)
+    return runLocally('gradient-batch', { targets, frictionEntries, r1Adjacency, viewHexes });
 
   const chunks = splitIntoChunks(targets, workerCount);
   const results = await Promise.all(
-    chunks.map((chunk) => runWorker('gradient-batch', { targets: chunk, frictionEntries }))
+    chunks.map((chunk) =>
+      runWorker('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes })
+    )
   );
 
   const merged = Object.create(null);
@@ -562,7 +569,13 @@ export async function runAgentBatches(
   }
   // Build the gradient graph from the (normalized) friction source so the
   // reachability check below and the worker's own graph agree on cellToIdx.
-  const gradientGraph = getGradientGraph(frictionEntries);
+  // M3: pass the shared r=1 CSR (+ AOI cell order) so this build filters it
+  // instead of running a per-cell gridDisk pass.
+  const gradientGraph = getGradientGraph(
+    frictionEntries,
+    options?.r1Adjacency || null,
+    options?.viewHexes || null
+  );
 
   // Diagnostic: ensure gradients required by the plan are present. If some are
   // missing, compute them here as a fallback to avoid races where callers
@@ -589,7 +602,10 @@ export async function runAgentBatches(
           );
       } catch (_e) {}
       // Compute missing gradients (uses same worker pool / normalization as callers)
-      const newGrads = await runGradientBatches(Array.from(missingTargets), frictionSource);
+      const newGrads = await runGradientBatches(Array.from(missingTargets), frictionSource, {
+        r1Adjacency: options?.r1Adjacency || null,
+        viewHexes: options?.viewHexes || null,
+      });
       for (const k in newGrads) gradientsObj[k] = newGrads[k];
       // Re-check and log any that are still missing
       const stillMissing = [];
@@ -652,6 +668,7 @@ export async function runAgentBatches(
     bearingMap: useWorker ? null : bearingMap,
     visibilityBearingCSR: options?.visibilityBearingCSR || null,
     viewHexes: options?.viewHexes || null,
+    r1Adjacency: options?.r1Adjacency || null,
   };
 
   if (!useWorker) {

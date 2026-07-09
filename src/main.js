@@ -71,6 +71,7 @@ class DesireMap {
       '_targetWeights',
       '_mappingGeneration',
       '_frictionSnapshotGen',
+      '_affordanceSnapshotGen',
       '_multiFrictionSnapshotGen',
       '_cellStateMappingGen',
       '_precomputedVisibility',

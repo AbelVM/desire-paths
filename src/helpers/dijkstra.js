@@ -64,7 +64,22 @@ export function invalidateGradientGraph() {
   _graphCacheKey = null;
 }
 
-export function getGradientGraph(cellSource) {
+/**
+ * Build (or return the cached) gradient graph for a friction source.
+ *
+ * @param {Map|Object} cellSource - friction source (Map or plain object).
+ * @param {Object} [r1Adjacency] - optional shared r=1 CSR from `buildR1Adjacency`
+ *   ({ N, offsets, neighbors }, viewHexes-indexed). When supplied together with
+ *   `viewHexes` (and `r1Adjacency.N === viewHexes.length`), the CSR adjacency is
+ *   built by FILTERING this prebuilt adjacency to passable cells instead of
+ *   running a per-cell `gridDisk` pass (M3). This removes the main-thread H3
+ *   V-pass (the biggest remaining UI block at city scale) and the worker's
+ *   duplicate H3 pass. The output is byte-identical to the `gridDisk` path: the
+ *   passable cell list is sorted the same way, so `cellToIdx`/`idxToCell` — and
+ *   therefore every M1 gradient index — are unchanged.
+ * @param {string[]} [viewHexes] - AOI cell order matching `r1Adjacency` indices.
+ */
+export function getGradientGraph(cellSource, r1Adjacency, viewHexes) {
   if (_graphCache && _graphCacheKey === cellSource) return _graphCache;
 
   const isMap = typeof cellSource !== 'undefined' && typeof cellSource.entries === 'function';
@@ -110,28 +125,64 @@ export function getGradientGraph(cellSource) {
     if (w > frictionMaxC) frictionMaxC = w;
   }
 
-  // CSR adjacency built in a SINGLE `gridDisk` pass into one flat temp buffer,
-  // then prefix-summed + compacted. The prior two-pass form called `gridDisk`
-  // twice per cell; this halves that cost. It holds only ONE contiguous
-  // `Int32Array(6V)` (not V intermediate arrays) — the V-arrays shape is what
-  // previously triggered non-deterministic memory corruption at city scale
-  // (V ~ 5e5), where the prefix-sum `adjOffsets` came back garbage and broke
-  // every consumer (gradient Dijkstra, visibility BFS). A single flat buffer is
-  // correct at any V. The temp + `deg` arrays are freed once `adjNeighbors` is
-  // built (the graph is cached per source, so this is a one-time cost).
+  // CSR adjacency built into one flat temp buffer, then prefix-summed +
+  // compacted. It holds only ONE contiguous `Int32Array(6V)` (not V intermediate
+  // arrays) — the V-arrays shape is what previously triggered non-deterministic
+  // memory corruption at city scale (V ~ 5e5), where the prefix-sum `adjOffsets`
+  // came back garbage and broke every consumer (gradient Dijkstra, visibility
+  // BFS). A single flat buffer is correct at any V. The temp + `deg` arrays are
+  // freed once `adjNeighbors` is built (the graph is cached per source, so this
+  // is a one-time cost).
+  //
+  // M3: when a shared `r1Adjacency` (viewHexes-indexed r=1 CSR from
+  // `buildR1Adjacency`, already computed once per mapping generation) is
+  // available, filter it to passable cells instead of running a per-cell
+  // `gridDisk` pass. `r1Adjacency` neighbors are viewHexes indices, so map each
+  // through `viewHexes[..]` back to a cell id and then to this graph's sorted
+  // `cellToIdx`. The resulting adjacency is identical to the `gridDisk` path
+  // (same passable, in-AOI, center-excluded neighbor set) — only the H3 calls
+  // are avoided.
+  const useR1 =
+    r1Adjacency &&
+    r1Adjacency.offsets &&
+    r1Adjacency.neighbors &&
+    Array.isArray(viewHexes) &&
+    r1Adjacency.N === viewHexes.length;
+
   const temp = new Int32Array(V * 6);
   const deg = new Int32Array(V);
   let tempPos = 0;
-  for (let i = 0; i < V; i++) {
-    const cell = cells[i];
-    const disk = gridDisk(cell, 1);
-    for (let k = 0; k < disk.length; k++) {
-      const nb = disk[k];
-      if (nb === cell) continue; // skip the center
-      const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
-      if (j !== undefined) {
-        temp[tempPos++] = j; // keep only passable, in-AOI neighbors
-        deg[i]++;
+  if (useR1) {
+    // viewHexes cell -> viewHexes index (cheap O(N) loop, no H3).
+    const vhIdx = Object.create(null);
+    for (let i = 0; i < viewHexes.length; i++) vhIdx[viewHexes[i]] = i;
+    const r1Off = r1Adjacency.offsets;
+    const r1Nb = r1Adjacency.neighbors;
+    for (let i = 0; i < V; i++) {
+      const gi = vhIdx[cells[i]];
+      if (gi === undefined) continue; // passable cell not in viewHexes (defensive)
+      const s = r1Off[gi];
+      const e = r1Off[gi + 1];
+      for (let x = s; x < e; x++) {
+        const j = cellToIdx[viewHexes[r1Nb[x]]]; // undefined for impassable / out-of-AOI
+        if (j !== undefined) {
+          temp[tempPos++] = j;
+          deg[i]++;
+        }
+      }
+    }
+  } else {
+    for (let i = 0; i < V; i++) {
+      const cell = cells[i];
+      const disk = gridDisk(cell, 1);
+      for (let k = 0; k < disk.length; k++) {
+        const nb = disk[k];
+        if (nb === cell) continue; // skip the center
+        const j = cellToIdx[nb]; // undefined for impassable / out-of-AOI neighbors
+        if (j !== undefined) {
+          temp[tempPos++] = j; // keep only passable, in-AOI neighbors
+          deg[i]++;
+        }
       }
     }
   }

@@ -413,7 +413,7 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   if (!gradientObj) return null;
   // Build the gradient graph once; its cellToIdx is what indexes the typed-array
   // gradient (M1). The graph is cached per friction source, so this is cheap.
-  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   const gCurr = gradientGet(gradientObj, curr, graph);
   if (typeof gCurr !== 'number') return null;
 
@@ -469,7 +469,23 @@ function runSingleAgentPath(
   let simCurrent = originCell;
   const simTarget = destCell;
 
-  // Precomputed distance check — eliminates per-tick gridDistance H3 call
+  // Precomputed distance check — eliminates per-tick gridDistance H3 call.
+  // The table is keyed only by node pairs, so the per-tick
+  // `simCurrent + '::' + destCell` lookup can only hit when `simCurrent` is a
+  // node. Build a node set once (not per tick) and gate the lookup on it:
+  // byte-identical to the old "always concat + read" path, but skips the string
+  // allocation + object read for the intermediate cells (the vast majority).
+  let nodeSet = null;
+  if (originDestDistances) {
+    nodeSet = new Set();
+    for (const key in originDestDistances) {
+      const sep = key.indexOf('::');
+      if (sep > 0) {
+        nodeSet.add(key.slice(0, sep));
+        nodeSet.add(key.slice(sep + 2));
+      }
+    }
+  }
   let distToTarget = 0;
   if (originDestDistances) {
     const d = originDestDistances[originCell + '::' + destCell];
@@ -491,9 +507,14 @@ function runSingleAgentPath(
   for (let tick = 0; tick < maxTicks; tick++) {
     // Update dynamic distance to target — the precomputed origin-to-destination
     // distance becomes stale if the agent takes a detour around obstacles.
+    // Gated on `nodeSet` (byte-identical: the table is node-only, so the lookup
+    // can only hit when `simCurrent` is a node) to skip the per-tick string
+    // concat + object read for intermediate cells.
     if (originDestDistances) {
-      const currentDist = originDestDistances[simCurrent + '::' + destCell];
-      if (typeof currentDist === 'number') distToTarget = currentDist;
+      if (nodeSet && nodeSet.has(simCurrent)) {
+        const currentDist = originDestDistances[simCurrent + '::' + destCell];
+        if (typeof currentDist === 'number') distToTarget = currentDist;
+      }
     } else {
       distToTarget = gridDistance(simCurrent, simTarget);
     }
@@ -553,7 +574,7 @@ function runSingleAgentPath(
 }
 
 function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
-  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   const destCandidates = [];
   let destWeightSum = 0;
   for (let d = 0; d < destinations.length; d++) {
@@ -702,6 +723,18 @@ export async function computeDesirePaths(state, mapInstance) {
     for (const [k, v] of state.cellFrictionMap) state._frictionObj[k] = v;
     state._frictionSnapshotGen = mappingGen;
   }
+  // B: `_affordanceObj` is no longer pre-built by grid.js — materialize it lazily
+  // here from `affordanceMap` (the single source of truth at mapping time), gated
+  // on the mapping generation like `_frictionObj`. Once built it becomes the live
+  // working copy for the run: `updateAffordance`/`decayAffordance` and the wear
+  // pass below mutate it in place, so it must exist before the decay loop. It is
+  // dropped by clearComputeCaches on the next remap (bumping mappingGen), so a
+  // fresh remap always reseeds it from the rebuilt `affordanceMap`.
+  if (!state._affordanceObj || state._affordanceSnapshotGen !== mappingGen) {
+    state._affordanceObj = Object.create(null);
+    for (const [k, v] of state.affordanceMap) state._affordanceObj[k] = v;
+    state._affordanceSnapshotGen = mappingGen;
+  }
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same cell→layer-map
   // references), not a second copy — this avoids holding N object references in
   // a separate plain-object container at steady state.
@@ -773,7 +806,8 @@ export async function computeDesirePaths(state, mapInstance) {
 
         const gradients = await runGradientBatches(
           missingDestinations,
-          state._frictionObj || state.cellFrictionMap
+          state._frictionObj || state.cellFrictionMap,
+          { r1Adjacency: state._r1Adjacency || null, viewHexes: state._viewHexes || null }
         );
         for (const d of missingDestinations) {
           state._gradientCacheObj[d] = gradients[d] || Object.create(null);
@@ -867,7 +901,7 @@ export async function computeDesirePaths(state, mapInstance) {
       });
   } catch (_e) {}
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
-  const planGraph = getGradientGraph(state.cellFrictionMap);
+  const planGraph = getGradientGraph(state.cellFrictionMap, state._r1Adjacency, state._viewHexes);
   for (let pi = 0; pi < plan.length; pi++) {
     const originCell = plan[pi].originCell;
     const destCandidates = plan[pi].destCandidates || [];
@@ -933,6 +967,9 @@ export async function computeDesirePaths(state, mapInstance) {
         // drops their function traps, silently degrading to the slow fallback).
         visibilityBearingCSR: state._visibilityBearingCSR || null,
         viewHexes: state._viewHexes || null,
+        // M3: ship the shared r=1 CSR so the agent worker's getGradientGraph
+        // filters it instead of running a per-cell gridDisk pass.
+        r1Adjacency: state._r1Adjacency || null,
         simulationParams: simParams,
       }
     );
@@ -1035,7 +1072,7 @@ function getBestNextStep(
   const sLatLng = _getCachedLatLng(curr);
   // Build the gradient graph once (cached per friction source) so the typed-array
   // gradient (M1) can be indexed by cellToIdx. Cheap after the first call.
-  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   const gradientLookup = gradient ? (n) => gradientGet(gradient, n, graph) : null;
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
@@ -1183,7 +1220,7 @@ function getBestNextStep(
   if (candCount === 0) {
     // depth=1 reuses the canonical graph's r=1 adjacency (CSR indices); deeper
     // rings fall back to the disk cache (the graph only encodes distance-1 edges).
-    const graph = getGradientGraph(ctx.cellFrictionMap);
+    const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
     const idxToCell = graph.idxToCell;
     for (let depth = 1; depth <= 3; depth++) {
       const nbrIdxs = depth === 1 ? getGraphNeighborIndicesR1(graph, curr) : null;
@@ -1338,7 +1375,7 @@ function computeDijkstraGradient(ctx, targetCell) {
   // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
   // cellFrictionMap reference. Topology is static per mapping generation; only
   // the per-cell friction (which can change via emergent wear) is rebuilt.
-  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   return computeDijkstra(targetCell, getFriction, null, graph);
 }
 
@@ -1397,7 +1434,7 @@ function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
     }
     // Reuse the canonical graph's r=1 adjacency (CSR indices) for the BFS
     // expansion; map neighbor indices back to cell ids via `graph.idxToCell`.
-    const graph = getGradientGraph(ctx.cellFrictionMap);
+    const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
     const nbrIdxs = getGraphNeighborIndicesR1(graph, node);
     const idxToCell = graph.idxToCell;
     for (let i = 0; i < nbrIdxs.length; i++) {
@@ -1650,7 +1687,7 @@ export function clearGradientCache(ctx) {
 
 // --- Incremental assignment & contribution helpers ---
 function _computeAssignedCounts(ctx) {
-  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   const agentsPerWeightUnit =
     ctx.simulationParams?.agentsPerWeightUnit ?? SIMULATION_PARAMS.agentsPerWeightUnit;
   const destinations = Object.keys(ctx.simulationNodes).filter((k) =>

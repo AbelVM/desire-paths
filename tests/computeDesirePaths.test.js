@@ -318,6 +318,9 @@ describe('computeDesirePaths regression', () => {
       ctx._frictionObj[cell] = FRICTION_COSTS.LIGHT_PARK;
       ctx.cellFrictionMap.set(cell, FRICTION_COSTS.LIGHT_PARK);
       ctx._affordanceObj[cell] = AFFORDANCE.LIGHT_PARK;
+      // affordanceMap is the canonical source: computeDesirePaths seeds the live
+      // `_affordanceObj` working copy from it at sim start (B).
+      ctx.affordanceMap.set(cell, AFFORDANCE.LIGHT_PARK);
     }
 
     const originCell = pathCells[0];
