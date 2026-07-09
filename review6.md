@@ -46,9 +46,9 @@ and **off-main-thread execution of the ABM loop**.
 | S3 | Sim | `getBestNextStep` (agentTasks.js) allocates 5 arrays + 4 closures + `weights` **per call** | Perf/GC | High | Med | **Implemented** |
 | S4 | Sim | `computeDijkstra` rebuilds `Float64Array(V)` friction per target → D×V transient alloc | Mem/Perf | High | Low | **Implemented** |
 | M1 | Map | Gradients stored as `destCell → {cellId: distance}` string-keyed objects → D×V string entries | Mem/Perf | High | High | **Implemented** (typed-array `Float32Array(V)` via `gradientGet`; node-verified, 387 pass) |
-| M2 | Map | Visibility BFS recomputed per-origin though visibility is symmetric | Perf | High | Med | Planned (§5) |
+| M2 | Map | Visibility BFS recomputed per-origin though visibility is symmetric | Perf | ~~High~~ Low | High | **Won't do** — premise flawed + breaks sharding (see §5 revised) |
 | M3 | Map | `getGradientGraph` CSR built on main thread during gradient batch | Perf | Med | Med | Planned (§6) |
-| M5 | Map | `state._cellState` = N per-cell objects `{friction,affordance,desire,multi}` | Mem | High | High | Planned (§7) |
+| M5 | Map | `state._cellState` = N per-cell objects `{friction,affordance,desire,multi}` | Mem | High | High | **Implemented** (eliminated; sim reads flat `_frictionObj`/`_affordanceObj`/`pathDesireScores`; byte-identical, 387 pass) |
 | S5 | Sim | `precomputeOriginDestDistances` O×D string-keyed object + `gridDistance` | Perf | Med | Low | Planned (§8) |
 | C1 | X | `gradientsObj` (D×V) structured-cloned to worker, not flattened | Mem | Med | Med | Planned (ties M1; SAB-share once M1 lands, see §3) |
 | C2 | X | Worker `_cellLatLngCacheObj` periodic full-reset discards useful entries | Mem | Low | Low | **Implemented** (Map LRU, mirrors compute.js) |
@@ -420,23 +420,45 @@ Keep the string-keyed shape behind a thin adapter during migration if needed.
 
 ---
 
-## 5. M2 — Exploit visibility symmetry in the BFS (PLANNED)
+## 5. M2 — Exploit visibility symmetry in the BFS (WON'T DO — analysis)
 
-**Problem.** `computeVisibilityBearingCSRIndexed` runs a ring BFS from *every*
-origin to `visionDepth`, recording `bearing(A→B)` for each discovered pair.
-Visibility is symmetric (line-of-sight blocked by impassable cells is symmetric),
-and `bearing(B→A) = (bearing(A→B) + 180) % 360`. The current code does 2× the
-necessary BFS work — the dominant mapping-stage cost (O(N·d²), d=`visionDepth`).
+**Original problem statement.** `computeVisibilityBearingCSRIndexed` runs a ring
+BFS from *every* origin to `visionDepth`, recording `bearing(A→B)` for each
+discovered pair. Visibility is symmetric and `bearing(B→A) = (bearing(A→B) +
+180) % 360`, so the review proposed running BFS "from only one half of the index
+pairs" and emitting both directions to halve the work.
 
-**Fix.** Run the BFS from only the origins in one half of the index pairs
-(e.g. `globalIdx[i] <= globalIdx[j]` by index), and for each discovered pair
-`(A,B)` emit both `A→B` (bearing θ) and `B→A` (bearing (θ+180)%360) into their
-respective CSR slices. The merge step (`mergeVisibilityBearingShards`) already
-lays out disjoint origin rows, so writing both rows is a local change.
-**Impact:** ~2× faster visibility/bearing at mapping time. **Risk:** the
-sort-by-index step (`sortNeighborsSlice`) must sort both emitted slices; bearing
-quantization must be applied to both θ and (θ+180)%360. Add a symmetry assertion
-to `csrBearingIndex.test.js`.
+**Why this does not work (2026-07-09 analysis).** Two independent problems:
+
+1. **The "2× BFS work" premise is false.** The CSR output is indexed by origin;
+   each origin's row must list *all* cells visible from it within `visionDepth`.
+   Cell X's row = `{ {X,Y} : d(X,Y) ≤ vision }`. Reconstructing X's row from
+   symmetry requires, for every partner Y with `idx[Y] < idx[X]`, that Y's BFS
+   discovered X — i.e. Y must *also* run a full BFS. So to populate every row you
+   still need a BFS from (essentially) every cell. Running BFS "from half the
+   origins" and deriving the rest via symmetry is impossible: the non-BFS cells
+   would form an independent set in the visibility graph, but within a vision
+   radius cells are densely mutually visible, so no such split exists. The BFS
+   flood-fill — explicitly the dominant cost per the kernel's own comments — is
+   **not** halvable. Symmetry can only remove the duplicate `atan2` + record for
+   each already-discovered pair (compute bearing once, derive the reverse), a
+   much smaller win than "~2× faster".
+
+2. **Even the record-halving breaks the sharded architecture.** To emit `B→A`
+   when A's BFS discovers B, you must write into **B's** origin row. Under
+   multi-worker sharding (`runVisibilityBearingTask` splits origins across
+   workers, `mergeVisibilityBearingShards` relies on each shard owning a
+   *disjoint* set of origin rows), B frequently lives in a different shard. A
+   cross-shard partner-row write destroys the disjoint-merge invariant and would
+   require a global reduction, adding synchronization cost and correctness risk.
+   The review's claim that "writing both rows is a local change" holds only for
+   the single-shard path.
+
+**Decision:** skip M2. The achievable gain (halved bearing `atan2`/record, not
+halved BFS) is modest, browser-only-verifiable, and carries high regression risk
+against the disjoint-shard merge. The BFS is already single-pass (count+write
+folded) and the per-pair trig is already reduced to one `atan2` via precomputed
+per-cell sin/cos (§0), so the remaining headroom here is small.
 
 ---
 
@@ -460,7 +482,67 @@ V-pass from the sim path. **Risk:** low; the graph is already a clean CSR and
 
 ---
 
-## 7. M5 — `_cellState` as parallel typed arrays (PLANNED, big steady-state win)
+## 7. M5 — Eliminate `_cellState` (IMPLEMENTED — flat objects are authoritative)
+
+**Problem.** `state._cellState` was one plain object holding N per-cell entries
+`{ friction, affordance, desire, multi }` (built in `computeDesirePaths` and
+`grid.js`). At N≈5e5 that is ~500k small objects — the largest steady-state
+memory consumer in the sim.
+
+**Key discovery (2026-07-09).** `_cellState` was a *pure denormalized cache*:
+- The **production batch sim path never used it.** `computeAgentBatch`
+  (`agentTasks.js`) — the path both node and browser take — calls `runAgentPath`
+  with `cellState = null` and reads only the flat `frictionLookup` /
+  `affordanceLookup` (built from `_frictionObj` / `_affordanceObj`).
+  `runAgentBatches` is likewise invoked with `state._frictionObj` /
+  `state._affordanceObj`, not `_cellState`.
+- friction was **never mutated** after build (`_cellState[cell].friction` always
+  equalled `_frictionObj[cell]` / `cellFrictionMap.get(cell)`).
+- affordance was **kept in sync**: `updateAffordance` / `decayAffordance` /
+  `_recomputeAffordanceForCells` all wrote *both* `cs.affordance` **and**
+  `_affordanceObj[cell]`.
+- desire was **kept in sync**: `applyPathDesireDeltas` / `_applyTargetContribDelta`
+  wrote *both* `cs.desire` **and** `pathDesireScores[cell]`.
+- `multi` is **never read** in the sim hot path (it lives authoritatively in
+  `multiFrictionMap`).
+
+So the three flat objects `_frictionObj` / `_affordanceObj` / `pathDesireScores`
+already held every value `_cellState` did, and every `_cellState` reader already
+had a `cellState?.[cell] ?? flatObj[cell]` fallback.
+
+**Fix (minimal, byte-identical).**
+- **Stopped building `_cellState`** in the three production paths: `grid.js`
+  `mapCells`, `compute.js` `computeDesirePaths`, and the incremental
+  `_recomputeTargetContribs`. Every remaining reader now transparently takes its
+  flat-object fallback (production sets `_cellState = null`).
+- The `computeDesirePaths` grass-recovery loop now iterates `_frictionObj` keys
+  (the exact cell set `_cellState` covered); `decayAffordance` reads/writes
+  `_affordanceObj` when no `_cellState` is present — identical values.
+- `initializeAffordanceMap` now also writes `_affordanceObj[cell]` (it previously
+  refreshed only `_cellState`), so the authoritative flat snapshot stays correct.
+- `clearComputeCaches` now also nulls the cached `_getFriction` / `_getAffordance`
+  closures (they capture the flat snapshots).
+- **Legacy `_cellState` support retained** behind `if (ctx._cellState)` guards, so
+  callers/tests that still construct `_cellState` are byte-for-byte unaffected;
+  `buildCellStateEntry` is still exported for them.
+
+**Impact:** removes ~N per-cell objects (tens of MB at city scale) with **no new
+memory** — the flat objects already existed and are already what the batch sim
+reads. This makes the whole codebase consistent with the (already-tested) batch
+path. The typed-array *locality* refinement the original plan floated is a
+further, optional optimization deferred (the object-count win — the stated
+primary impact — is fully realized here at near-zero risk).
+
+**Verified:** 387 tests pass. A standalone before/after harness
+(two `computeDesirePaths` runs over a mixed-friction AOI with 75 agents,
+exercising the cross-run decay/reuse paths) produced **byte-identical**
+`pathDesireScores`, `affordanceMap`, and `globalPeakFlow` (git-stash diff).
+Test change: `integration.test.js` "creates `_frictionObj`/`_affordanceObj`
+snapshots" now asserts `_cellState` is not built.
+
+---
+
+## 7b. M5 — original typed-array plan (superseded, kept for reference)
 
 **Problem.** `state._cellState` is one plain object holding N per-cell entries
 `{ friction, affordance, desire, multi }` (built in `computeDesirePaths` and
@@ -485,19 +567,32 @@ small accessor (`getCellFriction(state, cell)`) to keep tests stable.
 
 ---
 
-## 8. S5 — Index-based origin–destination distances (PLANNED)
+## 8. S5 — Index-based origin–destination distances (RE-SCOPED — behavior trap)
 
 **Problem.** `precomputeOriginDestDistances` (`compute.js`) builds an
 `o + '::' + d` → `gridDistance` object for all O×D pairs and is re-queried every
 tick in `runSingleAgentPath`/`runAgentPath` via string concatenation +
 `gridDistance` fallback.
 
-**Fix.** Encode as a `Float32Array` (or `Int16Array`) indexed by
-`originIdx * V + destIdx` using the gradient graph's `cellToIdx` for origins and
-destinations. The per-tick lookup becomes `odArr[cellIdx[simCurrent] * V +
-cellIdx[destCell]]` — no string concat, no `gridDistance` H3 call. **Impact:**
-removes O×D string entries and per-tick `gridDistance` calls. **Risk:** low;
-localized to `compute.js`/`agentTasks.js`.
+**Correctness note (2026-07-09).** The table is keyed **only by node pairs**
+(`precomputeOriginDestDistances(agents, destinations)`), but the per-tick lookup
+uses `simCurrent + '::' + destCell` where `simCurrent` is an *intermediate path
+cell*, not a node. So that lookup almost always **misses** and `distToTarget`
+stays at its last node-anchored value — this stale-update is the current,
+shipped behavior. The review's proposed dense `cellToIdx[simCurrent] * V +
+cellToIdx[destCell]` array would give every intermediate cell a real distance,
+which **changes simulation output** (the `distToTarget <= 1` early-exit would now
+fire mid-path). It therefore cannot be done as literally specified.
+
+**Byte-identical alternative (deferred).** Keep the sparse node-only key set but
+replace the string key with a numeric composite `cellToIdx[o] * V +
+cellToIdx[d]` in a `Map<number, number>`; the per-tick miss then costs one
+`cellToIdx` Map get + arithmetic + a numeric Map get instead of a string concat
++ object read. This is byte-identical but a **marginal** per-tick win (the table
+is O×D, which is small — few nodes), so it is deprioritized behind M5. The
+`cellToIdx` infrastructure it needs is shared with M5, so revisit after M5 lands.
+
+**Decision:** deprioritized; focus this pass on M5 (biggest steady-state win).
 
 ---
 
@@ -527,9 +622,9 @@ is exercised by every agent-batch run; no behavior change, only eviction policy)
 | S1 | add worker-dispatch + bearing-reconstruction integration test | new |
 | S1-SAB | add COOP/COEP browser test: SAB-backed inputs/result shared zero-copy; assert `crossOriginIsolated` path + plain-`ArrayBuffer` fallback | new |
 | M1 | gradient shape changes | adapt `compute.test.js` (`_computeDijkstraGradient`), `computeDesirePaths.test.js`, `csrBearingIndex.test.js` |
-| M2 | visibility symmetry | extend `csrBearingIndex.test.js` with symmetry assertion |
+| M2 | ~~visibility symmetry~~ | **Won't do** (see §5) — no test change |
 | M3 | gradient graph in worker | extend `mappingBuild.test.js` |
-| M5 | `_cellState` shape | adapt many tests asserting `_cellState[cell]` → use accessors |
+| M5 | `_cellState` shape | ✅ done — only `integration.test.js` snapshot assertion adjusted (all others use flat-object fallbacks) |
 | S5/S8/C2 | localized | minimal |
 
 ---
@@ -545,8 +640,13 @@ is exercised by every agent-batch run; no behavior change, only eviction policy)
    path as fallback. Requires the in-worker `BearingIndex` reconstruction
    (option 1 in §3) and a COOP/COEP browser test. M1 now makes gradients
    flat typed arrays, so **C1 closes at zero copy** once S1-SAB lands.
-4. **Then:** M5 (`_cellState` typed arrays), M2 (visibility symmetry),
-   M3 (gradient graph in worker), S5/C2 as follow-ups.
+4. **Done (2026-07-09):** M5 — eliminated `_cellState`; the sim now reads the
+   flat `_frictionObj`/`_affordanceObj`/`pathDesireScores` objects it already
+   used on the batch path (byte-identical, 387 pass). **M2 dropped** (§5 — flawed
+   premise + breaks the disjoint-shard merge). **S5 deprioritized** (§8 — dense
+   indexing changes behavior; byte-identical variant is only a marginal win).
+5. **Remaining:** M3 (gradient graph CSR in a worker — Med impact; only
+   meaningfully verifiable in-browser since node uses the main-thread path).
 
 Each step is independently shippable and testable; M1/M5 are the architectural
 refactors and should land behind thin accessors to keep the test surface stable.

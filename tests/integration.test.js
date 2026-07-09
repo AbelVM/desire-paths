@@ -374,7 +374,9 @@ describe('grid.js', () => {
       expect(map._frictionObj).toBeDefined();
       expect(map._affordanceObj).toBeDefined();
       expect(map._multiFrictionObj).toBeDefined();
-      expect(map._cellState).toBeDefined();
+      // M5: the per-cell `_cellState` object is no longer built; friction/affordance
+      // live in the flat `_frictionObj`/`_affordanceObj` snapshots the sim reads.
+      expect(map._cellState == null).toBe(true);
     });
 
     it('should reuse multiFrictionMap when AOI key unchanged', async () => {

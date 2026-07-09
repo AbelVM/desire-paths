@@ -317,6 +317,7 @@ export function clearComputeCaches(ctx) {
   if (ctx.pathDesireScores) {
     for (const k in ctx.pathDesireScores) delete ctx.pathDesireScores[k];
   }
+  // Legacy `_cellState` desire reset (kept for callers that still build it).
   if (ctx._cellState) {
     for (const cell in ctx._cellState) {
       const cs = ctx._cellState[cell];
@@ -332,6 +333,11 @@ export function clearComputeCaches(ctx) {
   ctx._perTargetContribs = null;
   ctx._assignedCounts = null;
   ctx._targetWeights = null;
+  // Drop cached hot-path closures — they capture `_frictionObj`/`_affordanceObj`
+  // (or a legacy `_cellState`), which are being replaced, so stale closures would
+  // read a detached snapshot on the next run.
+  ctx._getFriction = null;
+  ctx._getAffordance = null;
 
   // Reset compute cache instrumentation and LRU structures
   ctx._computePathCacheObj = undefined;
@@ -654,11 +660,11 @@ export async function computeDesirePaths(state, mapInstance) {
 
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.
+  // This fresh object is the authoritative desire reset now that `_cellState` is
+  // not built (M5); the legacy `_cellState` zeroing below is a no-op in production
+  // and kept only for callers/tests that still construct `_cellState`.
   state.pathDesireScores = Object.create(null);
 
-  // Zero out per-cell desire values in _cellState so stale scores from prior runs don't
-  // leak into the new simulation via applyPathDesireDeltas (which reads _cellState.desire
-  // before falling back to pathDesireScores).
   if (state._cellState) {
     for (const cell in state._cellState) {
       const cs = state._cellState[cell];
@@ -704,36 +710,22 @@ export async function computeDesirePaths(state, mapInstance) {
     state._multiFrictionSnapshotGen = mappingGen;
   }
 
-  // Consolidated per-cell state object for hot-path reads/writes.
-  // Reuse the existing container (and its per-cell entry objects) across runs
-  // when the AOI cell set is unchanged (same mapping generation) to avoid
-  // allocating a fresh ~V-entry object every simulation run — a meaningful GC
-  // source at city scale. The per-cell entries are refreshed in place by
-  // buildCellStateEntry (affordance/desire are re-read from the current
-  // snapshots), so reusing the container does not carry stale values forward.
-  // A new container is only allocated when the cell set changes (remap), since
-  // the old container may hold entries for cells no longer in the AOI.
-  const existingState = state._cellState;
-  if (!(existingState && state._cellStateMappingGen === mappingGen)) {
-    state._cellState = Object.create(null);
-  }
-  const frictionObj = state._frictionObj;
-  const affordanceObj = state._affordanceObj;
-  const desireScores = state.pathDesireScores;
-  const multiFrictionObj = state._multiFrictionObj;
+  // M5: the per-cell `_cellState` object is no longer built. friction lives in
+  // `_frictionObj` (mirror of `cellFrictionMap`), affordance in `_affordanceObj`,
+  // and desire in `pathDesireScores` — the exact flat lookups the batch sim path
+  // already consumes (`runAgentBatches` is called with `_frictionObj`/`_affordanceObj`
+  // below, and `computeAgentBatch` passes `cellState=null`). Every remaining
+  // `_cellState` reader keeps its `cellState?.[cell] ?? flatObj[cell]` fallback,
+  // so dropping the ~V per-cell objects is byte-identical and saves steady-state
+  // memory. `_affordanceObj` is guaranteed present here (built by grid.js mapCells,
+  // or from `affordanceMap` on the incremental path).
 
-  for (const k in frictionObj) {
-    const fr = frictionObj[k];
-    const aff = affordanceObj?.[k] ?? 0.1;
-    const desire = desireScores?.[k] ?? 0;
-    const multi = multiFrictionObj?.get?.(k) ?? null;
-    state._cellState[k] = buildCellStateEntry(fr, aff, desire, multi, existingState, k);
-  }
-  state._cellStateMappingGen = mappingGen;
-
-  // Grass recovery between user-triggered simulation runs (not after wear in the same pass)
-  if (state._cellState) {
-    for (const cell in state._cellState) {
+  // Grass recovery between user-triggered simulation runs (not after wear in the
+  // same pass). Iterate the friction-object key set (the exact cells the old
+  // `_cellState` covered). decayAffordance reads/writes `_affordanceObj` when no
+  // `_cellState` is present, so the effect is identical.
+  if (state._frictionObj) {
+    for (const cell in state._frictionObj) {
       decayAffordance(state, cell);
     }
   } else {
@@ -1554,6 +1546,13 @@ export function initializeAffordanceMap(ctx) {
     const { affordance } = classifyAffordance(friction);
     ctx.affordanceMap.set(cell, affordance);
 
+    // Keep the authoritative flat affordance snapshot in sync (M5 — this is what
+    // the sim path reads now that `_cellState` is not built). Previously this
+    // function only refreshed `_cellState`, leaving `_affordanceObj` stale.
+    if (ctx._affordanceObj) ctx._affordanceObj[cell] = affordance;
+
+    // Legacy `_cellState` support retained for callers/tests that still construct
+    // it; production no longer builds `_cellState`, so this block is skipped.
     if (ctx._cellState) {
       const cs = ctx._cellState[cell];
       const existingDesire = cs ? cs.desire : 0;
@@ -1720,7 +1719,9 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
   // _gradientCacheObj always stores plain objects
   const destGradientObj = ctx._gradientCacheObj[targetCell];
 
-  // Ensure snapshot state exists for safe inner-loop reads
+  // Ensure snapshot state exists for safe inner-loop reads. `runSingleAgentPath`
+  // reads friction/affordance via `cellState?.[cell] ?? _frictionObj/_affordanceObj`,
+  // so the flat objects below are the authoritative source (M5 — no `_cellState`).
   if (!ctx._frictionObj) {
     ctx._frictionObj = Object.create(null);
     for (const [k, v] of ctx.cellFrictionMap) ctx._frictionObj[k] = v;
@@ -1728,15 +1729,6 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
   if (!ctx._affordanceObj) {
     ctx._affordanceObj = Object.create(null);
     for (const [k, v] of ctx.affordanceMap) ctx._affordanceObj[k] = v;
-  }
-  if (!ctx._cellState) {
-    ctx._cellState = Object.create(null);
-    for (const k in ctx._frictionObj) {
-      const fr = ctx._frictionObj[k];
-      const aff = ctx._affordanceObj?.[k] ?? 0.1;
-      const desire = ctx.pathDesireScores?.[k] || 0;
-      ctx._cellState[k] = buildCellStateEntry(fr, aff, desire, null, null, k);
-    }
   }
 
   const origins = Object.keys(ctx.simulationNodes).filter((k) =>

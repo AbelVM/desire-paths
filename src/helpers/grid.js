@@ -8,7 +8,7 @@ import {
   runVisibilityBearingTask,
   runMergeCellsTask,
 } from './spatialWorker.js';
-import { clearComputeCaches, clearGradientCache, buildCellStateEntry } from './compute.js';
+import { clearComputeCaches, clearGradientCache } from './compute.js';
 import { invalidateGradientGraph } from './dijkstra.js';
 import { reconstructVisibilityBearing } from './bearingIndex.js';
 // Re-export for backward compatibility (tests / callers imported it from here).
@@ -165,16 +165,22 @@ export async function triggerFastScan(state, mapInstance) {
     }
   }
 
-  // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj/_cellState
+  // Single-pass: merge multi-friction, build frictionObj/cellFrictionMap, affordanceMap/_affordanceObj
   const blurWeights = build.blurWeights ?? Object.create(null);
   // `blurUpdateMap` is returned by the worker (cell→blurred friction), so we use
   // it directly instead of rebuilding an equivalent object from `blurUpdates`.
   const blurUpdateMap = build.blurUpdateMap ?? null;
 
+  // M5: the per-cell `_cellState` object (N `{friction,affordance,desire,multi}`
+  // entries) is NO LONGER built. It was a denormalized copy of data already held
+  // in the flat lookups below (`_frictionObj`, `_affordanceObj`, and
+  // `pathDesireScores` at sim time), which the production batch sim path already
+  // reads directly (`computeAgentBatch` passes `cellState=null`). Dropping it
+  // removes ~N small objects at steady state; every remaining `_cellState`
+  // consumer keeps its `cellState?.[n] ?? flatObj[n]` fallback, so behavior is
+  // byte-identical. `multi` lives in `multiFrictionMap` (never read in the hot path).
   state._frictionObj = Object.create(null);
   state._affordanceObj = Object.create(null);
-  state._cellState = Object.create(null);
-  state._cellStateMappingGen = state._mappingGeneration;
 
   // Assemble per-cell mapping state (friction, affordance, multi-friction layers)
   // in a worker pool, sharded by cell. The heavy per-cell work (layer merge,
@@ -197,7 +203,6 @@ export async function triggerFastScan(state, mapInstance) {
     state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
     state._affordanceObj[cell] = aff;
-    state._cellState[cell] = buildCellStateEntry(fr, aff, 0, target, null, cell);
   }
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
   // so we don't hold a second N-entry container at steady state.
