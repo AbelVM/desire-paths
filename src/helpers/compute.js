@@ -1005,11 +1005,20 @@ function getBestNextStep(
 ) {
   const simParams = ctx.simulationParams || SIMULATION_PARAMS;
   const affordanceLookup = ctx._affordanceObj;
-  const weights = {
-    w_a: simParams.affordanceWeight,
-    w_d: simParams.distancePenalty,
-    w_theta: WEIGHTS.w_theta,
-  };
+  // `weights` depends only on simParams; cache it on ctx and rebuild only when
+  // the relevant params change (getBestNextStep runs millions of times per sim,
+  // so allocating this object every call is pure GC churn).
+  const wKey = simParams.affordanceWeight + ':' + simParams.distancePenalty;
+  let weights = ctx._bestNextWeights;
+  if (!weights || ctx._bestNextWeightsKey !== wKey) {
+    weights = {
+      w_a: simParams.affordanceWeight,
+      w_d: simParams.distancePenalty,
+      w_theta: WEIGHTS.w_theta,
+    };
+    ctx._bestNextWeights = weights;
+    ctx._bestNextWeightsKey = wKey;
+  }
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simParams.fieldOfView / 2;
 
@@ -1076,15 +1085,32 @@ function getBestNextStep(
     ctx._candFriction = frictionArr;
     ctx._candGNs = gNsArr;
   }
-  const isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup);
-  const computeAngle = (n) => {
-    if (bearingMap) {
-      const bng = bearingMap.get?.(curr + '::' + n);
-      if (typeof bng === 'number') return angleDiff(bng, currentDirection);
-    }
-    const eLatLng = _getCachedLatLng(n);
-    return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-  };
+  // `isVisible` only closes over `frictionLookup` (stable per run). Cache it on
+  // ctx, rebuilding only if the friction source changes (e.g. a remap that
+  // swaps in a different _frictionObj). Avoids a closure allocation on every
+  // one of the millions of getBestNextStep invocations.
+  let isVisible = ctx._isVisibleFn;
+  if (!isVisible || ctx._isVisibleFrictionLookup !== frictionLookup) {
+    isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup);
+    ctx._isVisibleFn = isVisible;
+    ctx._isVisibleFrictionLookup = frictionLookup;
+  }
+  // `computeAngle` closes over `bearingMap` (stable per run); `curr` and
+  // `currentDirection` vary per call, so they are passed as arguments. Cache the
+  // closure on ctx, rebuilding only when the bearing map changes.
+  let computeAngle = ctx._computeAngleFn;
+  if (!computeAngle || ctx._computeAngleBearingMap !== bearingMap) {
+    computeAngle = (n, sLatLng, currentDirection, curr) => {
+      if (bearingMap) {
+        const bng = bearingMap.get?.(curr + '::' + n);
+        if (typeof bng === 'number') return angleDiff(bng, currentDirection);
+      }
+      const eLatLng = _getCachedLatLng(n);
+      return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+    };
+    ctx._computeAngleFn = computeAngle;
+    ctx._computeAngleBearingMap = bearingMap;
+  }
 
   const candCount = gatherCandidates({
     disk,
@@ -1101,6 +1127,8 @@ function getBestNextStep(
     affsArr,
     frictionArr,
     gNsArr,
+    sLatLng,
+    currentDirection,
   });
 
   const hardCount = partitionVisibleCone({

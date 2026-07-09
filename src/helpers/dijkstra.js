@@ -88,6 +88,22 @@ export function getGradientGraph(cellSource) {
   const cellToIdx = Object.create(null);
   for (let i = 0; i < V; i++) cellToIdx[cells[i]] = i;
 
+  // Precompute the per-cell edge-weight array ONCE per graph. Friction is
+  // constant for a given cell set / mapping generation, so every Dijkstra
+  // target can reuse this instead of rebuilding a fresh Float64Array(V) and
+  // re-running V friction lookups. The old per-target allocation was D×V
+  // transient memory (hundreds of MB at city scale) and dominated gradient
+  // batch cost. The graph is rebuilt (via invalidateGradientGraph) whenever
+  // friction topology changes, so this cache can never go stale.
+  const frictionArr = new Float64Array(V);
+  let frictionMaxC = 0;
+  for (let i = 0; i < V; i++) {
+    const f = getF(cells[i]);
+    const w = typeof f === 'number' && f < IMPASSABLE ? f : -1;
+    frictionArr[i] = w;
+    if (w > frictionMaxC) frictionMaxC = w;
+  }
+
   // CSR adjacency built in a SINGLE `gridDisk` pass into one flat temp buffer,
   // then prefix-summed + compacted. The prior two-pass form called `gridDisk`
   // twice per cell; this halves that cost. It holds only ONE contiguous
@@ -125,7 +141,15 @@ export function getGradientGraph(cellSource) {
     for (let e = start; e < end; e++) adjNeighbors[w++] = temp[e];
   }
 
-  _graphCache = { V, cellToIdx, idxToCell: cells, adjOffsets, adjNeighbors };
+  _graphCache = {
+    V,
+    cellToIdx,
+    idxToCell: cells,
+    adjOffsets,
+    adjNeighbors,
+    frictionArr,
+    frictionMaxC,
+  };
   _graphCacheKey = cellSource;
   return _graphCache;
 }
@@ -350,22 +374,10 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
     return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
   }
 
-  const { V, idxToCell } = graph;
-  const resolveFriction =
-    typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
-  const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
-
-  // Build the exact (Float64) per-cell weight array AND track the max weight in
-  // a single V-pass (the old code did these as two separate loops). Impassable /
-  // missing cells are encoded as -1 and skipped during relaxation.
-  const frictionArr = new Float64Array(V);
-  let C = 0;
-  for (let i = 0; i < V; i++) {
-    const f = resolveFriction(idxToCell[i]);
-    const w = typeof f === 'number' && f < IMPASSABLE ? f : -1;
-    frictionArr[i] = w;
-    if (w > C) C = w;
-  }
+  const { V, idxToCell, frictionArr, frictionMaxC } = graph;
+  // `frictionArr` / `frictionMaxC` are precomputed once per graph (see
+  // getGradientGraph) and reused across every target — no per-target V-pass.
+  const C = frictionMaxC;
 
   // Decide the queue. Dial's is only worthwhile when the max weight is small;
   // worn friction can reach IMPASSABLE, which would make its bucket count C huge.
@@ -373,9 +385,14 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
 
   let dist;
   if (useDial) {
-    const q = new Int32Array(V);
-    for (let i = 0; i < V; i++)
-      q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
+    // Quantize once per graph and cache it (depends only on frictionArr + scale).
+    let q = graph.frictionQuantized;
+    if (!q) {
+      q = new Int32Array(V);
+      for (let i = 0; i < V; i++)
+        q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
+      graph.frictionQuantized = q;
+    }
     dist = computeDijkstraDial(targetIdx, q, graph);
   } else {
     const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;

@@ -23,6 +23,8 @@ export function gatherCandidates({
   affsArr,
   frictionArr,
   gNsArr,
+  sLatLng,
+  currentDirection,
 }) {
   let count = 0;
   const diskLen = disk.length;
@@ -32,7 +34,7 @@ export function gatherCandidates({
     const f = getFriction(n);
     if (f === undefined || f >= impassableVal) continue;
     if (!isVisible(curr, n)) continue;
-    const ang = computeAngle(n);
+    const ang = computeAngle(n, sLatLng, currentDirection, curr);
     const aff = getAffordance(n);
     if (useGradient) {
       const gN = gradientLookup(n);

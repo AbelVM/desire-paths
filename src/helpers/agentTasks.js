@@ -69,6 +69,32 @@ function _getCachedLatLng(cell) {
   return stored;
 }
 
+// Reusable candidate buffers for getBestNextStep. The agent worker is
+// single-threaded and processes one batch at a time, so module-level reuse is
+// safe and avoids allocating 5 arrays on every one of the millions of
+// getBestNextStep invocations (the previous per-call allocation was a major GC
+// source at city scale).
+let _knCells = [];
+let _knAngles = [];
+let _knAffs = [];
+let _knFriction = [];
+let _knGNs = null;
+let _knScores = null;
+
+// Cached per-batch closures. Rebuilt only when their stable inputs change
+// (identity-guarded), so getBestNextStep stops allocating closures per call.
+let _knGetFriction = null;
+let _knGetAffordance = null;
+let _knFrictionLookup = null;
+let _knCellState = null;
+let _knIsVisible = null;
+let _knVisibilityMap = null;
+let _knIsVisibleFriction = null;
+let _knComputeAngle = null;
+let _knBearingMap = null;
+let _knWeights = null;
+let _knWeightsKey = null;
+
 // Fast bearing lookup: uses precomputed bearing map when available,
 // falls back to trig-based calculation otherwise.
 function getBearingFast(a, b, bearingMap) {
@@ -218,11 +244,6 @@ function getBestNextStep(
   graph
 ) {
   const gradientLookup = gradient ? (n) => gradient[n] : null;
-  const weights = {
-    w_a: simulationParams.affordanceWeight,
-    w_d: simulationParams.distancePenalty,
-    w_theta: WEIGHTS.w_theta,
-  };
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simulationParams.fieldOfView / 2;
 
@@ -231,35 +252,71 @@ function getBestNextStep(
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
-  // Inline friction/affordance lookups — direct property access is ~3× faster than function calls
-  const getFriction = cellState
-    ? (n) => {
-        const s = cellState[n];
-        return s ? s.friction : undefined;
-      }
-    : (n) => frictionLookup[n];
-  const getAffordance = cellState
-    ? (n) => {
-        const s = cellState[n];
-        return s ? (s.affordance ?? 0.1) : 0.1;
-      }
-    : (n) => affordanceLookup?.[n] ?? 0.1;
+  // `weights` depends only on simulationParams; cache it (rebuild only when the
+  // relevant params change) instead of allocating a fresh object per call.
+  const wKey = simulationParams.affordanceWeight + ':' + simulationParams.distancePenalty;
+  if (!_knWeights || _knWeightsKey !== wKey) {
+    _knWeights = {
+      w_a: simulationParams.affordanceWeight,
+      w_d: simulationParams.distancePenalty,
+      w_theta: WEIGHTS.w_theta,
+    };
+    _knWeightsKey = wKey;
+  }
+  const weights = _knWeights;
 
-  const cellsArr = [];
-  const anglesArr = [];
-  const affsArr = [];
-  const frictionArr = [];
-  const gNsArr = useGradient ? [] : null;
+  // Reuse module-level candidate buffers (reset in place; capacity is retained
+  // across calls). The agent worker is single-threaded, so this is safe.
+  const cellsArr = _knCells;
+  cellsArr.length = 0;
+  const anglesArr = _knAngles;
+  anglesArr.length = 0;
+  const affsArr = _knAffs;
+  affsArr.length = 0;
+  const frictionArr = _knFriction;
+  frictionArr.length = 0;
+  const gNsArr = useGradient ? (_knGNs || (_knGNs = [])) : null;
+  if (gNsArr) gNsArr.length = 0;
 
-  const isVisible = (a, b) => _getCachedVisibility(a, b, frictionLookup, visibilityMap);
-  const computeAngle = (n) => {
-    if (bearingMap) {
-      const bng = bearingMap[curr + '::' + n];
-      if (typeof bng === 'number') return angleDiff(bng, currentDirection);
-    }
-    const eLatLng = _getCachedLatLng(n);
-    return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-  };
+  // Cache the friction/affordance closures (stable per batch) on module state.
+  if (!_knGetFriction || _knFrictionLookup !== frictionLookup || _knCellState !== cellState) {
+    _knGetFriction = cellState
+      ? (n) => {
+          const s = cellState[n];
+          return s ? s.friction : undefined;
+        }
+      : (n) => frictionLookup[n];
+    _knGetAffordance = cellState
+      ? (n) => {
+          const s = cellState[n];
+          return s ? (s.affordance ?? 0.1) : 0.1;
+        }
+      : (n) => affordanceLookup?.[n] ?? 0.1;
+    _knFrictionLookup = frictionLookup;
+    _knCellState = cellState;
+  }
+  const getFriction = _knGetFriction;
+  const getAffordance = _knGetAffordance;
+
+  if (!_knIsVisible || _knVisibilityMap !== visibilityMap || _knIsVisibleFriction !== frictionLookup) {
+    _knIsVisible = (a, b) => _getCachedVisibility(a, b, frictionLookup, visibilityMap);
+    _knVisibilityMap = visibilityMap;
+    _knIsVisibleFriction = frictionLookup;
+  }
+  const isVisible = _knIsVisible;
+
+  if (!_knComputeAngle || _knBearingMap !== bearingMap) {
+    _knComputeAngle = (n, sLatLng, currentDirection, curr) => {
+      if (bearingMap) {
+        const bng = bearingMap[curr + '::' + n];
+        if (typeof bng === 'number') return angleDiff(bng, currentDirection);
+      }
+      const eLatLng = _getCachedLatLng(n);
+      return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
+    };
+    _knBearingMap = bearingMap;
+  }
+  const computeAngle = _knComputeAngle;
 
   const candCount = gatherCandidates({
     disk,
@@ -276,6 +333,8 @@ function getBestNextStep(
     affsArr,
     frictionArr,
     gNsArr,
+    sLatLng,
+    currentDirection,
   });
 
   const hardCount = partitionVisibleCone({
@@ -289,7 +348,8 @@ function getBestNextStep(
     visualAngleHalf,
   });
   const cLen = hardCount > 0 ? hardCount : candCount;
-  const scores = useGradient ? new Array(cLen) : null;
+  const scores = useGradient ? (_knScores || (_knScores = [])) : null;
+  if (scores) scores.length = cLen;
 
   if (useGradient) {
     scoreCandidates({
