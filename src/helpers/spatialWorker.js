@@ -538,7 +538,6 @@ export async function runAgentBatches(
       : normalizeFrictionEntries(affordanceSource);
 
   const visibilityEntries = options?.visibilityEntries || null;
-  const neighborDisks = options?.neighborDisks || null;
   // True ABM footprint accumulator — shared across all agents in a simulation run.
   // When present, computeAgentBatch runs a tick-based loop where each agent's
   // positions accumulate as footprints that modify affordance for subsequent agents.
@@ -661,7 +660,6 @@ export async function runAgentBatches(
     // BearingIndex/VisibilityIndex Proxies drops their function-valued traps, which
     // would silently degrade every lookup to the slow trig / path-cell fallback.
     visibilityEntries: useWorker ? null : visibilityEntries,
-    neighborDisks,
     options,
     accumulatedFootprints,
     originDestDistances,

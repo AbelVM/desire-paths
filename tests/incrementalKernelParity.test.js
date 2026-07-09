@@ -88,7 +88,6 @@ describe('incremental kernel parity (deterministic)', () => {
       affordanceObj,
       null, // cellState
       null, // visibilityMap
-      null, // neighborDisks
       null, // accumulatedFootprints
       null, // bearingMap
       null, // originDestDistances
@@ -147,7 +146,6 @@ describe('incremental kernel parity (deterministic)', () => {
       null,
       frictionObj,
       affordanceObj,
-      null,
       null,
       null,
       null,

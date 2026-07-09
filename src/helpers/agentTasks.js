@@ -14,7 +14,6 @@ import {
 import {
   FRICTION_COSTS,
   WEIGHTS,
-  VISUAL_DEPTH,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
   CELL_LATLNG_CACHE_MAX,
@@ -143,14 +142,10 @@ const _diskCache = Object.create(null);
 const _diskCacheOrder = [];
 const DISK_CACHE_MAX = 256;
 
-function _getCachedDisk(center, r, precomputedDisks) {
-  // Use precomputed neighbor disk when available (VISUAL_DEPTH only)
-  if (r === VISUAL_DEPTH && precomputedDisks) {
-    const disk = precomputedDisks[center];
-    if (disk) return disk;
-  }
-
-  // Fall back to LRU cache
+function _getCachedDisk(center, r) {
+  // LRU cache of gridDisk(center, r). This is the fast path that avoids
+  // recomputing gridDisk on every step; the old `neighborDisks` precompute
+  // hook was never wired up, so the disk is always sourced from here.
   let inner = _diskCache[center];
   if (inner) {
     const hit = inner[r];
@@ -193,7 +188,6 @@ function getGradientDirection(
   gradientObj,
   frictionLookup,
   cellState,
-  neighborDisks,
   bearingMap,
   graph
 ) {
@@ -205,7 +199,7 @@ function getGradientDirection(
   // available; fall back to the disk cache otherwise (same passable, in-AOI
   // neighbor set). Map neighbor indices back to cell ids via `graph.idxToCell`.
   const nbrIdxs = graph ? getGraphNeighborIndicesR1(graph, curr) : null;
-  const disk = graph ? null : _getCachedDisk(curr, 1, neighborDisks);
+  const disk = graph ? null : _getCachedDisk(curr, 1);
   const idxToCell = graph ? graph.idxToCell : null;
   let bestNeighbor = null;
   let bestGrad = gCurr;
@@ -239,7 +233,6 @@ function getBestNextStep(
   affordanceLookup,
   cellState,
   visibilityMap,
-  neighborDisks,
   accumulatedFootprints,
   bearingMap,
   graph
@@ -248,7 +241,7 @@ function getBestNextStep(
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simulationParams.fieldOfView / 2;
 
-  const disk = _getCachedDisk(curr, simulationParams.visionDepth, neighborDisks);
+  const disk = _getCachedDisk(curr, simulationParams.visionDepth);
   const sLatLng = _getCachedLatLng(curr);
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
@@ -373,7 +366,7 @@ function getBestNextStep(
     const idxToCell = graph ? graph.idxToCell : null;
     for (let depth = 1; depth <= 3; depth++) {
       const nbrIdxs = depth === 1 && graph ? getGraphNeighborIndicesR1(graph, curr) : null;
-      const disk = nbrIdxs ? null : _getCachedDisk(curr, depth, neighborDisks);
+      const disk = nbrIdxs ? null : _getCachedDisk(curr, depth);
       const count = nbrIdxs ? nbrIdxs.length : disk.length;
       let bestGrad = Infinity;
       let bestCandidate = null;
@@ -445,18 +438,14 @@ function getBestNextStep(
 // `nextStep`. Thin adapter over the shared `resolveStepLine` (agentStep.js) —
 // the obstacle-avoidance geometry lives there so this worker kernel and the
 // main-thread kernel cannot drift. The cache-accessor closures are memoized at
-// module scope (getDisk rebuilt only when `neighborDisks` changes) so no
-// closures are allocated on the hot per-step path.
+// module scope so no closures are allocated on the hot per-step path.
 const _knRslGetPathCells = (a, b) => _getCachedPathCells(a, b);
 let _knRslGetDisk = null;
-let _knRslNeighborDisks = null;
 
-function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDisks, graph) {
-  if (!_knRslGetDisk || _knRslNeighborDisks !== neighborDisks) {
-    // r=1 disks ignore `neighborDisks` (it only serves VISUAL_DEPTH), so a
-    // single accessor covers both the BFS expansion and the corner check.
-    _knRslGetDisk = (center, r) => _getCachedDisk(center, r, neighborDisks);
-    _knRslNeighborDisks = neighborDisks;
+function _resolveStepLine(curr, nextStep, frictionLookup, cellState, graph) {
+  if (!_knRslGetDisk) {
+    // A single disk accessor covers both the BFS expansion and the corner check.
+    _knRslGetDisk = (center, r) => _getCachedDisk(center, r);
   }
   return resolveStepLine({
     curr,
@@ -500,7 +489,6 @@ function runAgentPath(
   affordanceLookup,
   cellState,
   visibilityMap,
-  neighborDisks,
   accumulatedFootprints,
   bearingMap,
   originDestDistances,
@@ -526,7 +514,6 @@ function runAgentPath(
       destGradientObj,
       frictionLookup,
       cellState,
-      neighborDisks,
       bearingMap,
       graph
     ) ?? getBearingFast(simCurrent, simTarget, bearingMap);
@@ -570,7 +557,6 @@ function runAgentPath(
       affordanceLookup,
       cellState,
       visibilityMap,
-      neighborDisks,
       accumulatedFootprints,
       bearingMap,
       graph
@@ -592,7 +578,6 @@ function runAgentPath(
       nextStep,
       frictionLookup,
       cellState,
-      neighborDisks,
       graph
     );
     let hitTarget = false;
@@ -629,7 +614,6 @@ export function computeAgentBatch({
   affordanceEntries = null,
   hexCount = 0,
   visibilityEntries = null,
-  neighborDisks = null,
   options = {},
   accumulatedFootprints = null,
   originDestDistances = null,
@@ -750,7 +734,6 @@ export function computeAgentBatch({
           affordanceLookup,
           null,
           visibilityMap,
-          neighborDisks,
           abmFootprints,
           bearingMap,
           originDestDistances,
