@@ -449,6 +449,52 @@ export async function runGradientBatches(targets, frictionSource) {
   return merged;
 }
 
+/**
+ * Normalize a raw computeAgentBatch result (which may carry `__flat`-encoded
+ * pathDesire / perTargetContribs typed arrays) into the plain-object shape
+ * runAgentBatches returns. Shared by the local (main-thread) and worker
+ * dispatch paths so both produce identical output (S1).
+ */
+function normalizeAgentResult(result) {
+  const outPath = Object.create(null);
+  if (result && result.pathDesire) {
+    if (result.pathDesire.__flat) {
+      const keys = result.pathDesire.keys || [];
+      const vals = ArrayBuffer.isView(result.pathDesire.vals)
+        ? result.pathDesire.vals
+        : new Uint32Array(result.pathDesire.vals || []);
+      for (let i = 0; i < keys.length; i++) outPath[keys[i]] = vals[i];
+    } else if (typeof result.pathDesire === 'object') {
+      Object.assign(outPath, result.pathDesire);
+    }
+  }
+  const outPer = Object.create(null);
+  if (result && result.perTargetContribs) {
+    for (const dest in result.perTargetContribs) {
+      // Skip any internal metadata keys
+      if (typeof dest === 'string' && dest.startsWith('__')) continue;
+      const entry = result.perTargetContribs[dest];
+      if (entry && entry.__flat) {
+        const keys = entry.keys || [];
+        const vals = ArrayBuffer.isView(entry.vals)
+          ? entry.vals
+          : new Uint32Array(entry.vals || []);
+        const obj = Object.create(null);
+        for (let i = 0; i < keys.length; i++) obj[keys[i]] = vals[i];
+        outPer[dest] = obj;
+      } else if (entry && typeof entry === 'object') {
+        outPer[dest] = entry;
+      }
+    }
+  }
+  return {
+    pathDesire: outPath,
+    perTargetContribs: outPer,
+    processed: result?.processed || 0,
+    total: result?.total || 0,
+  };
+}
+
 export async function runAgentBatches(
   plan,
   frictionSource,
@@ -564,134 +610,58 @@ export async function runAgentBatches(
   // interaction would be lost). Running in a single execution context also removes
   // the 2+ worker trigger that produced SIGILL with 2+ origins. Gradient batches
   // (runGradientBatches) remain parallel because they are independent per destination.
-  const workerCount = 1;
+  //
+  // S1: run the WHOLE plan in ONE `agent-batch` worker, off the main thread, so
+  // the UI never blocks on the ABM loop (thousands of agents × hundreds of ticks
+  // × getBestNextStep). A single worker == one execution context == consistent
+  // shared ABM state. When `Worker` is unavailable (Node tests, SSR) we fall back
+  // to running computeAgentBatch synchronously on the main thread — behavior is
+  // identical. The worker kernel is allocation-free (S3) so the hot path stays fast.
+  const useWorker = typeof Worker !== 'undefined';
   try {
     logger.debug(
-        `runAgentBatches: dispatching agent-batches workerCount=${workerCount} planLength=${plan.length}`
+        `runAgentBatches: dispatching agent-batches useWorker=${useWorker} planLength=${plan.length}`
       );
   } catch (_e) {}
-  if (workerCount <= 1) {
-    // run locally on main thread
-    const ret = computeAgentBatch({
-      plan,
-      frictionEntries,
-      gradients: gradientsObj,
-      affordanceEntries,
-      hexCount,
-      visibilityEntries,
-      neighborDisks,
-      options,
-      accumulatedFootprints,
-      originDestDistances,
-      bearingMap,
-    });
-    // computeAgentBatch returns { result, transfers } when used in a worker; normalize
-    const result = ret && ret.result ? ret.result : ret;
-    // convert flattened structures into plain objects
-    const outPath = Object.create(null);
-    if (result && result.pathDesire && result.pathDesire.__flat) {
-      const keys = result.pathDesire.keys || [];
-      const vals = ArrayBuffer.isView(result.pathDesire.vals)
-        ? result.pathDesire.vals
-        : new Uint32Array(result.pathDesire.vals || []);
-      for (let i = 0; i < keys.length; i++) outPath[keys[i]] = vals[i];
-    }
-    const outPer = Object.create(null);
-    if (result && result.perTargetContribs) {
-      for (const dest in result.perTargetContribs) {
-        const entry = result.perTargetContribs[dest];
-        if (entry && entry.__flat) {
-          const keys = entry.keys || [];
-          const vals = ArrayBuffer.isView(entry.vals)
-            ? entry.vals
-            : new Uint32Array(entry.vals || []);
-          const obj = Object.create(null);
-          for (let i = 0; i < keys.length; i++) obj[keys[i]] = vals[i];
-          outPer[dest] = obj;
-        }
-      }
-    }
-    return {
-      pathDesire: outPath,
-      perTargetContribs: outPer,
-      processed: result?.processed || 0,
-      total: result?.total || 0,
-    };
+
+  const agentPayload = {
+    plan,
+    frictionEntries,
+    gradients: gradientsObj,
+    affordanceEntries,
+    hexCount,
+    visibilityEntries,
+    neighborDisks,
+    options,
+    accumulatedFootprints,
+    originDestDistances,
+    // S1 bearing: the precomputed `bearingMap` is a CSR-backed BearingIndex
+    // Proxy whose target holds functions. Structured-clone drops function-valued
+    // properties, so posting it to a worker would silently degrade every bearing
+    // lookup to the trig fallback. On the worker path we pass `null` and let the
+    // kernel use the correct (if slightly slower) trig path. Reconstructing the
+    // BearingIndex from the packed CSR inside the worker (option 1 in review6 §3)
+    // is a follow-up that restores the O(log P) index off-main-thread.
+    bearingMap: useWorker ? null : bearingMap,
+  };
+
+  if (!useWorker) {
+    // run locally on main thread (Node / no Worker available)
+    const ret = computeAgentBatch(agentPayload);
+    return normalizeAgentResult(ret?.result ?? ret);
   }
 
-  const chunks = splitIntoChunks(plan, workerCount);
   try {
-    logger.debug(
-        'runAgentBatches: chunks',
-        chunks.map((c) => c.length)
-      );
-  } catch (_e) {}
-  const results = await Promise.all(
-    chunks.map((chunk) =>
-      runWorker('agent-batch', {
-        plan: chunk,
-        frictionEntries,
-        gradients: gradientsObj,
-        affordanceEntries,
-        hexCount,
-        visibilityEntries,
-        neighborDisks,
-        options,
-        accumulatedFootprints,
-        originDestDistances,
-        bearingMap,
-      })
-    )
-  );
-
-  const mergedPath = Object.create(null);
-  const mergedPer = Object.create(null);
-  let processed = 0;
-  let total = 0;
-  for (let i = 0; i < results.length; i++) {
-    const batch = results[i] || {};
-    processed += batch.processed || 0;
-    total = batch.total || total;
-    const pd = batch.pathDesire;
-    if (pd) {
-      if (
-        pd.__flat &&
-        Array.isArray(pd.keys) &&
-        (ArrayBuffer.isView(pd.vals) || pd.vals instanceof ArrayBuffer)
-      ) {
-        const keys = pd.keys;
-        const vals = ArrayBuffer.isView(pd.vals) ? pd.vals : new Uint32Array(pd.vals);
-        for (let k = 0; k < keys.length; k++)
-          mergedPath[keys[k]] = (mergedPath[keys[k]] || 0) + vals[k];
-      } else if (typeof pd === 'object') {
-        for (const key in pd) mergedPath[key] = (mergedPath[key] || 0) + (Number(pd[key]) || 0);
-      }
-    }
-
-    const per = batch.perTargetContribs || {};
-    for (const dest in per) {
-      // Skip any internal metadata keys
-      if (typeof dest === 'string' && dest.startsWith('__')) continue;
-      const entry = per[dest];
-      if (!mergedPer[dest]) mergedPer[dest] = Object.create(null);
-      if (
-        entry &&
-        entry.__flat &&
-        Array.isArray(entry.keys) &&
-        (ArrayBuffer.isView(entry.vals) || entry.vals instanceof ArrayBuffer)
-      ) {
-        const keys = entry.keys;
-        const vals = ArrayBuffer.isView(entry.vals) ? entry.vals : new Uint32Array(entry.vals);
-        for (let k = 0; k < keys.length; k++)
-          mergedPer[dest][keys[k]] = (mergedPer[dest][keys[k]] || 0) + vals[k];
-      } else if (typeof entry === 'object') {
-        for (const cell in entry)
-          mergedPer[dest][cell] = (mergedPer[dest][cell] || 0) + (Number(entry[cell]) || 0);
-      }
-    }
+    const ret = await runWorker('agent-batch', agentPayload);
+    return normalizeAgentResult(ret);
+  } catch (err) {
+    try {
+      logger.warn('runAgentBatches: worker dispatch failed, falling back to local', err);
+    } catch (_e) {}
+    // graceful fallback to local execution on worker failure
+    const ret = computeAgentBatch(agentPayload);
+    return normalizeAgentResult(ret?.result ?? ret);
   }
-
-  return { pathDesire: mergedPath, perTargetContribs: mergedPer, processed, total };
 }
 
 export async function runFastScanTask(viewHexes, features, r1Adjacency) {

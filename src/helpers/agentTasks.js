@@ -38,33 +38,32 @@ function _strHash(s) {
   return h >>> 0;
 }
 
-// Small local caches (keeps worker stateless w.r.t. main thread)
-const _cellLatLngCacheObj = Object.create(null);
-const _cellLatLngCacheOrder = [];
-
-function _clearLatLngCache() {
-  for (const key in _cellLatLngCacheObj) delete _cellLatLngCacheObj[key];
-  _cellLatLngCacheOrder.length = 0;
-}
+// Small local cache (keeps worker stateless w.r.t. main thread).
+// Mirrors compute.js's `_cellLatLngCache` LRU: a Map whose insertion order
+// == recency. On a hit we delete+re-set to move the entry to the most-recent
+// end, and evict the oldest (first) key on overflow. This replaces the old
+// push/shift array + periodic *full* reset, which discarded every useful entry
+// once the cache drifted past 1.5× the cap and caused a recompute storm (C2).
+const _cellLatLngCache = new Map();
 
 function _getCachedLatLng(cell) {
-  const c = _cellLatLngCacheObj[cell];
-  if (c) return c;
+  const c = _cellLatLngCache.get(cell);
+  if (c) {
+    // LRU touch: re-insert so it moves to the most-recently-used end.
+    _cellLatLngCache.delete(cell);
+    _cellLatLngCache.set(cell, c);
+    return c;
+  }
   const v = cellToLatLng(cell);
   const lat = v[0];
   const lng = v[1];
   const latRad = (lat * Math.PI) / 180;
   const lngRad = (lng * Math.PI) / 180;
   const stored = [lat, lng, latRad, lngRad];
-  _cellLatLngCacheObj[cell] = stored;
-  _cellLatLngCacheOrder.push(cell);
-  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX) {
-    const old = _cellLatLngCacheOrder.shift();
-    delete _cellLatLngCacheObj[old];
-  }
-  // Periodic full GC pass to reclaim drift from repeated miss/evict cycles.
-  if (_cellLatLngCacheOrder.length > CELL_LATLNG_CACHE_MAX * 1.5) {
-    _clearLatLngCache();
+  _cellLatLngCache.set(cell, stored);
+  if (_cellLatLngCache.size > CELL_LATLNG_CACHE_MAX) {
+    const old = _cellLatLngCache.keys().next().value;
+    _cellLatLngCache.delete(old);
   }
   return stored;
 }

@@ -40,7 +40,8 @@ and **off-main-thread execution of the ABM loop**.
 
 | ID | Area | Issue | Type | Impact | Effort | Status |
 |----|------|-------|------|--------|--------|--------|
-| S1 | Sim | ABM loop runs on **main thread** (`runAgentBatches` `workerCount=1` → local `computeAgentBatch`) → UI freeze at city scale | Perf/UX | High | Med | **Planned** (see §3) |
+| S1 | Sim | ABM loop runs on **main thread** (`runAgentBatches` `workerCount=1` → local `computeAgentBatch`) → UI freeze at city scale | Perf/UX | High | Med | **Implemented** (off-main-thread single-worker dispatch + graceful local fallback; node-verified, 387 pass) |
+| S1-SAB | Sim | Large read-only inputs + result are structured-cloned/transferred per dispatch; reuse `allocTransferBuffer` (SAB when `crossOriginIsolated`) for zero-copy share | Mem/Perf | Med | Med | **Partial** (dispatch done; SAB buffers + in-worker BearingIndex reconstruction are follow-ups, need browser verification) |
 | S2 | Sim | `getBestNextStep` (compute.js) allocates `weights` + 2 closures **per call** (millions×) | Perf/GC | High | Low | **Implemented** |
 | S3 | Sim | `getBestNextStep` (agentTasks.js) allocates 5 arrays + 4 closures + `weights` **per call** | Perf/GC | High | Med | **Implemented** |
 | S4 | Sim | `computeDijkstra` rebuilds `Float64Array(V)` friction per target → D×V transient alloc | Mem/Perf | High | Low | **Implemented** |
@@ -49,8 +50,8 @@ and **off-main-thread execution of the ABM loop**.
 | M3 | Map | `getGradientGraph` CSR built on main thread during gradient batch | Perf | Med | Med | Planned (§6) |
 | M5 | Map | `state._cellState` = N per-cell objects `{friction,affordance,desire,multi}` | Mem | High | High | Planned (§7) |
 | S5 | Sim | `precomputeOriginDestDistances` O×D string-keyed object + `gridDistance` | Perf | Med | Low | Planned (§8) |
-| C1 | X | `gradientsObj` (D×V) structured-cloned to worker, not flattened | Mem | Med | Med | Planned (ties M1) |
-| C2 | X | Worker `_cellLatLngCacheObj` periodic full-reset discards useful entries | Mem | Low | Low | Planned (§9) |
+| C1 | X | `gradientsObj` (D×V) structured-cloned to worker, not flattened | Mem | Med | Med | Planned (ties M1; SAB-share once M1 lands, see §3) |
+| C2 | X | Worker `_cellLatLngCacheObj` periodic full-reset discards useful entries | Mem | Low | Low | **Implemented** (Map LRU, mirrors compute.js) |
 
 ---
 
@@ -168,6 +169,136 @@ Extract `normalizeAgentResult` (the existing `__flat`→plain-object logic at
 worker kernel is allocation-free. **Test impact:** node tests hit the local
 fallback (`Worker` undefined) → no behavior change; add a browser/worker
 integration check for the dispatch + bearing reconstruction.
+
+### S1 + SharedArrayBuffer (zero-copy inputs & result)
+
+The app is already **cross-origin isolated** (COOP/COEP headers installed by
+`public/coi-serviceworker.js`), and the mapping stage already has a
+`allocTransferBuffer(byteLength)` helper (`spatialWorker.js:817`, mirrored in
+`spatialTasks.js:475`) that returns a `SharedArrayBuffer` when
+`globalThis.crossOriginIsolated === true` and a plain `ArrayBuffer` otherwise.
+S1 should reuse that exact helper so the large, read-only inputs and the result
+are **shared** with the worker instead of structured-cloned / memcpy'd. This is
+the natural complement to S1: moving the loop off the main thread removes the
+*blocking*, and SAB removes the *per-dispatch copy cost* of the data the loop
+reads.
+
+**What can be SAB-backed today (no other refactor required):**
+
+1. **`frictionEntries` / `affordanceEntries`** are already flattened to a
+   `Float32Array` by `flattenPayloadAndTransfers` (`spatialWorker.js:268`).
+   Allocate that `vals` buffer via `allocTransferBuffer` so the worker reads the
+   *same* memory the main thread built — no memcpy, and (unlike a transfer) the
+   main thread keeps its own copy for the next run. Today `runWorker` *transfers*
+   the `vals.buffer` (detaching it from the main thread); switching to SAB keeps
+   it attached and shared.
+2. **`visibilityEntries`, `neighborDisks`, and the packed bearing CSR**
+   (`state._precomputedBearings.buffer`) are already typed arrays. Back their
+   buffers with `allocTransferBuffer` and pass them in the payload; the worker
+   reads them in place. No change to the worker kernel — it already consumes
+   typed arrays.
+3. **Result buffers (`pathDesire` / `perTargetContribs`).** These are already
+   `__flat`-encoded `Uint32Array`s. Allocate their `vals` backing via
+   `allocTransferBuffer` and pass the (empty) SAB *into* the payload; the worker
+   writes directly into shared memory and posts a lightweight `{ ok: true }`
+   with an **empty transfer list** (a SAB is shared by reference, never
+   transferred). The main thread reads the result SAB immediately on resolution
+   — the result is never copied across the boundary.
+
+**What needs M1 first (gradients):**
+
+4. **Gradients cannot be SAB-backed until M1 lands.** They are still
+   `destCell → { cellId: distance }` string-keyed objects, so they are cloned
+   (C1), not shared. Once M1 converts each gradient to a `Float32Array(V)`,
+   allocate those arrays on a `SharedArrayBuffer` and share them — this closes
+   C1 at **zero copy** (today C1 is "solved" only by flattening + transfer,
+   which still memcpy's D×V floats). Until M1, gradients keep the existing
+   structured-clone path; SAB for gradients is a drop-in once the array shape
+   exists.
+
+**Optional: `accumulatedFootprints` as SAB (live emergent-wear viz).**
+
+5. The run is single-worker and the main thread `await`s completion, so the
+   footprints SAB is *only* mutated by the worker during the run and *only* read
+   by the main thread after resolution — there is no concurrent access, so no
+   `Atomics`/locking is required. Backing it with SAB lets the UI render emergent
+   wear live (or at least without a second round-trip) and avoids cloning the
+   footprint structure. Keep the local-fallback path on a plain `ArrayBuffer`.
+
+**Graceful fallback (unchanged behavior).** When `crossOriginIsolated` is false
+(e.g. dev server without COOP/COEP, or `Worker` undefined in Node tests),
+`allocTransferBuffer` returns a plain `ArrayBuffer` and the existing
+transfer / structured-clone path is used verbatim. Node tests hit the local
+fallback (`Worker` undefined) → no behavior change; the SAB branch is exercised
+only by a browser/worker integration test under COOP/COEP.
+
+**SAB-aware dispatch shape:**
+```js
+const useWorker = typeof Worker !== 'undefined';
+const isolated = globalThis.crossOriginIsolated === true;
+// allocTransferBuffer → SharedArrayBuffer when isolated, else ArrayBuffer
+// (mirrors spatialWorker.js:817). Reuse it for every large buffer below.
+const resultPathDesire = new Uint32Array(allocTransferBuffer(nTargets * 4));
+const resultPer = new Uint32Array(allocTransferBuffer(nContribs * 4));
+// friction/affordance/visibility/neighborDisks/bearing CSR buffers also
+// allocated via allocTransferBuffer and shared (not transferred).
+if (!useWorker) {
+  const ret = computeAgentBatch({ /* …local, resultBuffers… */ });
+  return normalizeAgentResult(ret?.result ?? ret);
+}
+try {
+  const ret = await runWorker('agent-batch', {
+    plan, frictionEntries, gradients, affordanceEntries, hexCount,
+    visibilityEntries, neighborDisks, options, accumulatedFootprints,
+    originDestDistances, bearingMap,
+    resultBuffers: { pathDesire: resultPathDesire, perTargetContribs: resultPer },
+  });
+  // ret.result is now just a lightweight descriptor; the data lives in the
+  // shared resultBuffers the main thread already holds.
+  return normalizeAgentResult(ret?.result ?? ret, resultBuffers);
+} catch (err) {
+  const ret = computeAgentBatch({ /* …local… */ });
+  return normalizeAgentResult(ret?.result ?? ret);
+}
+```
+
+**Note on `runWorker` transfer list.** `runWorker` currently builds its transfer
+list from `flattenPayloadAndTransfers` and posts `{ kind, payload }, transfer`.
+For SAB inputs the transfer list is empty (SABs are shared, not transferred), so
+no change to `runWorker` is needed for the *input* side — only the worker's
+*result* post must stop transferring the result buffers (post `{ ok: true }`
+with no transfer list) since they are now shared. The `agent.worker.js` result
+post (`agent.worker.js:41-45`) already branches on `ret.transfers`; when the
+result is SAB-backed, `ret.transfers` is `[]` and the existing branch posts
+without a transfer list — correct for SAB.
+
+### S1 — implementation status (2026-07-09)
+
+The off-main-thread dispatch is **implemented** in `spatialWorker.js`
+`runAgentBatches`:
+- A single `agent-batch` worker is dispatched via `runWorker` whenever
+  `typeof Worker !== 'undefined'`; otherwise (Node tests / SSR) it falls back
+  to a synchronous `computeAgentBatch` on the main thread — behavior is
+  identical. A `try/catch` around the dispatch also falls back to local on
+  worker failure.
+- A shared `normalizeAgentResult` helper (extracted from the old inline
+  normalization) is used by **both** paths, so the worker and local results
+  are shaped identically.
+- **Bearing:** the worker path passes `bearingMap: null` (option 2 in §3)
+  because the precomputed `bearingMap` is a `BearingIndex` **Proxy** whose
+  function-valued properties are dropped by structured-clone. The worker kernel
+  therefore uses the correct trig fallback. Option 1 (reconstruct the
+  `BearingIndex` from the packed CSR *inside* the worker) is a follow-up that
+  restores the O(log P) index off-main-thread; it needs the raw CSR +
+  `cellToIndex` shipped to the worker and a browser/worker integration test.
+- **Verified:** 387 tests pass (node uses the local fallback, `useWorker=false`).
+  The browser worker path is implemented but **not yet browser-verified**; add
+  the integration test from §10 (`S1` row) before relying on it in production.
+- **SAB (S1-SAB):** the dispatch is in place, but the zero-copy SAB
+  buffers (friction/affordance/visibility/neighborDisks/bearing CSR + result)
+  are a follow-up — they require the in-worker `BearingIndex` reconstruction
+  and a COOP/COEP browser test, and are intentionally deferred until the
+  worker path is browser-verified.
 
 ---
 
@@ -289,16 +420,21 @@ localized to `compute.js`/`agentTasks.js`.
 
 ---
 
-## 9. C2 — Worker lat/lng cache eviction (PLANNED, minor)
+## 9. C2 — Worker lat/lng cache eviction (IMPLEMENTED, minor)
 
 **Problem.** `agentTasks.js` `_cellLatLngCacheObj` uses a periodic **full reset**
 when `order.length > CELL_LATLNG_CACHE_MAX * 1.5` (`_clearLatLngCache`),
 discarding all useful entries and causing a recompute storm. The main-thread
 cache (`compute.js` `_cellLatLngCache`) already uses proper LRU (delete+re-set).
 
-**Fix.** Port the LRU delete+re-set pattern to the worker cache (or share one
-implementation). **Impact:** avoids cache thrash in the worker kernel. **Risk:**
-trivial.
+**Fix.** Ported the LRU delete+re-set pattern to the worker cache: replaced the
+`Object.create(null)` + order-array + periodic full reset with a `Map` whose
+insertion order == recency. On a hit we `delete`+`set` to move the entry to
+the most-recently-used end, and evict the oldest (first) key on overflow. No
+periodic full reset, so useful entries are retained across AOI pans. **Risk:** trivial
+— the worker is single-threaded and processes one batch at a time, so the
+module-level `Map` is safe to reuse. **Verified:** 387 tests pass (the cache
+is exercised by every agent-batch run; no behavior change, only eviction policy).
 
 ---
 
@@ -308,6 +444,7 @@ trivial.
 |--------|----------------|--------|
 | S2/S3/S4 (done) | `compute.test.js`, `agentBatchParity.test.js`, `mappingBuild.test.js`, `spatialTasks.test.js`, `spatialWorker.test.js`, `csrBearingIndex.test.js`, `computeDesirePaths.test.js` | ✅ all green (387 pass) |
 | S1 | add worker-dispatch + bearing-reconstruction integration test | new |
+| S1-SAB | add COOP/COEP browser test: SAB-backed inputs/result shared zero-copy; assert `crossOriginIsolated` path + plain-`ArrayBuffer` fallback | new |
 | M1 | gradient shape changes | adapt `compute.test.js` (`_computeDijkstraGradient`), `computeDesirePaths.test.js`, `csrBearingIndex.test.js` |
 | M2 | visibility symmetry | extend `csrBearingIndex.test.js` with symmetry assertion |
 | M3 | gradient graph in worker | extend `mappingBuild.test.js` |
@@ -320,8 +457,12 @@ trivial.
 
 1. **Now (done):** S2, S3, S4 — safe, high-value, fully tested.
 2. **Next:** S1 (off-main-thread ABM) — requires S3 + bearing CSR transfer;
-   biggest UX win, preserves dynamics.
-3. **Then:** M1 (gradient typed arrays) — biggest memory win; pairs with C1.
+   biggest UX win, preserves dynamics. Land **S1-SAB** in the same pass: reuse
+   `allocTransferBuffer` so friction/affordance/visibility/neighborDisks/bearing
+   CSR and the result buffers are SAB-shared when `crossOriginIsolated` (zero
+   copy), with the plain-`ArrayBuffer` transfer path as fallback.
+3. **Then:** M1 (gradient typed arrays) — biggest memory win; pairs with C1 and
+   unlocks **SAB-sharing of gradients** (closes C1 at zero copy).
 4. **Then:** M5 (`_cellState` typed arrays), M2 (visibility symmetry),
    M3 (gradient graph in worker), S5/C2 as follow-ups.
 
