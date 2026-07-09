@@ -9,7 +9,7 @@ await vi.mock('../src/helpers/constants.js', async () => {
 
 import { latLngToCell, gridDisk, gridDistance } from 'h3-js';
 import { runAgentPath, estimateMaxTicks } from '../src/helpers/agentTasks.js';
-import { _runSingleAgentPath } from '../src/helpers/compute.js';
+import { runSingleAgentPath } from '../src/helpers/compute.js';
 import { SIMULATION_PARAMS, FRICTION_COSTS } from '../src/helpers/constants.js';
 
 // Win D parity guard: the incremental-API kernel (`runSingleAgentPath`,
@@ -66,7 +66,7 @@ describe('incremental kernel parity (deterministic)', () => {
       _cellState: null,
       simulationParams,
     };
-    const incrementalPath = _runSingleAgentPath(ctx, {
+    const incrementalPath = runSingleAgentPath(ctx, {
       originCell: origin,
       destCell: dest,
       destGradientObj: grad,
@@ -128,7 +128,7 @@ describe('incremental kernel parity (deterministic)', () => {
       _cellState: null,
       simulationParams,
     };
-    const incrementalPath = _runSingleAgentPath(ctx, {
+    const incrementalPath = runSingleAgentPath(ctx, {
       originCell: origin,
       destCell: dest,
       destGradientObj: grad,

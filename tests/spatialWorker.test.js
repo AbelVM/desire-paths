@@ -3,7 +3,6 @@ import { describe, it, expect } from 'vitest';
 // Test spatialTasks directly since spatialWorker depends on Worker API
 import {
   normalizeFrictionEntries,
-  computeDijkstraGradientSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
   computeFastScanSnapshot,
@@ -40,46 +39,6 @@ describe('normalizeFrictionEntries', () => {
     const result = normalizeFrictionEntries(input);
     expect(result.a).toBe(1);
     expect(result.b).toBe(2);
-  });
-});
-
-describe('computeDijkstraGradientSnapshot', () => {
-  it('should return gradient with target cell at distance 0', () => {
-    const frictionEntries = {
-      [h3Cell]: 1,
-    };
-    const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    const graph = getGradientGraph(frictionEntries);
-    expect(gradientGet(result, h3Cell, graph)).toBe(0);
-  });
-
-  it('should handle empty friction entries', () => {
-    const result = computeDijkstraGradientSnapshot(h3Cell, {});
-    const graph = getGradientGraph({});
-    // Target cell is not in the (empty) navigable graph, so it is unreachable.
-    expect(gradientGet(result, h3Cell, graph)).toBe(Infinity);
-  });
-
-  it('should handle Map input with single cell', () => {
-    const frictionEntries = new Map([
-      [h3Cell, 1],
-    ]);
-    const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    const graph = getGradientGraph(frictionEntries);
-    expect(gradientGet(result, h3Cell, graph)).toBe(0);
-  });
-
-  it('should exclude impassable cells from gradient', () => {
-    const neighbors = gridDisk(h3Cell, 1);
-    const impassableCell = neighbors[1] || h3Cell;
-    const frictionEntries = {
-      [h3Cell]: 1,
-      [impassableCell]: 999999,
-    };
-    const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    const graph = getGradientGraph(frictionEntries);
-    expect(gradientGet(result, h3Cell, graph)).toBe(0);
-    expect(gradientGet(result, impassableCell, graph)).toBe(Infinity);
   });
 });
 

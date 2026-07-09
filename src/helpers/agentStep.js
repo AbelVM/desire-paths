@@ -145,7 +145,6 @@ export function gatherCandidatesIndexed({
   affordanceArr,
   gradientObj,
   useGradient,
-  impassableVal,
   cellsArr,
   anglesArr,
   affsArr,

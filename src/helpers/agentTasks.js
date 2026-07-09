@@ -700,7 +700,6 @@ export function computeAgentBatch({
   hexCount = 0,
   visibilityEntries = null,
   options = {},
-  accumulatedFootprints = null,
   originDestDistances = null,
   bearingMap = null,
   // S1-SAB (review6 §3 option 1): the raw packed visibility/bearing CSR buffer +

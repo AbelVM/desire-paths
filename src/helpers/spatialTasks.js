@@ -191,10 +191,6 @@ function computeDijkstraGradientForLookup(targetCell, frictionLookup, r1Adjacenc
   return computeDijkstra(targetCell, frictionLookup, graph);
 }
 
-export function computeDijkstraGradientSnapshot(targetCell, frictionSource) {
-  return computeDijkstraGradientForLookup(targetCell, normalizeFrictionEntries(frictionSource));
-}
-
 export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, viewHexes }) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const gradients = Object.create(null);

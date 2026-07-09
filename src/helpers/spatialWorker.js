@@ -548,10 +548,6 @@ export async function runAgentBatches(
       : normalizeFrictionEntries(affordanceSource);
 
   const visibilityEntries = options?.visibilityEntries || null;
-  // True ABM footprint accumulator — shared across all agents in a simulation run.
-  // When present, computeAgentBatch runs a tick-based loop where each agent's
-  // positions accumulate as footprints that modify affordance for subsequent agents.
-  const accumulatedFootprints = options?.accumulatedFootprints || null;
   // Precomputed origin-destination grid distances — eliminates per-tick H3 calls
   const originDestDistances = options?.originDestDistances || null;
   // Precomputed bearing map — eliminates per-tick trig calls in getBestNextStep.

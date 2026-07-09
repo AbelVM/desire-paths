@@ -140,8 +140,6 @@ export function updateSimulationParams(next = {}) {
 // Simulation tick budget: cap steps per agent journey to keep UI responsive
 export const MAX_SIM_TICKS = 5000;
 export const SIM_TICK_BUFFER = 8; // multiplier on H3 grid distance between origin and destination
-export const YIELD_EVERY_AGENTS = 50; // cooperative yield interval during main-thread simulation (time guard is primary throttle)
-export const SIM_YIELD_MS = 45; // keep agent sampling under the browser long-task threshold
 
 // IMPASSABLE blur configuration
 // Radius (in H3 rings) to blur impassable influence (1 = immediate neighbors)
