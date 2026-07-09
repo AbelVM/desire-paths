@@ -401,7 +401,7 @@ function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited) {
 }
 
 function computeDijkstraHeap(targetIdx, frictionArr, graph, arity, dist, visited) {
-  const { V, adjOffsets, adjNeighbors } = graph;
+  const { adjOffsets, adjNeighbors } = graph;
   dist.fill(Infinity);
   visited.fill(0);
   const heap = new DaryHeap(arity);
