@@ -31,6 +31,7 @@ import {
   gradientGet,
   gradientReachableCount,
   invalidateGradientGraph,
+  graphFriction,
 } from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
 import { _bearingFromLatLngs, angleDiff } from './bearing.js';
@@ -221,7 +222,7 @@ function precomputeOriginDestDistances(origins, destinations) {
   return result;
 }
 
-function _getCachedVisibility(ctx, a, b, frictionLookup) {
+function _getCachedVisibility(ctx, a, b, frictionLookup, graph) {
   // Use precomputed visibility sets when available and fresh
   const precomputed = ctx._precomputedVisibility;
   const currentGen = ctx._mappingGeneration ?? 0;
@@ -255,7 +256,7 @@ function _getCachedVisibility(ctx, a, b, frictionLookup) {
   let visible = true;
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
-    const f = frictionLookup[c];
+    const f = graph ? graphFriction(graph, c) : frictionLookup[c];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
       visible = false;
       break;
@@ -387,7 +388,7 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   for (let i = 0; i < nbrIdxs.length; i++) {
     const n = idxToCell[nbrIdxs[i]];
     if (n === curr) continue;
-    const f = frictionLookup?.[n];
+    const f = graph ? graphFriction(graph, n) : frictionLookup[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
     const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
@@ -1008,10 +1009,16 @@ function getBestNextStep(
   // depend on frictionLookup/affordanceLookup, which are stable for
   // the lifetime of a sim run, so build them once and cache on ctx instead of
   // re-allocating two closures on every one of the millions of invocations.
+  // When a gradient graph is available, read friction from its typed-array
+  // `frictionArr` (indexed by `cellToIdx`) — byte-identical to
+  // `frictionLookup[n]` but a typed-array read that drops the hot-path
+  // dependency on the N-entry `_frictionObj` plain object.
   let getFriction = ctx._getFriction;
   let getAffordance = ctx._getAffordance;
   if (!getFriction || !getAffordance) {
-    getFriction = (n) => frictionLookup[n];
+    getFriction = graph
+      ? (n) => graphFriction(graph, n)
+      : (n) => frictionLookup[n];
     getAffordance = (n) => affordanceLookup?.[n] ?? 0.1;
     ctx._getFriction = getFriction;
     ctx._getAffordance = getAffordance;
@@ -1039,15 +1046,23 @@ function getBestNextStep(
     ctx._candFriction = frictionArr;
     ctx._candGNs = gNsArr;
   }
-  // `isVisible` only closes over `frictionLookup` (stable per run). Cache it on
-  // ctx, rebuilding only if the friction source changes (e.g. a remap that
-  // swaps in a different _frictionObj). Avoids a closure allocation on every
-  // one of the millions of getBestNextStep invocations.
+  // `isVisible` only closes over `frictionLookup`/`graph` (stable per run).
+  // Cache it on ctx, rebuilding only if the friction source changes (e.g. a
+  // remap that swaps in a different _frictionObj). Avoids a closure
+  // allocation on every one of the millions of getBestNextStep invocations.
+  // When a gradient graph is available, friction is read from its typed-array
+  // `frictionArr` (byte-identical to `frictionLookup`) so the hot path
+  // drops the N-entry `_frictionObj` dependency.
   let isVisible = ctx._isVisibleFn;
-  if (!isVisible || ctx._isVisibleFrictionLookup !== frictionLookup) {
-    isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup);
+  if (
+    !isVisible ||
+    ctx._isVisibleFrictionLookup !== frictionLookup ||
+    ctx._isVisibleGraph !== graph
+  ) {
+    isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup, graph);
     ctx._isVisibleFn = isVisible;
     ctx._isVisibleFrictionLookup = frictionLookup;
+    ctx._isVisibleGraph = graph;
   }
   // `computeAngle` closes over `bearingMap` (stable per run); `curr` and
   // `currentDirection` vary per call, so they are passed as arguments. Cache the

@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
-import { getGradientGraph, getGraphNeighborIndicesR1, gradientGet } from './dijkstra.js';
+import { getGradientGraph, getGraphNeighborIndicesR1, gradientGet, graphFriction } from './dijkstra.js';
 import { _bearingFromLatLngs, angleDiff } from './bearing.js';
 import { reconstructVisibilityBearing } from './bearingIndex.js';
 import {
@@ -86,18 +86,34 @@ let _knScores = null;
 let _knGetFriction = null;
 let _knGetAffordance = null;
 let _knFrictionLookup = null;
+let _knFrictionGraph = null;
 let _knIsVisible = null;
 let _knVisibilityMap = null;
 let _knIsVisibleFriction = null;
+let _knIsVisibleGraph = null;
 let _knComputeAngle = null;
 let _knBearingMap = null;
 let _knWeights = null;
 let _knWeightsKey = null;
+// Mutable affordance snapshot (Float32Array(V), indexed by `graph.cellToIdx`),
+// built once per batch from `affordanceLookup`. The worker never applies wear
+// (that happens on the main thread after the batch returns), so this is
+// read-only here — but it lives in a typed array so hot-path affordance reads
+// are O(1) and we avoid holding a second N-entry plain object.
+let _knAffordanceArr = null;
 
 // Fast bearing lookup: uses precomputed bearing map when available,
 // falls back to trig-based calculation otherwise.
 function getBearingFast(a, b, bearingMap) {
   if (bearingMap) {
+    // Prefer the integer-index accessor (no `a + '::' + b` string concat +
+    // Proxy `indexOf`/`slice` in the hot path). The CSR-backed BearingIndex
+    // Proxy exposes `getBearing`; a legacy real `Map` does not, so fall back to
+    // the string-keyed read for those (tests).
+    if (typeof bearingMap.getBearing === 'function') {
+      const bng = bearingMap.getBearing(a, b);
+      if (typeof bng === 'number') return bng;
+    }
     const bng = bearingMap[a + '::' + b];
     if (typeof bng === 'number') return bng;
   }
@@ -164,7 +180,7 @@ function _getCachedDisk(center, r) {
   return arr;
 }
 
-function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
+function _getCachedVisibility(a, b, frictionLookup, visibilityMap, graph) {
   // Use precomputed visibility map when available
   if (visibilityMap) {
     const visible = visibilityMap[a];
@@ -176,7 +192,7 @@ function _getCachedVisibility(a, b, frictionLookup, visibilityMap) {
   const path = _getCachedPathCells(a, b);
   for (let i = 0; i < path.length; i++) {
     const c = path[i];
-    const f = frictionLookup[c];
+    const f = graph ? graphFriction(graph, c) : frictionLookup[c];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) return false;
   }
   return true;
@@ -206,7 +222,7 @@ function getGradientDirection(
   for (let i = 0; i < count; i++) {
     const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
     if (n === curr) continue;
-    const f = frictionLookup[n];
+    const f = graph ? graphFriction(graph, n) : frictionLookup[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
     const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
@@ -268,25 +284,44 @@ function getBestNextStep(
   if (gNsArr) gNsArr.length = 0;
 
   // Cache the friction/affordance closures (stable per batch) on module state.
-  if (!_knGetFriction || _knFrictionLookup !== frictionLookup) {
-    _knGetFriction = (n) => frictionLookup[n];
-    _knGetAffordance = (n) => affordanceLookup?.[n] ?? 0.1;
+  // When a gradient graph is available, read friction/affordance from the
+  // graph's typed arrays (indexed by `cellToIdx`) instead of the plain-object
+  // lookups — faster and avoids the N-entry plain-object copies in the hot path.
+  if (!_knGetFriction || _knFrictionLookup !== frictionLookup || _knFrictionGraph !== graph) {
+    _knGetFriction = graph
+      ? (n) => graphFriction(graph, n)
+      : (n) => frictionLookup[n];
+    _knGetAffordance = graph
+      ? (n) => {
+          const i = graph.cellToIdx[n];
+          return i === undefined ? 0.1 : _knAffordanceArr[i];
+        }
+      : (n) => affordanceLookup?.[n] ?? 0.1;
     _knFrictionLookup = frictionLookup;
+    _knFrictionGraph = graph;
   }
   const getFriction = _knGetFriction;
   const getAffordance = _knGetAffordance;
 
-  if (!_knIsVisible || _knVisibilityMap !== visibilityMap || _knIsVisibleFriction !== frictionLookup) {
-    _knIsVisible = (a, b) => _getCachedVisibility(a, b, frictionLookup, visibilityMap);
+  if (
+    !_knIsVisible ||
+    _knVisibilityMap !== visibilityMap ||
+    _knIsVisibleFriction !== frictionLookup ||
+    _knIsVisibleGraph !== graph
+  ) {
+    _knIsVisible = (a, b) => _getCachedVisibility(a, b, frictionLookup, visibilityMap, graph);
     _knVisibilityMap = visibilityMap;
     _knIsVisibleFriction = frictionLookup;
+    _knIsVisibleGraph = graph;
   }
   const isVisible = _knIsVisible;
 
   if (!_knComputeAngle || _knBearingMap !== bearingMap) {
     _knComputeAngle = (n, sLatLng, currentDirection, curr) => {
       if (bearingMap) {
-        const bng = bearingMap[curr + '::' + n];
+        let bng;
+        if (typeof bearingMap.getBearing === 'function') bng = bearingMap.getBearing(curr, n);
+        else bng = bearingMap[curr + '::' + n];
         if (typeof bng === 'number') return angleDiff(bng, currentDirection);
       }
       const eLatLng = _getCachedLatLng(n);
@@ -632,6 +667,22 @@ export function computeAgentBatch({
   // M3: when the shared r=1 CSR (+ AOI cell order) is supplied, filter it instead
   // of running a per-cell gridDisk pass.
   const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
+
+  // Snapshot affordance into a typed array indexed by `graph.cellToIdx` so the
+  // hot-path `getAffordance` reads are O(1) typed-array accesses (no N-entry
+  // plain-object copy held for the whole batch). Read-only in the worker.
+  if (graph) {
+    const V = graph.V;
+    const affArr = new Float32Array(V);
+    const idxToCell = graph.idxToCell;
+    for (let i = 0; i < V; i++) {
+      const a = affordanceLookup[idxToCell[i]];
+      affArr[i] = typeof a === 'number' ? a : 0.1;
+    }
+    _knAffordanceArr = affArr;
+  } else {
+    _knAffordanceArr = null;
+  }
 
   // Total agents for progress reporting
   let totalAgents = 0;

@@ -153,14 +153,22 @@ export function getGradientGraph(cellSource, r1Adjacency, viewHexes) {
   const deg = new Int32Array(V);
   let tempPos = 0;
   if (useR1) {
-    // viewHexes cell -> viewHexes index (cheap O(N) loop, no H3).
-    const vhIdx = Object.create(null);
-    for (let i = 0; i < viewHexes.length; i++) vhIdx[viewHexes[i]] = i;
+    // The CSR copy-out below reads `temp` in graph-index order (row i occupies
+    // `temp[adjOffsets[i]..adjOffsets[i+1])`), so `temp` MUST be filled in graph
+    // -index order too. `cellToIdx` is sorted, so viewHexes order != graph-index
+    // order — we therefore iterate graph indices `i` and map each back to its
+    // viewHexes index `gi`. Instead of the old N-entry plain-object `vhIdx`
+    // (string keys), use a compact `Int32Array(V)` graph-index -> viewHexes-index
+    // map, built in one pass over viewHexes.
     const r1Off = r1Adjacency.offsets;
     const r1Nb = r1Adjacency.neighbors;
+    const giOfIdx = new Int32Array(V);
+    for (let gi = 0; gi < viewHexes.length; gi++) {
+      const i = cellToIdx[viewHexes[gi]];
+      if (i !== undefined) giOfIdx[i] = gi;
+    }
     for (let i = 0; i < V; i++) {
-      const gi = vhIdx[cells[i]];
-      if (gi === undefined) continue; // passable cell not in viewHexes (defensive)
+      const gi = giOfIdx[i];
       const s = r1Off[gi];
       const e = r1Off[gi + 1];
       for (let x = s; x < e; x++) {
@@ -318,12 +326,29 @@ class DaryHeap {
 // Impassable / missing cells are encoded as -1 and skipped.
 // ---------------------------------------------------------------------------
 
+// Reusable working buffers for Dijkstra. Gradient computation runs one Dijkstra
+// per destination target; the `dist`/`visited` scratch is transient and identical
+// in shape every target, so we pool a single pair per module instance instead of
+// allocating D×V buffers during a gradient batch. Peak gradient memory drops from
+// D×(V dist + V visited) to 1×(V dist + V visited) + D output gradients. The
+// buffers are reset at the top of each `computeDijkstra` call, so reuse across
+// targets is safe (Dijkstra is synchronous and single-threaded per module).
+let _dialDist = null;
+let _heapDist = null;
+let _dijkstraVisited = null;
+function acquireDijkstraBuffers(V) {
+  if (!_dialDist || _dialDist.length < V) _dialDist = new Int32Array(V);
+  if (!_heapDist || _heapDist.length < V) _heapDist = new Float64Array(V);
+  if (!_dijkstraVisited || _dijkstraVisited.length < V) _dijkstraVisited = new Uint8Array(V);
+  return { dialDist: _dialDist, heapDist: _heapDist, visited: _dijkstraVisited };
+}
+
 // Dial's Algorithm with circular buckets. C = max edge weight (integer); the
 // bucket count is C+1. Because every edge weight w satisfies 1 <= w <= C, a
 // relaxed neighbor at distance du+w always lands in a bucket strictly ahead of
 // du in the circular order, so lazy deletion (stale duplicates skipped via
 // `visited`) is correct. Termination is tracked by nodeCount.
-function computeDijkstraDial(targetIdx, frictionArr, graph) {
+function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited) {
   const { V, adjOffsets, adjNeighbors } = graph;
 
   let C = 1;
@@ -335,8 +360,8 @@ function computeDijkstraDial(targetIdx, frictionArr, graph) {
   const buckets = new Array(B);
   for (let i = 0; i < B; i++) buckets[i] = [];
 
-  const dist = new Int32Array(V).fill(INF_INT);
-  const visited = new Uint8Array(V);
+  dist.fill(INF_INT);
+  visited.fill(0);
   dist[targetIdx] = 0;
   buckets[0].push(targetIdx);
   let nodeCount = 1;
@@ -375,10 +400,10 @@ function computeDijkstraDial(targetIdx, frictionArr, graph) {
   return dist;
 }
 
-function computeDijkstraHeap(targetIdx, frictionArr, graph, arity) {
+function computeDijkstraHeap(targetIdx, frictionArr, graph, arity, dist, visited) {
   const { V, adjOffsets, adjNeighbors } = graph;
-  const dist = new Float64Array(V).fill(Infinity);
-  const visited = new Uint8Array(V);
+  dist.fill(Infinity);
+  visited.fill(0);
   const heap = new DaryHeap(arity);
   dist[targetIdx] = 0;
   heap.insert(targetIdx, 0);
@@ -440,6 +465,10 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
   // worn friction can reach IMPASSABLE, which would make its bucket count C huge.
   const useDial = GRADIENT_ALGO === 'dial' && C <= DIAL_MAX_C;
 
+  // Pooled working buffers (reset inside the algorithm), so D targets reuse one
+  // dist/visited pair instead of allocating D of them.
+  const { dialDist, heapDist, visited } = acquireDijkstraBuffers(V);
+
   let dist;
   if (useDial) {
     // Quantize once per graph and cache it (depends only on frictionArr + scale).
@@ -450,10 +479,10 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
         q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
       graph.frictionQuantized = q;
     }
-    dist = computeDijkstraDial(targetIdx, q, graph);
+    dist = computeDijkstraDial(targetIdx, q, graph, dialDist, visited);
   } else {
     const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;
-    dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity);
+    dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity, heapDist, visited);
   }
 
   // M1: store the gradient as a single `Float32Array(V)` indexed by the graph's
@@ -488,6 +517,21 @@ export function gradientReachableCount(grad) {
   let n = 0;
   for (const k in grad) if (typeof grad[k] === 'number') n++;
   return n;
+}
+
+/**
+ * Read friction from a gradient graph's `frictionArr` (indexed by
+ * `cellToIdx`). Returns the friction number for passable cells, or
+ * `undefined` for impassable / out-of-graph cells (which the kernel skips
+ * exactly as a plain-object `frictionLookup[cell]` would). Byte-identical to
+ * `frictionLookup[cell]` for every cell the kernel queries, but a typed-array
+ * read instead of a string-keyed object read. Shared by both kernels so the
+ * hot path stops holding a second N-entry plain-object copy of the friction.
+ */
+export function graphFriction(graph, cell) {
+  if (!graph) return undefined;
+  const i = graph.cellToIdx[cell];
+  return i === undefined ? undefined : graph.frictionArr[i];
 }
 
 /**
