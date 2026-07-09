@@ -1,4 +1,3 @@
-import { MinHeap } from './minheap.js';
 import { FRICTION_COSTS } from './constants.js';
 import { gridDisk } from 'h3-js';
 
@@ -92,18 +91,35 @@ export function getGradientGraph(cellSource, r1Adjacency, viewHexes) {
   // traversed, so they are excluded from the graph entirely. This shrinks both
   // V and E; the result is identical to the legacy path, which skipped
   // impassable neighbors during relaxation.
+  // Build the passable cell list. When `viewHexes` is supplied (the
+  // production path: main thread, gradient worker, and agent worker all
+  // call this with the SAME `viewHexes` + friction source), iterate
+  // `viewHexes` IN ORDER and keep only passable cells. This yields a
+  // deterministic, identical `cellToIdx`/`idxToCell` on every caller
+  // WITHOUT the O(N log N) string sort (S6) — the old sort existed
+  // only to make the index assignment order-independent of the input
+  // object's key order, which `viewHexes` order already guarantees.
+  // The friction map is always built from `viewHexes`, so its key set is
+  // exactly `viewHexes`; the two enumeration orders therefore produce
+  // byte-identical graphs. The legacy no-`viewHexes` path (direct
+  // unit tests) keeps the sort for backward compatibility.
   const cells = [];
-  for (let i = 0; i < cellKeys.length; i++) {
-    const c = cellKeys[i];
-    const f = getF(c);
-    if (typeof f === 'number' && f < IMPASSABLE) cells.push(c);
+  if (Array.isArray(viewHexes) && viewHexes.length > 0) {
+    for (let i = 0; i < viewHexes.length; i++) {
+      const c = viewHexes[i];
+      const f = getF(c);
+      if (typeof f === 'number' && f < IMPASSABLE) cells.push(c);
+    }
+  } else {
+    for (let i = 0; i < cellKeys.length; i++) {
+      const c = cellKeys[i];
+      const f = getF(c);
+      if (typeof f === 'number' && f < IMPASSABLE) cells.push(c);
+    }
+    // Sort so `cellToIdx`/`idxToCell` are DETERMINISTIC for a given
+    // cell set, independent of the input object's key order.
+    cells.sort();
   }
-  // Sort the passable cell list so `cellToIdx` / `idxToCell` are DETERMINISTIC
-  // for a given cell set, independent of the input object's key order. This is
-  // what lets a gradient typed-array (indexed by this graph's `cellToIdx`) be
-  // produced on the main thread and consumed in a worker that rebuilds the same
-  // graph from the same friction source — both arrive at identical indices.
-  cells.sort();
   const V = cells.length;
 
   const cellToIdx = Object.create(null);
@@ -343,6 +359,25 @@ function acquireDijkstraBuffers(V) {
   return { dialDist: _dialDist, heapDist: _heapDist, visited: _dijkstraVisited };
 }
 
+// Pooled Dial bucket array. `B = C + 1` is constant for a given graph
+// (it depends only on `frictionMaxC`), so every target in a gradient batch
+// reuses the SAME bucket array — we just reset each bucket's length to 0
+// between targets instead of allocating B fresh `[]`s per target. Dijkstra is
+// synchronous and single-threaded per module, so reuse across targets is safe.
+// This removes the D×(B+1) array allocations that used to dominate gradient
+// batch GC churn at city scale (S2).
+let _dialBuckets = null;
+let _dialBucketsB = 0;
+function acquireDialBuckets(B) {
+  if (!_dialBuckets || _dialBucketsB < B) {
+    _dialBuckets = new Array(B);
+    for (let i = 0; i < B; i++) _dialBuckets[i] = [];
+    _dialBucketsB = B;
+  }
+  for (let i = 0; i < B; i++) _dialBuckets[i].length = 0;
+  return _dialBuckets;
+}
+
 // Dial's Algorithm with circular buckets. C = max edge weight (integer); the
 // bucket count is C+1. Because every edge weight w satisfies 1 <= w <= C, a
 // relaxed neighbor at distance du+w always lands in a bucket strictly ahead of
@@ -357,8 +392,9 @@ function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited) {
     if (f > C) C = f;
   }
   const B = C + 1;
-  const buckets = new Array(B);
-  for (let i = 0; i < B; i++) buckets[i] = [];
+  // Reuse the module-level pooled bucket array (reset in place) instead of
+  // allocating B fresh `[]`s per target (S2).
+  const buckets = acquireDialBuckets(B);
 
   dist.fill(INF_INT);
   visited.fill(0);
@@ -441,19 +477,26 @@ function computeDijkstraHeap(targetIdx, frictionArr, graph, arity, dist, visited
  * @param {string} targetCell - The H3 cell ID to compute distances from.
  * @param {Object|Function} frictionLookup - Plain object (cell->friction) or
  *   function (cell)->friction. Used to build the per-cell weight array.
- * @param {Function} [getNeighbors] - Optional neighbor resolver (legacy path).
- * @param {Object} [graph] - Optional precomputed gradient graph from
- *   getGradientGraph(). When provided, the indexed (CSR + typed-array) path is
- *   used, which is dramatically faster and reuses mapping-stage neighbor data.
- * @returns {Object} Plain object mapping reachable cell IDs to distance.
+ * @param {Object} graph - Precomputed gradient graph from getGradientGraph().
+ *   The indexed (CSR + typed-array) path is used, which is dramatically faster
+ *   and reuses mapping-stage neighbor data. A graph is always built by the
+ *   mapping stage (M3), so the legacy no-graph Dijkstra path has been removed
+ *   (P2-12).
+ * @returns {Float32Array} `Float32Array(V)` indexed by `graph.cellToIdx`
+ *   (Infinity = unreachable).
  */
-export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph) {
-  if (!graph) return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
+export function computeDijkstra(targetCell, frictionLookup, graph) {
+  if (!graph) {
+    // The mapping stage always builds a gradient graph (M3); the legacy
+    // no-graph Dijkstra path was dead code in production. Without a graph we
+    // cannot compute a gradient, so return an empty (unreachable) result.
+    return new Float32Array(0);
+  }
 
   const targetIdx = graph.cellToIdx[targetCell];
   if (targetIdx === undefined) {
-    // Target outside the graph's cell set — fall back to the legacy path.
-    return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
+    // Target outside the graph's cell set — unreachable from the AOI.
+    return new Float32Array(graph.V).fill(Infinity);
   }
 
   const { V, frictionArr, frictionMaxC } = graph;
@@ -558,48 +601,4 @@ export function gradientGet(grad, cell, graph) {
   }
   const v = grad ? grad[cell] : undefined;
   return typeof v === 'number' ? v : Infinity;
-}
-
-/**
- * Legacy string-keyed Dijkstra (binary MinHeap, on-the-fly neighbor lookup).
- * Kept for backward compatibility and as the exact fallback when no graph is
- * supplied.
- */
-export function computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors) {
-  const distances = Object.create(null);
-  const visited = Object.create(null);
-  const heap = new MinHeap();
-
-  const resolveFriction =
-    typeof frictionLookup === 'function' ? frictionLookup : (cell) => frictionLookup[cell];
-  const resolveNeighbors =
-    typeof getNeighbors === 'function' ? getNeighbors : (cell) => gridDisk(cell, 1);
-
-  distances[targetCell] = 0;
-  heap.insert(targetCell, 0);
-
-  while (heap.size() > 0) {
-    const current = heap.extractMin();
-    if (visited[current]) continue;
-    visited[current] = true;
-
-    const currentDistance = distances[current];
-    const neighbors = resolveNeighbors(current);
-
-    for (let i = 0; i < neighbors.length; i++) {
-      const neighbor = neighbors[i];
-      if (neighbor === current) continue;
-
-      const friction = resolveFriction(neighbor);
-      if (typeof friction !== 'number' || friction >= FRICTION_COSTS.IMPASSABLE) continue;
-
-      const nextDistance = currentDistance + friction;
-      if (!Object.hasOwn(distances, neighbor) || nextDistance < distances[neighbor]) {
-        distances[neighbor] = nextDistance;
-        heap.insert(neighbor, nextDistance);
-      }
-    }
-  }
-
-  return distances;
 }

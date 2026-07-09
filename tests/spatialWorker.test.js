@@ -56,7 +56,8 @@ describe('computeDijkstraGradientSnapshot', () => {
   it('should handle empty friction entries', () => {
     const result = computeDijkstraGradientSnapshot(h3Cell, {});
     const graph = getGradientGraph({});
-    expect(gradientGet(result, h3Cell, graph)).toBe(0);
+    // Target cell is not in the (empty) navigable graph, so it is unreachable.
+    expect(gradientGet(result, h3Cell, graph)).toBe(Infinity);
   });
 
   it('should handle Map input with single cell', () => {

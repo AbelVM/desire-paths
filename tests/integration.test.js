@@ -179,24 +179,17 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
       latLngArr: new Float32Array(N * 4),
     };
   }),
-  runMergeCellsTask: vi.fn(async ({ cells, multiEntries, cellFrictionEntries, blurUpdateMap, blurWeights }) => {
+  runMergeCellsTask: vi.fn(async ({ cells, cellFrictionEntries, blurUpdateMap, blurWeights }) => {
     // Mock per-cell assembly: replicate the essential mapping (friction from
-    // cellFrictionEntries / multiEntries min, affordance classification) so the
-    // mapping stage populates state without exercising the real worker compute.
+    // cellFrictionEntries, affordance classification) so the mapping stage
+    // populates state without exercising the real worker compute. The layer-map
+    // objects are handled on the main thread (P2-9), so this mock only returns
+    // the typed friction/affordance arrays.
     const frictionArr = new Float64Array(cells.length);
     const affArr = new Float64Array(cells.length);
-    const multiArr = new Array(cells.length);
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
-      const layerMap = multiEntries[cell];
-      let fr;
-      if (layerMap) {
-        let min = Infinity;
-        for (const k in layerMap) if (layerMap[k] < min) min = layerMap[k];
-        fr = min;
-      } else {
-        fr = cellFrictionEntries[cell] ?? 0;
-      }
+      let fr = cellFrictionEntries[cell] ?? 0;
       if (blurUpdateMap && blurUpdateMap[cell] !== undefined) fr = blurUpdateMap[cell];
       let aff;
       if (fr >= 999999) aff = 0.1;
@@ -206,9 +199,8 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
       if (blurWeights && blurWeights[cell] != null) aff = Math.max(0, aff - Math.min(aff, blurWeights[cell] * 0.4));
       frictionArr[i] = fr;
       affArr[i] = aff;
-      multiArr[i] = layerMap || Object.create(null);
     }
-    return { cells, frictionArr, affArr, multiArr };
+    return { frictionArr, affArr };
   }),
   // Remaining exports importers reference — provided as no-ops / safe shapes.
   runAgentBatches: vi.fn(async () => ({

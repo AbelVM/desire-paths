@@ -551,12 +551,18 @@ describe('_computeDijkstraGradient', () => {
     for (const n of neighbors) {
       frictionObj[n] = 1;
     }
-    // Don't set _cellState so it uses _frictionObj directly
+    // The gradient graph is always built from `cellFrictionMap` (the stable
+    // AOI cell set); `_frictionObj` supplies the per-cell friction lookup.
+    // Mirror that here so the graph is non-empty (P2-12 removed the legacy
+    // no-graph Dijkstra fallback that previously masked a missing graph).
+    const cellFrictionMap = new Map();
+    for (const k in frictionObj) cellFrictionMap.set(k, frictionObj[k]);
     const map = {
       _frictionObj: frictionObj,
+      cellFrictionMap,
     };
     const result = _computeDijkstraGradient(map, h3);
-    const graph = getGradientGraph(frictionObj);
+    const graph = getGradientGraph(cellFrictionMap);
     expect(gradientGet(result, h3, graph)).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
@@ -590,7 +596,8 @@ describe('_computeDijkstraGradient', () => {
     };
     const result = _computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(new Map());
-    expect(gradientGet(result, h3, graph)).toBe(0);
+    // Target cell is not in the (empty) navigable graph, so it is unreachable.
+    expect(gradientGet(result, h3, graph)).toBe(Infinity);
   });
 });
 
@@ -905,8 +912,6 @@ describe('unreachable destination warning', () => {
       _cellStateMappingGen: 1,
       _gradientCacheGen: 1,
       _visibilityCacheGen: 1,
-      _precomputedVisibility: { gen: 1, data: Object.create(null) },
-      _precomputedBearings: { gen: 1, data: Object.create(null) },
       _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
       showAlertCard: (msg, opts) => {
         map._alertMsg = msg;
@@ -940,8 +945,6 @@ describe('unreachable destination warning', () => {
       _cellStateMappingGen: 1,
       _gradientCacheGen: 1,
       _visibilityCacheGen: 1,
-      _precomputedVisibility: { gen: 1, data: Object.create(null) },
-      _precomputedBearings: { gen: 1, data: Object.create(null) },
       _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
       showAlertCard: (msg, opts) => {
         map._alertMsg = msg;
@@ -981,8 +984,6 @@ describe('unreachable destination warning', () => {
       _cellStateMappingGen: 1,
       _gradientCacheGen: 1,
       _visibilityCacheGen: 1,
-      _precomputedVisibility: { gen: 1, data: Object.create(null) },
-      _precomputedBearings: { gen: 1, data: Object.create(null) },
       _precomputedNeighborDisks: { gen: 1, data: Object.create(null) },
       showAlertCard: (msg, opts) => {
         map._alertMsg = msg;

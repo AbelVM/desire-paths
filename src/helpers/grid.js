@@ -10,7 +10,6 @@ import {
 } from './spatialWorker.js';
 import { clearComputeCaches, clearGradientCache } from './compute.js';
 import { invalidateGradientGraph } from './dijkstra.js';
-import { reconstructVisibilityBearing } from './bearingIndex.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -185,18 +184,23 @@ export async function triggerFastScan(state, mapInstance) {
   // in a worker pool, sharded by cell. The heavy per-cell work (layer merge,
   // min-friction, affordance classification, blur application) runs off the main
   // thread in parallel; we only write the results into `state` here (O(N) assigns).
+  // P2-9: the merge worker no longer ships the N layer-map objects to/from the
+  // worker — it returns only the friction/affordance typed arrays (it never reads
+  // the layer-map contents). We write `multiFrictionMap` from the local
+  // `multiEntries` (from the fast-scan pass) directly, avoiding a 2× clone of N
+  // objects. We also iterate `viewHexes` by index instead of the worker's returned
+  // `cells` (N strings), avoiding a redundant clone.
   const merged = await runMergeCellsTask({
     cells: viewHexes,
-    multiEntries,
     cellFrictionEntries: build.cellFrictionEntries,
     blurUpdateMap,
     blurWeights,
   });
-  for (let i = 0; i < merged.cells.length; i++) {
-    const cell = merged.cells[i];
+  for (let i = 0; i < viewHexes.length; i++) {
+    const cell = viewHexes[i];
     const fr = merged.frictionArr[i];
     const aff = merged.affArr[i];
-    const target = merged.multiArr[i];
+    const target = multiEntries[cell] || Object.create(null);
     state.cellFrictionMap.set(cell, fr);
     state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
@@ -215,9 +219,14 @@ export async function triggerFastScan(state, mapInstance) {
   // flat CSR typed arrays (no Map) and transfers them via a SharedArrayBuffer
   // (zero-copy when cross-origin isolated) or an ArrayBuffer (memcpy). The large
   // bearing Map is NEVER structured-cloned across the worker boundary — that
-  // clone is what previously triggered SIGILL. We rebuild the plain-object
-  // visibility map and the bearing Map IN-PROCESS on the main thread (safe: no
-  // cross-boundary clone), so the simulation's consumers are untouched.
+  // clone is what previously triggered SIGILL.
+  // M3: the main thread no longer eagerly rebuilds the visibility/bearing Proxy
+  // indices here. The agent worker rebuilds them IN-WORKER from the raw packed
+  // CSR (S1), and the main-thread preview kernel rebuilds them lazily on first
+  // use from the same CSR (see `getMainThreadVisibilityBearing` in compute.js).
+  // The packed CSR buffer is the single source of truth; we never hold the
+  // O(N)-cellToIndex + Proxy structures on the main thread unless a preview
+  // actually needs them.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
   // lazily and cached during the simulation via getNeighborDisk (see compute.js).
   const mappingGraph = await runBuildMappingGraph(
@@ -233,17 +242,16 @@ export async function triggerFastScan(state, mapInstance) {
   // detaching the buffers held here.
   state._r1Adjacency = await r1AdjacencyPromise;
   const csr = await runVisibilityBearingTask(mappingGraph, viewHexes, visionDepth);
-  const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
-  state._precomputedVisibility = { gen: state._mappingGeneration, data: visibilityData };
-  state._precomputedBearings = { gen: state._mappingGeneration, data: bearingMap };
-  // Keep the raw packed CSR buffer (offsets/neighbors/bearings) so the agent
-  // worker can REBUILD the visibility + bearing indices IN-WORKER from it plus
-  // `viewHexes` (see S1-SAB, review6 §3 option 1). Structured-cloning the
-  // BearingIndex/VisibilityIndex Proxies drops their function-valued traps, so
-  // posting them to a worker silently degrades every lookup to the slow trig /
-  // path-cell fallback. Shipping the buffer + viewHexes instead keeps the O(log P)
-  // index off the main thread. The buffer is SAB-backed when cross-origin isolated
-  // (zero-copy share) and an ArrayBuffer otherwise (cloned once).
+  // M3: keep ONLY the raw packed CSR buffer (offsets/neighbors/bearings) as the
+  // single source of truth. The agent worker rebuilds the visibility + bearing
+  // indices IN-WORKER from it plus `viewHexes` (S1-SAB, review6 §3 option 1);
+  // structured-cloning the BearingIndex/VisibilityIndex Proxies drops their
+  // function-valued traps, so posting them to a worker silently degrades every
+  // lookup to the slow trig / path-cell fallback. Shipping the buffer + viewHexes
+  // instead keeps the O(log P) index off the main thread. The buffer is SAB-backed
+  // when cross-origin isolated (zero-copy share) and an ArrayBuffer otherwise
+  // (cloned once). The main-thread preview kernel rebuilds lazily from this same
+  // buffer via `getMainThreadVisibilityBearing` (compute.js).
   state._visibilityBearingCSR = { gen: state._mappingGeneration, ...csr };
 
   // Friction/affordance lookups changed — bump so updateLayers rebuilds the

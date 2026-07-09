@@ -60,9 +60,12 @@ describe('getGradientGraph M3 r1Adjacency fast path', () => {
   frictionEntries[viewHexes[2]] = FRICTION_COSTS.IMPASSABLE;
 
   it('builds a graph byte-identical to the gridDisk path (same indices + CSR)', () => {
-    // gridDisk path (no r1Adjacency).
+    // gridDisk path (no r1Adjacency) — still enumerated in `viewHexes`
+    // order (S6): when `viewHexes` is supplied the graph is built by
+    // iterating `viewHexes` in order rather than sorting cell strings, so
+    // this baseline matches the r1 fast path below.
     invalidateGradientGraph();
-    const gDisk = getGradientGraph(frictionEntries);
+    const gDisk = getGradientGraph(frictionEntries, null, viewHexes);
     const snapDisk = {
       V: gDisk.V,
       idxToCell: gDisk.idxToCell.slice(),
@@ -99,20 +102,24 @@ describe('getGradientGraph M3 r1Adjacency fast path', () => {
   it('produces identical Dijkstra gradients from both graph paths', () => {
     const target = viewHexes[0];
     invalidateGradientGraph();
-    const gDisk = getGradientGraph(frictionEntries);
-    const distDisk = computeDijkstra(target, frictionEntries, null, gDisk);
+    // gridDisk path enumerated in `viewHexes` order (S6) so it
+    // matches the r1 fast path below.
+    const gDisk = getGradientGraph(frictionEntries, null, viewHexes);
+    const distDisk = computeDijkstra(target, frictionEntries, gDisk);
 
     invalidateGradientGraph();
     const r1 = buildR1Adjacency({ viewHexes });
     const gR1 = getGradientGraph(frictionEntries, r1, viewHexes);
-    const distR1 = computeDijkstra(target, frictionEntries, null, gR1);
+    const distR1 = computeDijkstra(target, frictionEntries, gR1);
 
     expect(Array.from(distR1)).toEqual(Array.from(distDisk));
   });
 
   it('ignores the r1 path when N does not match viewHexes (falls back to gridDisk)', () => {
     invalidateGradientGraph();
-    const gDisk = getGradientGraph(frictionEntries);
+    // gridDisk path enumerated in `viewHexes` order (S6) so it
+    // matches the r1 fast path below (both viewHexes order).
+    const gDisk = getGradientGraph(frictionEntries, null, viewHexes);
     const diskOffsets = Array.from(gDisk.adjOffsets);
     invalidateGradientGraph();
     // Mismatched N → useR1 is false → gridDisk path, still correct.
@@ -160,19 +167,13 @@ describe('buildMappingGraph', () => {
 });
 
 describe('mergeCellsChunk', () => {
-  it('reuses the layer map by reference and derives friction from cellFrictionEntries', () => {
+  it('derives friction/affordance from cellFrictionEntries (layer maps handled on main thread, P2-9)', () => {
     const cell = center;
-    const layerMap = Object.create(null);
-    layerMap['0'] = FRICTION_COSTS.PAVEMENT; // 1.0
-    layerMap['1'] = FRICTION_COSTS.LIGHT_PARK; // 2.5
-    const multiEntries = Object.create(null);
-    multiEntries[cell] = layerMap;
     const cellFrictionEntries = Object.create(null);
     cellFrictionEntries[cell] = FRICTION_COSTS.PAVEMENT; // min across layers
 
     const out = mergeCellsChunk({
       cells: [cell],
-      multiEntries,
       cellFrictionEntries,
       blurUpdateMap: null,
       blurWeights: null,
@@ -180,13 +181,12 @@ describe('mergeCellsChunk', () => {
 
     expect(out.frictionArr[0]).toBe(FRICTION_COSTS.PAVEMENT);
     expect(out.affArr[0]).toBe(AFFORDANCE.PAVEMENT);
-    // The returned layer map is the SAME reference (no per-cell copy).
-    expect(out.multiArr[0]).toBe(layerMap);
+    // The merge kernel no longer returns the layer map (P2-9) — only typed arrays.
+    expect(out.multiArr).toBeUndefined();
   });
 
   it('applies the impassable-blur friction override', () => {
     const cell = center;
-    const multiEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);
     cellFrictionEntries[cell] = FRICTION_COSTS.PAVEMENT;
     const blurUpdateMap = Object.create(null);
@@ -194,7 +194,6 @@ describe('mergeCellsChunk', () => {
 
     const out = mergeCellsChunk({
       cells: [cell],
-      multiEntries,
       cellFrictionEntries,
       blurUpdateMap,
       blurWeights: null,
@@ -205,13 +204,11 @@ describe('mergeCellsChunk', () => {
 
   it('classifies impassable friction as IMPASSABLE affordance', () => {
     const cell = center;
-    const multiEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);
     cellFrictionEntries[cell] = FRICTION_COSTS.IMPASSABLE;
 
     const out = mergeCellsChunk({
       cells: [cell],
-      multiEntries,
       cellFrictionEntries,
       blurUpdateMap: null,
       blurWeights: null,

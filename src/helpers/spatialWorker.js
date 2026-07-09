@@ -265,34 +265,44 @@ function splitIntoBalancedChunks(items, chunkCount, costFn) {
 }
 
   // Flatten large payloads for cheaper structured-clone by converting plain
-  // friction lookup objects into a transferable typed-array representation.
+  // friction/affordance lookup objects into transferable typed-array
+  // representations. `frictionEntries` was already flattened; extend the same
+  // treatment to `affordanceEntries` (S4) so the agent-batch worker no
+  // longer structured-clones a second N-entry plain object on every run.
   function flattenPayloadAndTransfers(payload) {
     if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
-    const fe = payload.frictionEntries;
-    if (!fe || typeof fe !== 'object') return { payload, transfer: [] };
-    // If already flattened, nothing to do
+    function flattenOne(fe) {
+    if (!fe || typeof fe !== 'object') return null;
+    // Already flattened — nothing to do.
     if (
       fe.__flat &&
       Array.isArray(fe.keys) &&
       (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer)
     )
-      return { payload, transfer: [] };
-
-    // frictionEntries is always a plain object (normalised before dispatch)
+      return null;
     const keys = Object.keys(fe);
-    if (keys.length === 0) return { payload, transfer: [] };
-    // S1-SAB (review6 §3): back the flattened buffer with a SharedArrayBuffer when
-    // the page is cross-origin isolated, so the worker reads the SAME memory the
-    // main thread built (zero-copy share, no memcpy, and the main thread keeps its
-    // own copy for the next run). When SAB is unavailable the buffer is a plain
-    // ArrayBuffer and is transferred (detached) exactly as before.
+    if (keys.length === 0) return null;
+    // S1-SAB (review6 §3): back the flattened buffer with a SharedArrayBuffer
+    // when cross-origin isolated, so the worker reads the SAME memory (zero-copy
+    // share, no memcpy). Otherwise a plain ArrayBuffer is transferred (detached).
     const vals = new Float32Array(allocTransferBuffer(keys.length * 4));
     for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
-
-    const newPayload = Object.assign({}, payload, { frictionEntries: { __flat: true, keys, vals } });
-    // A SharedArrayBuffer is shared by reference and must NOT be placed in the
-    // transfer list (doing so throws); an ArrayBuffer is transferred as before.
     const transfer = vals.buffer instanceof SharedArrayBuffer ? [] : [vals.buffer];
+    return { flat: { __flat: true, keys, vals }, transfer };
+  }
+
+  let transfer = [];
+  let newPayload = payload;
+  const fFlat = flattenOne(payload.frictionEntries);
+  if (fFlat) {
+    newPayload = Object.assign({}, newPayload, { frictionEntries: fFlat.flat });
+    transfer = transfer.concat(fFlat.transfer);
+  }
+  const aFlat = flattenOne(payload.affordanceEntries);
+  if (aFlat) {
+    newPayload = Object.assign({}, newPayload, { affordanceEntries: aFlat.flat });
+    transfer = transfer.concat(aFlat.transfer);
+  }
     return { payload: newPayload, transfer };
   }
 
@@ -661,7 +671,9 @@ export async function runAgentBatches(
     // would silently degrade every lookup to the slow trig / path-cell fallback.
     visibilityEntries: useWorker ? null : visibilityEntries,
     options,
-    accumulatedFootprints,
+    // `accumulatedFootprints` is no longer shipped (S5): the worker
+    // owns its own empty accumulator, so we avoid a needless
+    // structured-clone of an (empty) object across the boundary.
     originDestDistances,
     bearingMap: useWorker ? null : bearingMap,
     visibilityBearingCSR: options?.visibilityBearingCSR || null,
@@ -983,21 +995,22 @@ export async function runVisibilityBearingTask(graph, viewHexes, visionDepth) {
 
 /**
  * Assemble per-cell mapping state (friction, affordance, multi-friction layers)
- * off the main thread, sharded across the worker pool by cell.
+ * off the main thread, in a single worker call over the full cell set.
  *
- * Each shard runs `mergeCellsChunk` (layer merge, min-friction, affordance
- * classification, blur application) for its cells and returns flat typed
- * arrays + per-cell layer maps. The orchestrator merges the shards and returns
- * a single concatenated result; the caller only does O(N) assignments into
- * `state` (no min-reduction / classification / object construction on the UI
- * thread). Falls back to a single local compute when only one worker is available.
+ * `mergeCellsChunk` runs the per-cell work (min-friction, affordance
+ * classification, blur application) and returns flat typed arrays. The
+ * orchestrator returns them; the caller only does O(N) assignments into `state`
+ * (no min-reduction / classification / object construction on the UI thread).
+ * The per-cell layer maps are NOT returned — the caller writes
+ * `multiFrictionMap` from its local `multiEntries` (P2-9), avoiding a 2× clone
+ * of N objects. Falls back to a single local compute when Workers are
+ * unavailable.
  *
- * @returns { cells, frictionArr: Float64Array, affArr: Float64Array, multiArr: Array }
- *          indexed in cell order; `multiArr[i]` is the merged layer map (or empty).
+ * @returns { frictionArr: Float64Array, affArr: Float64Array }
+ *          indexed in `viewHexes` (cell) order.
  */
 export async function runMergeCellsTask({
   cells,
-  multiEntries,
   cellFrictionEntries,
   blurUpdateMap,
   blurWeights,
@@ -1007,7 +1020,6 @@ export async function runMergeCellsTask({
       cells: [],
       frictionArr: new Float64Array(0),
       affArr: new Float64Array(0),
-      multiArr: [],
     };
   }
 
@@ -1018,13 +1030,20 @@ export async function runMergeCellsTask({
   // once either way. A single off-main-thread call removes all main-thread
   // per-cell work. `runWorker` falls back to inline execution when Workers are
   // unavailable.
-  return runWorker('merge-cells', {
+  //
+  // P2-9: the N layer-map objects (`multiEntries`) are NO LONGER shipped to the
+  // worker or back. The merge kernel never reads their contents (it only needs
+  // the already-reduced min friction in `cellFrictionEntries`), so the main
+  // thread writes `multiFrictionMap` from its local `multiEntries` directly,
+  // avoiding a 2× structured-clone of N objects. We also drop the returned
+  // `cells` (N strings) — the caller iterates `viewHexes` by index instead.
+  const result = await runWorker('merge-cells', {
     cells,
-    multiEntries,
     cellFrictionEntries,
     blurUpdateMap,
     blurWeights,
   });
+  return { frictionArr: result.frictionArr, affArr: result.affArr };
 }
 
 /**

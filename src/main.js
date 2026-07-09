@@ -72,7 +72,7 @@ class DesireMap {
       '_frictionSnapshotGen',
       '_affordanceSnapshotGen',
       '_multiFrictionSnapshotGen',
-      '_precomputedVisibility',
+      '_visibilityBearingCSR',
       '_precomputedNeighborDisks',
       'simulationParams',
     ]);

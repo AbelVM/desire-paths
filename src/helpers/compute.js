@@ -42,6 +42,7 @@ import {
   selectBestCandidate,
   resolveStepLine,
 } from './agentStep.js';
+import { reconstructVisibilityBearing } from './bearingIndex.js';
 
 // Module-level lat/lng cache. Uses a Map so its insertion order gives us an
 // O(1) LRU for free: on a hit we delete+re-set the key to move it to the
@@ -205,29 +206,86 @@ function getNeighborDisk(cell, visualDepth, gen) {
   return d;
 }
 
-// Precompute grid distances for all origin-destination pairs.
-// Returns a flat string-keyed map: "origin::dest" → distance (H3 grid units).
-// Eliminates per-tick gridDistance calls in runSingleAgentPath termination checks.
+// Precompute grid distances for all origin-destination pairs as a typed matrix
+// (S7). Returns `{ nodeList, nodeToIdx, matrix }` where `matrix` is a
+// `Float32Array(M*M)` (M = unique origin/destination cells) indexed by node
+// indices, initialized to Infinity. Only origin×dest and dest×origin pairs are
+// filled (symmetric), matching the old string-keyed table's node-only key set.
+// This clones cheaply to the worker (one typed array + a small Map) and needs no
+// per-lookup string concat. Unfilled pairs stay Infinity, so `lookupOriginDest`
+// returns `undefined` for them — preserving the old "lookup only hits for node
+// pairs" semantics exactly (the per-tick lookup is still gated on `nodeSet`).
 function precomputeOriginDestDistances(origins, destinations) {
-  const result = Object.create(null);
+  const nodeSet = new Set();
+  for (let i = 0; i < origins.length; i++) nodeSet.add(origins[i]);
+  for (let j = 0; j < destinations.length; j++) nodeSet.add(destinations[j]);
+  const nodeList = Array.from(nodeSet);
+  const M = nodeList.length;
+  const nodeToIdx = new Map();
+  for (let i = 0; i < M; i++) nodeToIdx.set(nodeList[i], i);
+  const matrix = new Float32Array(M * M).fill(Infinity);
   for (let i = 0; i < origins.length; i++) {
     const o = origins[i];
+    const oi = nodeToIdx.get(o);
     for (let j = 0; j < destinations.length; j++) {
       const d = destinations[j];
       if (o === d) continue;
-      result[o + '::' + d] = gridDistance(o, d);
-      result[d + '::' + o] = gridDistance(d, o);
+      const di = nodeToIdx.get(d);
+      const dist = gridDistance(o, d);
+      matrix[oi * M + di] = dist;
+      matrix[di * M + oi] = dist; // reverse direction (table was symmetric)
     }
   }
+  return { nodeList, nodeToIdx, matrix };
+}
+
+// O(1) typed-matrix lookup for the precomputed origin-destination distances.
+// Returns the finite distance, or `undefined` when the pair is not a filled
+// node pair (Infinity / non-node). Safe to call with a null `od`.
+function lookupOriginDest(od, a, b) {
+  if (!od) return undefined;
+  const ai = od.nodeToIdx.get(a);
+  const bi = od.nodeToIdx.get(b);
+  if (ai === undefined || bi === undefined) return undefined;
+  const v = od.matrix[ai * od.nodeList.length + bi];
+  return Number.isFinite(v) ? v : undefined;
+}
+
+// M3: lazily rebuild the main-thread visibility + bearing indices from the raw
+// packed CSR buffer (`_visibilityBearingCSR`) + AOI cell order (`_viewHexes`),
+// instead of holding the eagerly-built Proxy indices that grid.js used to
+// construct. The agent worker already rebuilds from this same CSR (S1); the
+// main-thread preview kernel (runSingleAgentPath / _getCachedVisibility) now does
+// the same, on first use, and caches by mapping generation. This keeps the CSR as
+// the single source of truth and avoids the O(N) cellToIndex + Proxy construction
+// when only the worker path runs. Cached in a WeakMap keyed by state so the proxy
+// get-trap (which returns undefined for unknown `_`-prefixed props) can't hide the
+// value, and so the cache is collected with the state.
+const _mtVisBearingCache = new WeakMap();
+function getMainThreadVisibilityBearing(state) {
+  const gen = state._mappingGeneration ?? 0;
+  const cached = _mtVisBearingCache.get(state);
+  if (cached && cached.gen === gen) return cached;
+  const csr = state._visibilityBearingCSR;
+  const viewHexes = state._viewHexes || null;
+  let visibilityData = null;
+  let bearingMap = null;
+  if (csr && viewHexes) {
+    const recon = reconstructVisibilityBearing(csr, viewHexes);
+    visibilityData = recon.visibilityData.data;
+    bearingMap = recon.bearingMap;
+  }
+  const result = { gen, visibilityData, bearingMap };
+  _mtVisBearingCache.set(state, result);
   return result;
 }
 
 function _getCachedVisibility(ctx, a, b, frictionLookup, graph) {
-  // Use precomputed visibility sets when available and fresh
-  const precomputed = ctx._precomputedVisibility;
+  // M3: use the lazily-rebuilt main-thread visibility index (from raw CSR).
+  const mt = getMainThreadVisibilityBearing(ctx);
   const currentGen = ctx._mappingGeneration ?? 0;
-  if (precomputed && precomputed.gen === currentGen) {
-    const visible = precomputed.data[a];
+  if (mt.visibilityData && mt.gen === currentGen) {
+    const visible = mt.visibilityData[a];
     if (visible) {
       return !!visible[b];
     }
@@ -431,18 +489,11 @@ function runSingleAgentPath(
   // allocation + object read for the intermediate cells (the vast majority).
   let nodeSet = null;
   if (originDestDistances) {
-    nodeSet = new Set();
-    for (const key in originDestDistances) {
-      const sep = key.indexOf('::');
-      if (sep > 0) {
-        nodeSet.add(key.slice(0, sep));
-        nodeSet.add(key.slice(sep + 2));
-      }
-    }
+    nodeSet = new Set(originDestDistances.nodeList);
   }
   let distToTarget = 0;
   if (originDestDistances) {
-    const d = originDestDistances[originCell + '::' + destCell];
+    const d = lookupOriginDest(originDestDistances, originCell, destCell);
     if (typeof d === 'number') distToTarget = d;
   }
 
@@ -465,7 +516,7 @@ function runSingleAgentPath(
     // concat + object read for intermediate cells.
     if (originDestDistances) {
       if (nodeSet && nodeSet.has(simCurrent)) {
-        const currentDist = originDestDistances[simCurrent + '::' + destCell];
+        const currentDist = lookupOriginDest(originDestDistances, simCurrent, destCell);
         if (typeof currentDist === 'number') distToTarget = currentDist;
       }
     } else {
@@ -808,7 +859,8 @@ export async function computeDesirePaths(state, mapInstance) {
   // True ABM: shared footprint accumulator — all agents in this simulation
   // see each other's positions as accumulated footprints.  This is the key
   // difference from Monte-Carlo sampling where every agent plans independently.
-  const accumulatedFootprints = Object.create(null);
+  // The accumulator is owned by the agent worker (S5); it is no longer
+  // created or shipped from the main thread.
 
   let perTargetContribs;
   const { plan, assignedCounts, totalAgents } = buildSimulationPlan(
@@ -881,6 +933,7 @@ export async function computeDesirePaths(state, mapInstance) {
       } catch (_e) {}
     });
 
+    const mtVis = getMainThreadVisibilityBearing(state);
     const agentResults = await runAgentBatches(
       plan,
       state._frictionObj || state.cellFrictionMap,
@@ -888,10 +941,12 @@ export async function computeDesirePaths(state, mapInstance) {
       state._affordanceObj || state.affordanceMap,
       hexes,
       {
-        visibilityEntries: state._precomputedVisibility?.data || null,
-        accumulatedFootprints,
+        // M3: lazily-rebuilt main-thread indices (from raw CSR). The worker path
+        // ignores these and rebuilds from `visibilityBearingCSR` + `viewHexes`
+        // (S1); they are only used by the non-worker fallback (Node/SSR).
+        visibilityEntries: mtVis.visibilityData || null,
         originDestDistances: odDistances,
-        bearingMap: state._precomputedBearings?.data || null,
+        bearingMap: mtVis.bearingMap || null,
         // S1-SAB (review6 §3 option 1): ship the raw packed visibility/bearing CSR
         // buffer + the exact AOI cell order so the agent worker can REBUILD the
         // visibility + bearing indices in-worker (structured-cloning the Proxies
@@ -1300,7 +1355,7 @@ function computeDijkstraGradient(ctx, targetCell) {
   // cellFrictionMap reference. Topology is static per mapping generation; only
   // the per-cell friction (which can change via emergent wear) is rebuilt.
   const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  return computeDijkstra(targetCell, getFriction, null, graph);
+  return computeDijkstra(targetCell, getFriction, graph);
 }
 
 /**
@@ -1603,7 +1658,8 @@ function _recomputeTargetContribs(ctx, targetCell, newAssignedCounts) {
         simAgentId,
         applyWear: false,
         accumulatedFootprints: null, // incremental API — not part of main ABM loop
-        bearingMap: ctx._precomputedBearings?.data || null,
+        // M3: lazily-rebuilt main-thread bearing index (from raw CSR).
+        bearingMap: getMainThreadVisibilityBearing(ctx).bearingMap || null,
         originDestDistances: precomputeOriginDestDistances([o], [targetCell]),
       });
 

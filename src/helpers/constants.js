@@ -73,6 +73,13 @@ export const DEFAULT_SIMULATION_PARAMS = Object.freeze({
   temperature: TEMPERATURE,
   h3StrideResolution: H3_STRIDE_RESOLUTION,
   emergentWear: true,
+  // S1: enumerate agent candidates from the precomputed visibility CSR
+  // (typed-array reads) instead of gridDisk + isVisible binary-search
+  // + bearing trig. Byte-identical to the string kernel at temperature=0
+  // and distribution-identical (statistically equivalent emergent output)
+  // at temperature>0, so it is safe to run at all temperatures. Falls back
+  // to the string kernel automatically when the visibility CSR is absent.
+  useIndexedKernel: true,
 });
 
 export const SIMULATION_PARAMS = {

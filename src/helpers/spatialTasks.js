@@ -188,7 +188,7 @@ function computeDijkstraGradientForLookup(targetCell, frictionLookup, r1Adjacenc
   // shared r=1 CSR (+ AOI cell order) is supplied, filter it instead of running a
   // per-cell gridDisk pass.
   const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
-  return computeDijkstra(targetCell, frictionLookup, null, graph);
+  return computeDijkstra(targetCell, frictionLookup, graph);
 }
 
 export function computeDijkstraGradientSnapshot(targetCell, frictionSource) {
@@ -893,14 +893,19 @@ export function computeVisibilityBearingCSRIndexed({
  * construction on the UI thread).
  *
  * @param cells            subset of viewHexes this shard owns
- * @param multiEntries     { cell: layerMap } for these cells (merged layers)
  * @param cellFrictionEntries { cell: number } fast-scan fallback friction
  * @param blurUpdateMap    { cell: number } | null  blur friction overrides
  * @param blurWeights      { cell: number } | null  blur affordance penalties
+ *
+ * NOTE: the per-cell layer map (`multiFrictionMap` entry) is NOT handled here.
+ * The merge worker never reads its contents — it only needs the already-reduced
+ * min friction (`cellFrictionEntries`). Shipping the N layer-map objects to the
+ * worker and back was pure structured-clone waste (P2-9); the main thread holds
+ * `multiEntries` from the fast-scan pass and writes it into `multiFrictionMap`
+ * directly. So this function returns only the typed friction/affordance arrays.
  */
 export function mergeCellsChunk({
   cells = [],
-  multiEntries = Object.create(null),
   cellFrictionEntries = Object.create(null),
   blurUpdateMap = null,
   blurWeights = null,
@@ -908,7 +913,6 @@ export function mergeCellsChunk({
   const n = cells.length;
   const frictionArr = new Float64Array(n);
   const affArr = new Float64Array(n);
-  const multiArr = new Array(n);
 
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
   const pavement = AFFORDANCE.PAVEMENT;
@@ -927,16 +931,11 @@ export function mergeCellsChunk({
 
   for (let i = 0; i < n; i++) {
     const cell = cells[i];
-    const layerMap = multiEntries[cell];
 
     // `cellFrictionEntries[cell]` already holds the min friction across all
     // layers (computed once in the fast-scan pass), so reuse it directly instead
-    // of re-reducing the layer map here. The layer map is reused by reference
-    // (no per-cell copy) — it is the canonical multiFrictionMap entry and is
-    // mutated in place by later map edits, so sharing it is correct and saves
-    // N object allocations plus an O(N·avgLayers) reduction loop.
+    // of re-reducing the layer map here.
     let fr = cellFrictionEntries[cell] ?? 0;
-    const target = layerMap || Object.create(null);
 
     // Apply the impassable blur friction override (nudge routing around obstacles).
     if (blurUpdateMap) {
@@ -959,8 +958,7 @@ export function mergeCellsChunk({
 
     frictionArr[i] = fr;
     affArr[i] = aff;
-    multiArr[i] = target;
   }
 
-  return { cells, frictionArr, affArr, multiArr };
+  return { cells, frictionArr, affArr };
 }

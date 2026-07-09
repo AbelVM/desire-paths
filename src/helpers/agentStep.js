@@ -1,5 +1,6 @@
 import { gridDistance } from 'h3-js';
 import { getGraphNeighborIndicesR1 } from './dijkstra.js';
+import { angleDiff } from './bearing.js';
 
 // Shared agent-decision helpers used by both the main-thread kernel
 // (compute.js) and the worker kernel (agentTasks.js) so the two parallel
@@ -115,7 +116,71 @@ export function resolveStepLine({
   return [curr, ...path];
 }
 
-// 1) Visibility filter + candidate gather.
+// 1b) Index-space candidate gather (S1).
+// Consumes the visibility CSR directly instead of `gridDisk(curr, visionDepth)`
+// + the `isVisible` binary-search + the per-candidate bearing trig /
+// `cellToLatLng` cache. The CSR neighbor slice for `curr` is EXACTLY the
+// post-`isVisible`-filter candidate set the string kernel produces in
+// production (the worker's `isVisible` already resolves to the CSR
+// BFS-reachability Proxy, not the straight-line fallback), so the two
+// kernels enumerate the same cells — only the enumeration order differs,
+// which does not affect the max-score selection except on exact score
+// ties. Every read below is a typed-array access indexed by the
+// precomputed `viewIdxToGraphIdx` map, so the hot path does zero
+// string→index lookups, zero H3 calls, and zero trig.
+//
+// `visOffsets/visNeighbors/bearings` are viewHexes-indexed (the same
+// indexing the mapping graph uses). `viewIdxToGraphIdx[vIdx]` maps a
+// viewHexes index to the gradient-graph index (or -1 for impassable /
+// missing), so `frictionArr` / `affordanceArr` / `gradientObj` (all
+// graph-indexed) are read with a single integer subscript.
+export function gatherCandidatesIndexed({
+  currVIdx,
+  visOffsets,
+  visNeighbors,
+  bearings,
+  viewHexes,
+  viewIdxToGraphIdx,
+  frictionArr,
+  affordanceArr,
+  gradientObj,
+  useGradient,
+  impassableVal,
+  cellsArr,
+  anglesArr,
+  affsArr,
+  frictionArrOut,
+  gNsArr,
+  currentDirection,
+}) {
+  let count = 0;
+  const s = visOffsets[currVIdx];
+  const e = visOffsets[currVIdx + 1];
+  for (let x = s; x < e; x++) {
+    const vIdx = visNeighbors[x];
+    const gIdx = viewIdxToGraphIdx[vIdx];
+    if (gIdx < 0) continue; // impassable / missing
+    const f = frictionArr[gIdx];
+    if (f < 0) continue; // impassable (redundant w/ gIdx<0, safe)
+    const aff = affordanceArr[gIdx];
+    if (useGradient) {
+      const gN = gradientObj ? gradientObj[gIdx] : undefined;
+      if (typeof gN !== 'number') continue;
+      cellsArr[count] = viewHexes[vIdx];
+      anglesArr[count] = angleDiff(bearings[x], currentDirection);
+      affsArr[count] = aff;
+      frictionArrOut[count] = f;
+      gNsArr[count] = gN;
+    } else {
+      cellsArr[count] = viewHexes[vIdx];
+      anglesArr[count] = angleDiff(bearings[x], currentDirection);
+      affsArr[count] = aff;
+      frictionArrOut[count] = f;
+    }
+    count++;
+  }
+  return count;
+}
 // Walks `disk`, dropping impassable / non-visible cells, computing each
 // survivor's angular offset from the current heading, and appending to the
 // parallel candidate arrays. Returns the number of candidates gathered.
@@ -254,10 +319,22 @@ export function selectBestCandidate({
   for (let i = 0; i < cLen; i++) {
     const S_ij = scores?.[i];
     const isScoreValid = typeof S_ij === 'number';
-    if (isScoreValid && S_ij > bestScore) {
-      bestScore = S_ij;
-      bestIndex = i;
-    } else if (!isScoreValid) {
+    if (isScoreValid) {
+      if (S_ij > bestScore) {
+        bestScore = S_ij;
+        bestIndex = i;
+      } else if (S_ij === bestScore && bestIndex >= 0 && cellsArr[i] < cellsArr[bestIndex]) {
+        // Deterministic, enumeration-order-independent tie-break: on an EXACT
+        // score tie prefer the lexicographically smaller cell id. Both kernels
+        // compute the same S_ij for the same candidate (same aff/gN/delta/angle
+        // read from the same graph + CSR), so this makes the string kernel
+        // (gridDisk enumeration order) and the index kernel (CSR-neighbor
+        // enumeration order) select the SAME candidate regardless of order —
+        // the byte-parity requirement for S1. It only affects exact ties, which
+        // the pre-S1 string kernel resolved arbitrarily by gridDisk order.
+        bestIndex = i;
+      }
+    } else {
       // No gradient: fall back to affordance, boosted by accumulated footprints.
       let effAff = affsArr[i];
       if (accumulatedFootprints) {
@@ -279,6 +356,10 @@ export function selectBestCandidate({
           const dCandidate = gridDistance(curr, cellsArr[i]);
           const dBest = gridDistance(curr, cellsArr[bestIndex]);
           if (dCandidate < dBest) {
+            bestIndex = i;
+          } else if (dCandidate === dBest && cellsArr[i] < cellsArr[bestIndex]) {
+            // Final enumeration-order-independent tie-break by cell id so the
+            // two kernels agree even when cost AND distance also tie.
             bestIndex = i;
           }
         }
