@@ -93,12 +93,17 @@ export function getHexes(state, _mapInstance) {
  * queryRenderedFeatures, so H3 computation doesn't block feature fetching.
  */
 export async function triggerFastScan(state, mapInstance) {
-  // Start AOI hex generation in a Web Worker — runs off the main thread.
-  // This is CPU-intensive (polygonToCells) and blocks for ~50-200ms otherwise.
+  // Reuse the warm AOI-hex cache (populated by getHexes) when the AOI and
+  // resolution are unchanged, skipping the worker round-trip + polygonToCells on
+  // every remap (P3/F1). On a cache miss we fall back to the worker.
   const aoiPolygon = state.aoi_polygon;
-  const aoiHexPromise = runAoiHexesTask(aoiPolygon, SIMULATION_PARAMS.h3StrideResolution).catch(
-    () => []
-  );
+  const aoiCacheKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';
+  const cacheKey = `${aoiCacheKey}:${SIMULATION_PARAMS.h3StrideResolution}`;
+  const cachedHexes =
+    state._cachedViewHexes && state._cachedAoiKey === cacheKey ? state._cachedViewHexes : null;
+  const aoiHexPromise = cachedHexes
+    ? Promise.resolve(cachedHexes)
+    : runAoiHexesTask(aoiPolygon, SIMULATION_PARAMS.h3StrideResolution).catch(() => []);
 
   // Fetch features in parallel — queryRenderedFeatures depends on map rendering,
   // which is already done (we waited for moveend in fitAoiBounds).
@@ -442,7 +447,9 @@ export function reconstructVisibilityBearing(csr, viewHexes) {
   }
   const visOffsets = new Int32Array(buffer, 0, N + 1);
   const visNeighbors = new Int32Array(buffer, offsetsBytes, P);
-  const bearings = new Float32Array(buffer, offsetsBytes + neighborsBytes, P);
+  // Bearings are quantized to Uint16 (see packCSR / mergeVisibilityBearingShards);
+  // reading them yields plain numbers, so the BearingIndex consumers are unchanged.
+  const bearings = new Uint16Array(buffer, offsetsBytes + neighborsBytes, P);
 
   // O(N) cell-string → index map. This is the ONLY per-cell structure we keep;
   // it replaces the O(P) per-pair Map/object the legacy path built.

@@ -825,16 +825,19 @@ function allocTransferBuffer(byteLength) {
   return new ArrayBuffer(byteLength);
 }
 
-/** Pack CSR components into one transferable buffer (SAB when isolated, else AB). */
+/** Pack CSR components into one transferable buffer (SAB when isolated, else AB).
+ *  Bearings are quantized to Uint16 (360/65536 ≈ 0.0055° step) — far more
+ *  precision than the agent's angle math needs, and halves the bearing storage
+ *  (P2/D3). */
 function packCSR(visOffsets, visNeighbors, bearings, N, P) {
   const offsetsBytes = (N + 1) * 4;
   const neighborsBytes = P * 4;
-  const bearingsBytes = P * 4;
+  const bearingsBytes = P * 2;
   const totalBytes = offsetsBytes + neighborsBytes + bearingsBytes;
   const buffer = allocTransferBuffer(totalBytes);
   new Int32Array(buffer, 0, N + 1).set(visOffsets);
   new Int32Array(buffer, offsetsBytes, P).set(visNeighbors);
-  new Float32Array(buffer, offsetsBytes + neighborsBytes, P).set(bearings);
+  new Uint16Array(buffer, offsetsBytes + neighborsBytes, P).set(bearings);
   return { buffer, N, P, offsetsBytes, neighborsBytes };
 }
 
@@ -844,6 +847,10 @@ function packCSR(visOffsets, visNeighbors, bearings, N, P) {
  * out global offsets via a prefix-sum of per-origin pair counts and copy each
  * shard's neighbor/bearing slices into place. O(N + P) array copies — cheap
  * next to the parallel BFS that produced the shards.
+ *
+ * Packs DIRECTLY into the final transferable buffer (no intermediate 2P
+ * visNeighbors/bearings arrays), which removes the largest transient allocation
+ * on the main thread (P2/D4). Bearings are quantized to Uint16 (P2/D3).
  */
 function mergeVisibilityBearingShards(shards, N) {
   let PTotal = 0;
@@ -867,8 +874,15 @@ function mergeVisibilityBearingShards(shards, N) {
   }
   visOffsets[N] = acc;
 
-  const visNeighbors = new Int32Array(PTotal);
-  const bearings = new Float32Array(PTotal);
+  const offsetsBytes = (N + 1) * 4;
+  const neighborsBytes = PTotal * 4;
+  const bearingsBytes = PTotal * 2;
+  const totalBytes = offsetsBytes + neighborsBytes + bearingsBytes;
+  const buffer = allocTransferBuffer(totalBytes);
+  const nbView = new Int32Array(buffer, offsetsBytes, PTotal);
+  const brgView = new Uint16Array(buffer, offsetsBytes + neighborsBytes, PTotal);
+  new Int32Array(buffer, 0, N + 1).set(visOffsets);
+
   for (let s = 0; s < shards.length; s++) {
     const shard = shards[s];
     const M = shard.globalIdx ? shard.globalIdx.length : N;
@@ -877,11 +891,11 @@ function mergeVisibilityBearingShards(shards, N) {
       const srcStart = shard.localOffsets[j];
       const srcEnd = shard.localOffsets[j + 1];
       const dstStart = visOffsets[gi];
-      visNeighbors.set(shard.visNeighbors.subarray(srcStart, srcEnd), dstStart);
-      bearings.set(shard.bearings.subarray(srcStart, srcEnd), dstStart);
+      nbView.set(shard.visNeighbors.subarray(srcStart, srcEnd), dstStart);
+      brgView.set(shard.bearings.subarray(srcStart, srcEnd), dstStart);
     }
   }
-  return { visOffsets, visNeighbors, bearings, N, P: PTotal };
+  return { buffer, N, P: PTotal, offsetsBytes, neighborsBytes };
 }
 
 /**
@@ -968,7 +982,9 @@ export async function runVisibilityBearingTask(graph, viewHexes, visionDepth) {
   );
 
   const merged = mergeVisibilityBearingShards(shards, N);
-  return packCSR(merged.visOffsets, merged.visNeighbors, merged.bearings, merged.N, merged.P);
+  // mergeVisibilityBearingShards already packs into the final transferable
+  // buffer (same shape packCSR returns), so return it directly.
+  return merged;
 }
 
 /**

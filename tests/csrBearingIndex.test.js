@@ -46,11 +46,18 @@ describe('P5 CSR-backed bearing/visibility (no per-pair Map)', () => {
     // lat/lng deltas between adjacent cells are not collapsed by Float32
     // precision — this isolates the great-circle FORMULA from float precision,
     // letting us assert the precomputed bearing equals the trig reference.
-    const latLngArr = new Float64Array(N * 4);
+    const latLngArr = new Float64Array(N * 8);
     for (let i = 0; i < N; i++) {
       const [lat, lng] = cellToLatLng(viewHexes[i]);
-      latLngArr[i * 4 + 2] = (lat * Math.PI) / 180;
-      latLngArr[i * 4 + 3] = (lng * Math.PI) / 180;
+      const latR = (lat * Math.PI) / 180;
+      const lngR = (lng * Math.PI) / 180;
+      const b = i * 8;
+      latLngArr[b + 2] = latR;
+      latLngArr[b + 3] = lngR;
+      latLngArr[b + 4] = Math.sin(latR);
+      latLngArr[b + 5] = Math.cos(latR);
+      latLngArr[b + 6] = Math.sin(lngR);
+      latLngArr[b + 7] = Math.cos(lngR);
     }
 
     const res = computeVisibilityBearingCSRIndexed({
@@ -63,11 +70,11 @@ describe('P5 CSR-backed bearing/visibility (no per-pair Map)', () => {
     const packed = (() => {
       const offsetsBytes = (res.N + 1) * 4;
       const neighborsBytes = res.P * 4;
-      const total = offsetsBytes + neighborsBytes + res.P * 4;
+      const total = offsetsBytes + neighborsBytes + res.P * 2; // Uint16 bearings
       const buf = new ArrayBuffer(total);
       new Int32Array(buf, 0, res.N + 1).set(res.localOffsets);
       new Int32Array(buf, offsetsBytes, res.P).set(res.visNeighbors);
-      new Float32Array(buf, offsetsBytes + neighborsBytes, res.P).set(res.bearings);
+      new Uint16Array(buf, offsetsBytes + neighborsBytes, res.P).set(res.bearings);
       return { buffer: buf, N: res.N, P: res.P, offsetsBytes, neighborsBytes };
     })();
 
@@ -117,11 +124,14 @@ describe('P5 CSR-backed bearing/visibility (no per-pair Map)', () => {
         // bearing via bracket (agentTasks style)
         const bg2 = bearingMap[a + '::' + b];
         const expected = rawBearing(a, b);
-        expect(bg1).toBe(expected);
-        expect(bg2).toBe(expected);
+        // Bearings are quantized to Uint16 (rounded, ±0.5°). `expected` is the
+        // full-precision BFS value (already rounded in the kernel), so the proxy
+        // must match it exactly.
+        expect(bg1).toBe(Math.round(expected));
+        expect(bg2).toBe(Math.round(expected));
         // Also assert the precomputed bearing is numerically correct (guards the
-        // worker's great-circle formula against regression).
-        expect(bg1).toBeCloseTo(bearingBetween(a, b), 4);
+        // worker's great-circle formula against regression). Quantized to ±0.5°.
+        expect(bg1).toBe(Math.round(bearingBetween(a, b)));
         checked++;
       }
     }

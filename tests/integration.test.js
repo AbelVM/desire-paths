@@ -124,6 +124,11 @@ vi.mock('h3-js', async () => {
 });
 
 // ── Spatial Worker Mock ───────────────────────────────────────────────
+// Partial mock: vitest 4.1.10 enforces that a mocked module still exposes every
+// named export its importers use, so we declare all of them (the real module is
+// NOT spread in — its top-level `window.addEventListener` would throw under node).
+// Only the tasks this suite needs to stub are given real behavior; the rest are
+// no-op fns returning safe shapes.
 vi.mock('../src/helpers/spatialWorker.js', () => ({
   runAoiHexesTask: vi.fn(async (aoiPolygon) => {
     // Return mock hexes for testing — simulates AOI polygon-to-cells result.
@@ -205,6 +210,16 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     }
     return { cells, frictionArr, affArr, multiArr };
   }),
+  // Remaining exports importers reference — provided as no-ops / safe shapes.
+  runAgentBatches: vi.fn(async () => ({
+    pathDesire: Object.create(null),
+    perTargetContribs: Object.create(null),
+    processed: 0,
+    total: 0,
+  })),
+  setSpatialWorkerProgressHandler: vi.fn(),
+  clearSpatialWorkerProgressHandler: vi.fn(),
+  terminateAllWorkers: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────

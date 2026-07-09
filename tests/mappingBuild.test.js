@@ -8,6 +8,8 @@ import {
   computeImpassableBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
 } from '../src/helpers/spatialTasks.js';
+import { runVisibilityBearingTask } from '../src/helpers/spatialWorker.js';
+import { reconstructVisibilityBearing } from '../src/helpers/grid.js';
 import { FRICTION_COSTS, AFFORDANCE } from '../src/helpers/constants.js';
 
 // A small AOI: a center cell plus its 6 ring-1 neighbors.
@@ -232,7 +234,7 @@ describe('computeVisibilityBearingCSRIndexed', () => {
     const r1 = buildR1Adjacency({ viewHexes });
     const N = viewHexes.length;
     const frictionArr = new Float64Array(N);
-    const latLngArr = new Float32Array(N * 4);
+    const latLngArr = new Float32Array(N * 8);
     for (let i = 0; i < N; i++) {
       const cell = viewHexes[i];
       const f = frictionByCell[cell];
@@ -241,8 +243,15 @@ describe('computeVisibilityBearingCSRIndexed', () => {
       frictionArr[i] =
         typeof f === 'number' && f >= FRICTION_COSTS.IMPASSABLE ? -1 : typeof f === 'number' ? f : FRICTION_COSTS.PAVEMENT;
       const [lat, lng] = cellToLatLng(cell);
-      latLngArr[i * 4 + 2] = (lat * Math.PI) / 180;
-      latLngArr[i * 4 + 3] = (lng * Math.PI) / 180;
+      const latRad = (lat * Math.PI) / 180;
+      const lngRad = (lng * Math.PI) / 180;
+      const b = i * 8;
+      latLngArr[b + 2] = latRad;
+      latLngArr[b + 3] = lngRad;
+      latLngArr[b + 4] = Math.sin(latRad);
+      latLngArr[b + 5] = Math.cos(latRad);
+      latLngArr[b + 6] = Math.sin(lngRad);
+      latLngArr[b + 7] = Math.cos(lngRad);
     }
     return { adjOffsets: r1.offsets, adjNeighbors: r1.neighbors, frictionArr, latLngArr, N };
   }
@@ -310,5 +319,40 @@ describe('computeVisibilityBearingCSRIndexed', () => {
     });
     expect(res.localOffsets[1] - res.localOffsets[0]).toBe(0);
     expect(res.P).toBe(0);
+  });
+});
+
+describe('runVisibilityBearingTask (multi-worker merge path)', () => {
+  it('packs the merged CSR without throwing and reconstructs valid bearings', async () => {
+    // A larger AOI (depth 2) so workerCount > 1 and the code path that calls
+    // mergeVisibilityBearingShards (not the single-shard packCSR path) is taken.
+    const center = latLngToCell(40.4169, -3.7035, 15);
+    const viewHexes = gridDisk(center, 2);
+    const frictionEntries = Object.create(null);
+    for (const c of viewHexes) frictionEntries[c] = FRICTION_COSTS.PAVEMENT;
+
+    const r1 = buildR1Adjacency({ viewHexes });
+    const graph = buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency: r1 });
+
+    // In node `Worker` is undefined, so runWorker falls back to runLocally and
+    // the multi-shard merge (mergeVisibilityBearingShards) is exercised.
+    const csr = await runVisibilityBearingTask(graph, viewHexes, 2);
+    expect(csr.buffer).toBeTruthy();
+    expect(csr.N).toBe(viewHexes.length);
+
+    const { visibilityData, bearingMap } = reconstructVisibilityBearing(csr, viewHexes);
+    // Every bearing in the reconstructed index must be a valid degree in [0,360).
+    for (let i = 0; i < viewHexes.length; i++) {
+      const a = viewHexes[i];
+      const vis = visibilityData.data[a];
+      if (!vis) continue;
+      for (let j = 0; j < viewHexes.length; j++) {
+        const b = viewHexes[j];
+        if (vis[b]) {
+          const brg = bearingMap.get?.(a + '::' + b);
+          expect(typeof brg === 'number' && brg >= 0 && brg < 360).toBe(true);
+        }
+      }
+    }
   });
 });

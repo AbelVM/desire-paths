@@ -1,5 +1,33 @@
 import { logger } from './logger.js';
-import { gridDisk, polygonToCells, cellToLatLng } from 'h3-js';
+import { gridRingUnsafe, polygonToCells, cellToLatLng } from 'h3-js';
+
+// Module-level lat/lng cache (mirrors compute.js's `_cellLatLngCache`). H3
+// `cellToLatLng` is comparatively expensive and is called N times per mapping
+// generation in `buildMappingGraph` (and again per distinct cell during the
+// sim), so caching across remaps avoids recomputing the same cells repeatedly.
+// Stores [lat, lng, latRad, lngRad] so the radian conversion is also cached.
+const _cellLatLngCache = new Map();
+const CELL_LATLNG_CACHE_MAX_LOCAL = 4096;
+function cachedCellLatLng(cell) {
+  let v = _cellLatLngCache.get(cell);
+  if (v) {
+    _cellLatLngCache.delete(cell);
+    _cellLatLngCache.set(cell, v);
+    return v;
+  }
+  const ll = cellToLatLng(cell);
+  const lat = ll[0];
+  const lng = ll[1];
+  const latRad = (lat * Math.PI) / 180;
+  const lngRad = (lng * Math.PI) / 180;
+  v = [lat, lng, latRad, lngRad];
+  _cellLatLngCache.set(cell, v);
+  if (_cellLatLngCache.size > CELL_LATLNG_CACHE_MAX_LOCAL) {
+    const old = _cellLatLngCache.keys().next().value;
+    _cellLatLngCache.delete(old);
+  }
+  return v;
+}
 import {
   FRICTION_COSTS,
   SIMULATION_PARAMS,
@@ -327,15 +355,12 @@ export function computeImpassableBlurSnapshot({
     }
   }
 
-  // Collect impassable sources as viewHexes indices via a locally-built idxOf.
-  const idxOf = Object.create(null);
-  for (let i = 0; i < vh.length; i++) idxOf[vh[i]] = i;
+  // Collect impassable sources as viewHexes indices. `vh` is already
+  // index-ordered (vh[i] is the cell at index i), so we scan it directly — no
+  // idxOf N-key object and no `for...in` over the friction map (P3/H1).
   const impassables = [];
-  for (const cell in frictionLookup) {
-    if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) {
-      const idx = idxOf[cell];
-      if (idx !== undefined) impassables.push(idx);
-    }
+  for (let i = 0; i < vh.length; i++) {
+    if (frictionLookup[vh[i]] >= FRICTION_COSTS.IMPASSABLE) impassables.push(i);
   }
   if (impassables.length === 0 || radius < 1)
     return { blurWeights: Object.create(null), updates: [] };
@@ -486,12 +511,19 @@ export function buildR1Adjacency({ viewHexes } = {}) {
   // Single flat `gridDisk` pass into one contiguous temp buffer (not N
   // intermediate arrays), then prefix-sum + compact — the shape that is correct
   // at any N (the old V-arrays form previously corrupted at city scale).
+  // The temp/deg buffers are short-lived scratch; only `offsets`/`neighbors` are
+  // returned. Allocate those via `allocTransferBuffer` so they are SAB-backed
+  // when the page is cross-origin isolated and can be SHARED (zero-copy) with
+  // the blur and mapping-graph workers instead of structured-cloned (P1).
   const temp = new Int32Array(N * 6);
   const deg = new Int32Array(N);
   let tempPos = 0;
   for (let i = 0; i < N; i++) {
     const cell = viewHexes[i];
-    const disk = gridDisk(cell, 1);
+    // `gridRingUnsafe(cell, 1)` returns the 6 ring-1 neighbors directly (no
+    // center, no validation) — faster than `gridDisk(cell, 1)` and exactly the
+    // neighbor set adjacency wants. `viewHexes` are guaranteed-valid H3 cells.
+    const disk = gridRingUnsafe(cell, 1);
     for (let k = 0; k < disk.length; k++) {
       const nb = disk[k];
       if (nb === cell) continue; // skip the center
@@ -502,10 +534,10 @@ export function buildR1Adjacency({ viewHexes } = {}) {
     }
   }
 
-  const offsets = new Int32Array(N + 1);
+  const offsets = new Int32Array(allocTransferBuffer((N + 1) * 4));
   for (let i = 0; i < N; i++) offsets[i + 1] = offsets[i] + deg[i];
 
-  const neighbors = new Int32Array(offsets[N]);
+  const neighbors = new Int32Array(allocTransferBuffer(offsets[N] * 4));
   let w = 0;
   for (let i = 0; i < N; i++) {
     const start = offsets[i];
@@ -530,7 +562,7 @@ export function buildR1Adjacency({ viewHexes } = {}) {
  * `gridDisk` pass — the P1 + P3 win.
  *
  * @returns { N, adjOffsets:Int32Array(N+1), adjNeighbors:Int32Array(E),
- *            frictionArr:Float32Array(N), latLngArr:Float32Array(4N) }
+ *            frictionArr:Float32Array(N), latLngArr:Float32Array(8N) }
  */
 export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
@@ -540,18 +572,27 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
   // SAB-backed when cross-origin isolated so posting the graph to the visibility
   // shard workers is zero-copy (no per-shard structured clone of a large graph).
   const frictionArr = new Float32Array(allocTransferBuffer(N * 4));
-  const latLngArr = new Float32Array(allocTransferBuffer(N * 4 * 4));
+  // 8 floats/cell: [lat, lng, latRad, lngRad, sinLat, cosLat, sinLng, cosLng].
+  // The per-cell sin/cos are precomputed once here (this loop already pays the
+  // N `cellToLatLng` calls) so the visibility BFS can derive each bearing with a
+  // single `atan2` instead of ~5 trig calls per visible pair (P0).
+  const latLngArr = new Float32Array(allocTransferBuffer(N * 8 * 4));
   for (let i = 0; i < N; i++) {
     const cell = viewHexes[i];
     const f = frictionLookup[cell] ?? 0;
     frictionArr[i] = f < impassable ? f : -1; // -1 marks impassable / missing
-    const ll = cellToLatLng(cell);
-    const latRad = (ll[0] * Math.PI) / 180;
-    const lngRad = (ll[1] * Math.PI) / 180;
-    latLngArr[i * 4] = ll[0];
-    latLngArr[i * 4 + 1] = ll[1];
-    latLngArr[i * 4 + 2] = latRad;
-    latLngArr[i * 4 + 3] = lngRad;
+    const ll = cachedCellLatLng(cell);
+    const latRad = ll[2];
+    const lngRad = ll[3];
+    const b = i * 8;
+    latLngArr[b] = ll[0];
+    latLngArr[b + 1] = ll[1];
+    latLngArr[b + 2] = latRad;
+    latLngArr[b + 3] = lngRad;
+    latLngArr[b + 4] = Math.sin(latRad);
+    latLngArr[b + 5] = Math.cos(latRad);
+    latLngArr[b + 6] = Math.sin(lngRad);
+    latLngArr[b + 7] = Math.cos(lngRad);
   }
 
   // CSR adjacency in viewHexes index space. Impassable cells get an empty row
@@ -607,10 +648,9 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
     for (let i = 0; i < N; i++) {
       if (frictionArr[i] < 0) continue; // impassable cells get an empty row
       const cell = viewHexes[i];
-      const disk = gridDisk(cell, 1);
+      const disk = gridRingUnsafe(cell, 1);
       for (let k = 0; k < disk.length; k++) {
         const nb = disk[k];
-        if (nb === cell) continue; // skip the center
         const j = idxOf[nb];
         if (j === undefined) continue; // out of AOI
         if (frictionArr[j] < 0) continue; // impassable neighbor
@@ -742,9 +782,12 @@ export function computeVisibilityBearingCSRIndexed({
     let tail = 0;
     queue[tail++] = start;
     visited[start] = gen;
-    const b = start * 4;
-    const sLatR = latLngArr[b + 2];
-    const sLngR = latLngArr[b + 3];
+    const b = start * 8;
+    // Precomputed per-origin sin/cos (latLngArr stride is 8 floats/cell).
+    const sSinLat = latLngArr[b + 4];
+    const sCosLat = latLngArr[b + 5];
+    const sSinLng = latLngArr[b + 6];
+    const sCosLng = latLngArr[b + 7];
     // Ring BFS: pop exactly `levelSize` cells per level. `levelSize` is reset to
     // the number of cells enqueued for the next level (tail - head) after each
     // level, so it can never drift negative and the depth cap is always honored.
@@ -762,14 +805,22 @@ export function computeVisibilityBearingCSRIndexed({
           visited[nb] = gen;
           count++;
           visNeighbors[writePos] = nb;
-          const n = nb * 4;
-          const nLatR = latLngArr[n + 2];
-          const nLngR = latLngArr[n + 3];
-          const y = Math.sin(nLngR - sLngR) * Math.cos(nLatR);
-          const bx =
-            Math.cos(sLatR) * Math.sin(nLatR) -
-            Math.sin(sLatR) * Math.cos(nLatR) * Math.cos(nLngR - sLngR);
-          bearings[writePos] = ((Math.atan2(y, bx) * 180) / Math.PI + 360) % 360;
+          const n = nb * 8;
+          // Per-cell sin/cos are precomputed in buildMappingGraph, so the
+          // longitude-difference sin/cos are pure multiply/add (no trig per
+          // pair). Only `atan2` remains — ~5x fewer trig calls than before (P0).
+          const nSinLat = latLngArr[n + 4];
+          const nCosLat = latLngArr[n + 5];
+          const nSinLng = latLngArr[n + 6];
+          const nCosLng = latLngArr[n + 7];
+          const sinDLng = nSinLng * sCosLng - nCosLng * sSinLng;
+          const cosDLng = nCosLng * sCosLng + nSinLng * sSinLng;
+          const y = sinDLng * nCosLat;
+          const bx = sCosLat * nSinLat - sSinLat * nCosLat * cosDLng;
+          // Round to integer degrees; packing quantizes to Uint16 (P2/D3) which
+          // truncates, so rounding here keeps the quantization error symmetric
+          // (±0.5°) instead of biased toward zero.
+          bearings[writePos] = Math.round(((Math.atan2(y, bx) * 180) / Math.PI + 360) % 360);
           writePos++;
           queue[tail++] = nb;
         }
