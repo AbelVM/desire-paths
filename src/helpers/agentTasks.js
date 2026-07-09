@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
-import { getGradientGraph, getGraphNeighborIndicesR1 } from './dijkstra.js';
+import { getGradientGraph, getGraphNeighborIndicesR1, gradientGet } from './dijkstra.js';
 import { _bearingFromLatLngs, angleDiff } from './bearing.js';
 import {
   gatherCandidates,
@@ -196,7 +196,7 @@ function getGradientDirection(
   graph
 ) {
   if (!gradientObj) return null;
-  const gCurr = gradientObj[curr];
+  const gCurr = gradientGet(gradientObj, curr, graph);
   if (typeof gCurr !== 'number') return null;
 
   // Reuse the canonical gradient graph's r=1 adjacency (CSR indices) when
@@ -216,7 +216,7 @@ function getGradientDirection(
     if (cellState && cellState[n]) f = cellState[n].friction;
     else f = frictionLookup[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
-    const gN = gradientObj[n];
+    const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
     if (gN < bestGrad) {
       bestGrad = gN;
@@ -242,7 +242,7 @@ function getBestNextStep(
   bearingMap,
   graph
 ) {
-  const gradientLookup = gradient ? (n) => gradient[n] : null;
+  const gradientLookup = gradient ? (n) => gradientGet(gradient, n, graph) : null;
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simulationParams.fieldOfView / 2;
 
@@ -729,9 +729,9 @@ export function computeAgentBatch({
       if (!destGradient) continue;
 
       let destGradientObj;
-      // gradients are always plain objects — the Map branch is dead code
+      // gradients are always typed arrays (M1) indexed by the graph's cellToIdx
       destGradientObj = destGradient;
-      if (typeof destGradientObj[originCell] !== 'number') {
+      if (!isFinite(gradientGet(destGradientObj, originCell, graph))) {
         try {
           logger.debug('computeAgentBatch: skipping dest because origin missing in gradient', {
               originCell,

@@ -28,6 +28,8 @@ import {
   computeDijkstra,
   getGradientGraph,
   getGraphNeighborIndicesR1,
+  gradientGet,
+  gradientReachableCount,
   invalidateGradientGraph,
 } from './dijkstra.js';
 import { createLCG, strHash } from './rng.js';
@@ -403,14 +405,16 @@ export async function yieldToMain() {
 /** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
 function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
   if (!gradientObj) return null;
-  const gCurr = gradientObj[curr];
+  // Build the gradient graph once; its cellToIdx is what indexes the typed-array
+  // gradient (M1). The graph is cached per friction source, so this is cheap.
+  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const gCurr = gradientGet(gradientObj, curr, graph);
   if (typeof gCurr !== 'number') return null;
 
   // Reuse the canonical gradient graph's r=1 adjacency (CSR) instead of a
   // separate gridDisk(cell, 1) call — same passable, in-AOI neighbor set.
   // Iterate neighbor *indices* (zero-copy CSR view) and map back to cell ids via
   // `idxToCell`; this drops the old `cellNeighbors` string-array materialization.
-  const graph = getGradientGraph(ctx.cellFrictionMap);
   const nbrIdxs = getGraphNeighborIndicesR1(graph, curr);
   const idxToCell = graph.idxToCell;
   // _frictionObj is always the canonical lookup — already built once per sim run.
@@ -426,7 +430,7 @@ function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
     // Prefer _cellState.friction (updated during sim); fall back to frictionLookup.
     let f = cellState?.[n]?.friction ?? frictionLookup?.[n];
     if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
-    const gN = gradientObj[n];
+    const gN = gradientGet(gradientObj, n, graph);
     if (typeof gN !== 'number') continue;
     if (gN < bestGrad) {
       bestGrad = gN;
@@ -543,6 +547,7 @@ function runSingleAgentPath(
 }
 
 function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
+  const graph = getGradientGraph(ctx.cellFrictionMap);
   const destCandidates = [];
   let destWeightSum = 0;
   for (let d = 0; d < destinations.length; d++) {
@@ -555,9 +560,7 @@ function getReachableDestinations(ctx, originCell, destinations, goalGradients) 
       } catch (_e) {}
       continue;
     }
-    const hasOrigin =
-      typeof grad.has === 'function' ? grad.has(originCell) : typeof grad[originCell] === 'number';
-    if (!hasOrigin) {
+    if (!isFinite(gradientGet(grad, originCell, graph))) {
       try {
         logger.debug('getReachableDestinations: origin not in gradient', {
             originCell,
@@ -828,9 +831,8 @@ export async function computeDesirePaths(state, mapInstance) {
   const unreachableDests = [];
   for (const d of destinations) {
     const grad = state._gradientCacheObj[d];
-    const gradKeys = grad ? Object.keys(grad) : [];
-    // If gradient only contains the destination itself (or is empty), it's unreachable
-    if (gradKeys.length <= 1) {
+    // If the gradient reaches only the destination itself (or is empty), it's unreachable
+    if (gradientReachableCount(grad) <= 1) {
       unreachableDests.push(d);
     }
   }
@@ -873,17 +875,14 @@ export async function computeDesirePaths(state, mapInstance) {
       });
   } catch (_e) {}
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
+  const planGraph = getGradientGraph(state.cellFrictionMap);
   for (let pi = 0; pi < plan.length; pi++) {
     const originCell = plan[pi].originCell;
     const destCandidates = plan[pi].destCandidates || [];
     for (let di = 0; di < destCandidates.length; di++) {
       const destCell = destCandidates[di].dest;
       const grad = goalGradients.get(destCell);
-      const hasOrigin =
-        grad &&
-        (typeof grad.has === 'function'
-          ? grad.has(originCell)
-          : typeof grad[originCell] === 'number');
+      const hasOrigin = grad && isFinite(gradientGet(grad, originCell, planGraph));
       if (!hasOrigin) {
         try {
           logger.warn('computeDesirePaths: aborting - missing gradient for plan entry', {
@@ -1036,7 +1035,10 @@ function getBestNextStep(
 
   const disk = _getCachedDisk(ctx, curr, simParams.visionDepth);
   const sLatLng = _getCachedLatLng(curr);
-  const gradientLookup = gradient ? (n) => gradient[n] : null;
+  // Build the gradient graph once (cached per friction source) so the typed-array
+  // gradient (M1) can be indexed by cellToIdx. Cheap after the first call.
+  const graph = getGradientGraph(ctx.cellFrictionMap);
+  const gradientLookup = gradient ? (n) => gradientGet(gradient, n, graph) : null;
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
@@ -1213,7 +1215,7 @@ function getBestNextStep(
         }
         if (ang > visualAngleHalf) continue;
 
-        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradient[n] ?? Infinity);
+        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradientGet(gradient, n, graph) ?? Infinity);
         if (g < bestGrad) {
           bestGrad = g;
           bestCandidate = n;
@@ -1643,6 +1645,7 @@ export function clearGradientCache(ctx) {
 
 // --- Incremental assignment & contribution helpers ---
 function _computeAssignedCounts(ctx) {
+  const graph = getGradientGraph(ctx.cellFrictionMap);
   const agentsPerWeightUnit =
     ctx.simulationParams?.agentsPerWeightUnit ?? SIMULATION_PARAMS.agentsPerWeightUnit;
   const destinations = Object.keys(ctx.simulationNodes).filter((k) =>
@@ -1672,7 +1675,7 @@ function _computeAssignedCounts(ctx) {
       if (d === o) continue;
       const grad = ctx._gradientCacheObj[d];
       if (!grad) continue;
-      if (typeof grad[o] !== 'number') continue;
+      if (!isFinite(gradientGet(grad, o, graph))) continue;
       const w = ctx.simulationNodes[d]?.weight || 1;
       destCandidates.push({ dest: d, weight: w });
       destWeightSum += w;
@@ -1877,8 +1880,7 @@ export function addDestination(ctx, targetCell, weight = 1) {
 
   // Check if the newly added destination is unreachable (surrounded by impassable terrain)
   const grad = ctx._gradientCacheObj[targetCell];
-  const gradKeys = grad ? Object.keys(grad) : [];
-  if (gradKeys.length <= 1) {
+  if (gradientReachableCount(grad) <= 1) {
     const msg = '1 destination can’t be reached on foot — walled off by buildings or barriers';
     if (ctx.showAlertCard) {
       try {

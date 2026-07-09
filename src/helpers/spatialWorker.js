@@ -13,6 +13,7 @@ import {
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
 import { SIMULATION_PARAMS } from './constants.js';
+import { gradientGet, getGradientGraph } from './dijkstra.js';
 
 const detectedHC =
   typeof navigator !== 'undefined' && navigator.hardwareConcurrency
@@ -541,7 +542,8 @@ export async function runAgentBatches(
       ? Object.fromEntries(bearingMapRaw)
       : bearingMapRaw;
 
-  // Normalize gradients into a plain object for structured-clone
+  // Normalize gradients into a plain object for structured-clone. Each gradient
+  // is a Float32Array(V) indexed by the gradient graph's cellToIdx (M1).
   const gradientsObj = Object.create(null);
   if (gradients) {
     if (typeof gradients.entries === 'function') {
@@ -550,6 +552,9 @@ export async function runAgentBatches(
       for (const k in gradients) gradientsObj[k] = gradients[k];
     }
   }
+  // Build the gradient graph from the (normalized) friction source so the
+  // reachability check below and the worker's own graph agree on cellToIdx.
+  const gradientGraph = getGradientGraph(frictionEntries);
 
   // Diagnostic: ensure gradients required by the plan are present. If some are
   // missing, compute them here as a fallback to avoid races where callers
@@ -563,11 +568,7 @@ export async function runAgentBatches(
       for (let di = 0; di < destCandidates.length; di++) {
         const destCell = destCandidates[di].dest;
         const grad = gradientsObj[destCell];
-        const hasOrigin =
-          grad &&
-          (typeof grad.has === 'function'
-            ? grad.has(originCell)
-            : typeof grad[originCell] === 'number');
+        const hasOrigin = grad && isFinite(gradientGet(grad, originCell, gradientGraph));
         if (!grad || !hasOrigin) missingTargets.add(destCell);
       }
     }

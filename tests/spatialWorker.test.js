@@ -15,6 +15,7 @@ import {
   runImpassableBlurTask,
 } from '../src/helpers/spatialWorker.js';
 import { latLngToCell, gridDisk } from 'h3-js';
+import { gradientGet, getGradientGraph } from '../src/helpers/dijkstra.js';
 
 const h3Cell = latLngToCell(40.4169, -3.7035, 15);
 
@@ -48,12 +49,14 @@ describe('computeDijkstraGradientSnapshot', () => {
       [h3Cell]: 1,
     };
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should handle empty friction entries', () => {
     const result = computeDijkstraGradientSnapshot(h3Cell, {});
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph({});
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should handle Map input with single cell', () => {
@@ -61,7 +64,8 @@ describe('computeDijkstraGradientSnapshot', () => {
       [h3Cell, 1],
     ]);
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should exclude impassable cells from gradient', () => {
@@ -72,8 +76,9 @@ describe('computeDijkstraGradientSnapshot', () => {
       [impassableCell]: 999999,
     };
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
-    expect(result[impassableCell]).toBeUndefined();
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
+    expect(gradientGet(result, impassableCell, graph)).toBe(Infinity);
   });
 });
 
@@ -86,8 +91,9 @@ describe('computeGradientBatch', () => {
       frictionEntries,
       targets: [h3Cell],
     });
+    const graph = getGradientGraph(frictionEntries);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
   });
 
   it('should handle empty targets list', () => {
@@ -260,8 +266,9 @@ describe('runGradientBatches', () => {
       [neighborCell, 1],
     ]);
     const result = await runGradientBatches([h3Cell], frictionMap);
+    const graph = getGradientGraph(frictionMap);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
   });
 
   it('should handle plain object friction source', async () => {
@@ -269,8 +276,9 @@ describe('runGradientBatches', () => {
       [h3Cell]: 1,
     };
     const result = await runGradientBatches([h3Cell], frictionObj);
+    const graph = getGradientGraph(frictionObj);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
   });
 
   it('should compute gradients for single target', async () => {
@@ -278,8 +286,9 @@ describe('runGradientBatches', () => {
       [h3Cell]: 1,
     };
     const result = await runGradientBatches([h3Cell], frictionObj);
+    const graph = getGradientGraph(frictionObj);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
   });
 
   it('should compute gradients for multiple targets', async () => {
@@ -289,10 +298,11 @@ describe('runGradientBatches', () => {
       [h3_2]: 1,
     };
     const result = await runGradientBatches([h3Cell, h3_2], frictionObj);
+    const graph = getGradientGraph(frictionObj);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
     expect(result[h3_2]).toBeDefined();
-    expect(result[h3_2][h3_2]).toBe(0);
+    expect(gradientGet(result[h3_2], h3_2, graph)).toBe(0);
   });
 });
 

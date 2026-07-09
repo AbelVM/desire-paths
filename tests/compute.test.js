@@ -21,6 +21,7 @@ import {
 } from '../src/helpers/compute.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 import { buildSimulationGeoJSON } from '../src/helpers/map.js';
+import { gradientGet, getGradientGraph } from '../src/helpers/dijkstra.js';
 
 describe('angleDiff', () => {
   it('should return 0 for equal angles', () => {
@@ -546,7 +547,8 @@ describe('_computeDijkstraGradient', () => {
       cellFrictionMap: frictionMap,
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
+    const graph = getGradientGraph(frictionMap);
+    expect(gradientGet(result, h3, graph)).toBe(0);
   });
 
   it('should compute distances through adjacent cells', () => {
@@ -563,11 +565,12 @@ describe('_computeDijkstraGradient', () => {
       cellFrictionMap: frictionMap,
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
+    const graph = getGradientGraph(frictionMap);
+    expect(gradientGet(result, h3, graph)).toBe(0);
     // All neighbors should be reachable with distance = 1
     for (const n of neighbors) {
       if (n !== h3) {
-        expect(result[n]).toBe(1);
+        expect(gradientGet(result, n, graph)).toBe(1);
       }
     }
   });
@@ -584,10 +587,11 @@ describe('_computeDijkstraGradient', () => {
       _frictionObj: frictionObj,
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
+    const graph = getGradientGraph(frictionObj);
+    expect(gradientGet(result, h3, graph)).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
-        expect(result[n]).toBe(1);
+        expect(gradientGet(result, n, graph)).toBe(1);
       }
     }
   });
@@ -608,10 +612,11 @@ describe('_computeDijkstraGradient', () => {
       _cellState: cellState,
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
+    const graph = getGradientGraph(frictionMap);
+    expect(gradientGet(result, h3, graph)).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
-        expect(result[n]).toBe(1);
+        expect(gradientGet(result, n, graph)).toBe(1);
       }
     }
   });
@@ -629,8 +634,9 @@ describe('_computeDijkstraGradient', () => {
       cellFrictionMap: frictionMap,
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
-    expect(result[neighborCell]).toBeUndefined();
+    const graph = getGradientGraph(frictionMap);
+    expect(gradientGet(result, h3, graph)).toBe(0);
+    expect(gradientGet(result, neighborCell, graph)).toBe(Infinity);
   });
 
   it('should handle empty friction map', () => {
@@ -639,7 +645,8 @@ describe('_computeDijkstraGradient', () => {
       cellFrictionMap: new Map(),
     };
     const result = _computeDijkstraGradient(map, h3);
-    expect(result[h3]).toBe(0);
+    const graph = getGradientGraph(new Map());
+    expect(gradientGet(result, h3, graph)).toBe(0);
   });
 });
 

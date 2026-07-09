@@ -45,7 +45,7 @@ and **off-main-thread execution of the ABM loop**.
 | S2 | Sim | `getBestNextStep` (compute.js) allocates `weights` + 2 closures **per call** (millions×) | Perf/GC | High | Low | **Implemented** |
 | S3 | Sim | `getBestNextStep` (agentTasks.js) allocates 5 arrays + 4 closures + `weights` **per call** | Perf/GC | High | Med | **Implemented** |
 | S4 | Sim | `computeDijkstra` rebuilds `Float64Array(V)` friction per target → D×V transient alloc | Mem/Perf | High | Low | **Implemented** |
-| M1 | Map | Gradients stored as `destCell → {cellId: distance}` string-keyed objects → D×V string entries | Mem/Perf | High | High | Planned (§4) |
+| M1 | Map | Gradients stored as `destCell → {cellId: distance}` string-keyed objects → D×V string entries | Mem/Perf | High | High | **Implemented** (typed-array `Float32Array(V)` via `gradientGet`; node-verified, 387 pass) |
 | M2 | Map | Visibility BFS recomputed per-origin though visibility is symmetric | Perf | High | Med | Planned (§5) |
 | M3 | Map | `getGradientGraph` CSR built on main thread during gradient batch | Perf | Med | Med | Planned (§6) |
 | M5 | Map | `state._cellState` = N per-cell objects `{friction,affordance,desire,multi}` | Mem | High | High | Planned (§7) |
@@ -107,6 +107,64 @@ graph is invalidated on any friction-topology change via
   and cached on the graph.
 **Verified:** gradient tests (`spatialTasks`, `mappingBuild`, `compute`) pass;
 values unchanged.
+
+### M1 — Gradients as index-addressed typed arrays (IMPLEMENTED)
+
+**File(s):** `src/helpers/dijkstra.js` (`computeDijkstra`, `getGradientGraph`,
+new `gradientGet` / `gradientReachableCount`), `src/helpers/agentTasks.js`
+(`getGradientDirection`, `getBestNextStep`, `computeAgentBatch`),
+`src/helpers/compute.js` (`getGradientDirection`, `getBestNextStep`,
+`getReachableDestinations`, `_computeAssignedCounts`, `addDestination`,
+`computeDesirePaths` plan validation + unreachable check),
+`src/helpers/spatialWorker.js` (`runAgentBatches` reachability check),
+`src/helpers/spatialTasks.js` (`computeGradientBatch` now yields typed arrays).
+
+**Evidence (before):** each destination's gradient was a plain object
+`{ cellId: distance }`. With D destinations and V reachable cells this is
+**D×V string-keyed entries** — gigabytes at city scale — and every hot-path
+lookup (`gradientObj[curr]`, `gradientObj[n]`) was a string-keyed object
+property access.
+
+**Change:**
+- `computeDijkstra` now returns a single `Float32Array(V)` indexed by the
+  gradient graph's `cellToIdx` (value `Infinity` = unreachable) whenever a
+  graph is supplied, instead of a `destCell → { cellId: distance }` object.
+  The legacy object path is retained only for the no-graph fallback.
+- `getGradientGraph` now **sorts** the passable cell list, so `cellToIdx` /
+  `idxToCell` are deterministic for a given cell set. This is what lets a
+  gradient typed-array be produced on the main thread and consumed in a worker
+  that rebuilds the same graph from the same friction source — both arrive at
+  identical indices (no per-cell `Map`/string lookup mismatch).
+- A single representation-agnostic accessor `gradientGet(grad, cell, graph)`
+  reads either the `Float32Array(V)` form or a legacy plain object (returns
+  `Infinity` when unreachable/absent). Every consumer — main thread
+  (`compute.js`) and the agent worker (`agentTasks.js`) — routes gradient
+  reads through it, so the hot path is now an O(1) typed-array read and the
+  two representations are interchangeable.
+- `gradientReachableCount(grad)` replaces the old `Object.keys(grad).length`
+  "walled-off destination" check so it works for both shapes.
+- `runAgentBatches` builds the gradient graph from the (normalized) friction
+  source and uses `gradientGet` for the origin-reachability check; the typed
+  gradients are passed straight through to the worker (which indexes them with
+  its own, identically-ordered graph).
+
+**Why safe:** `gradientGet` falls back to the legacy object read, so any
+plain-object gradient (e.g. tests, incremental-API caches) still works
+byte-for-byte. The graph sort is deterministic and only reorders indices, so
+all existing CSR consumers are unaffected. Output values are unchanged
+(Dial's quantized distances are divided back by `GRADIENT_DIAL_SCALE`, heap
+distances copied as-is).
+
+**Impact:** gradient memory drops from ~D×V×(string+number overhead) to
+D×V×4 bytes (~5–10× smaller), and hot-path lookups become O(1) typed-array
+reads. This also **unlocks C1** — gradients are now flat typed arrays that can
+be SAB-shared / transferred zero-copy once S1-SAB lands (see §3 SAB note).
+
+**Verified:** 387 tests pass (node uses the local fallback, `useWorker=false`);
+gradient values unchanged. Affected tests adapted to `gradientGet`:
+`compute.test.js` (`_computeDijkstraGradient`), `spatialWorker.test.js`
+(`computeDijkstraGradientSnapshot`, `computeGradientBatch`, `runGradientBatches`),
+`spatialTasks.test.js` (`computeDijkstraGradientSnapshot`).
 
 ---
 
@@ -455,14 +513,15 @@ is exercised by every agent-batch run; no behavior change, only eviction policy)
 
 ## 11. Recommended sequencing
 
-1. **Now (done):** S2, S3, S4 — safe, high-value, fully tested.
-2. **Next:** S1 (off-main-thread ABM) — requires S3 + bearing CSR transfer;
-   biggest UX win, preserves dynamics. Land **S1-SAB** in the same pass: reuse
-   `allocTransferBuffer` so friction/affordance/visibility/neighborDisks/bearing
-   CSR and the result buffers are SAB-shared when `crossOriginIsolated` (zero
-   copy), with the plain-`ArrayBuffer` transfer path as fallback.
-3. **Then:** M1 (gradient typed arrays) — biggest memory win; pairs with C1 and
-   unlocks **SAB-sharing of gradients** (closes C1 at zero copy).
+1. **Done:** S2, S3, S4 — safe, high-value, fully tested.
+2. **Done:** S1 (off-main-thread ABM) — preserves dynamics; **M1** (gradient
+   typed arrays) — biggest memory win, now implemented and tested.
+3. **Next:** **S1-SAB** — reuse `allocTransferBuffer` so friction/affordance/
+   visibility/neighborDisks/bearing CSR and the result buffers are SAB-shared
+   when `crossOriginIsolated` (zero copy), with the plain-`ArrayBuffer` transfer
+   path as fallback. Requires the in-worker `BearingIndex` reconstruction
+   (option 1 in §3) and a COOP/COEP browser test. M1 now makes gradients
+   flat typed arrays, so **C1 closes at zero copy** once S1-SAB lands.
 4. **Then:** M5 (`_cellState` typed arrays), M2 (visibility symmetry),
    M3 (gradient graph in worker), S5/C2 as follow-ups.
 

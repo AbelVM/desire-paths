@@ -9,6 +9,7 @@ import {
 } from '../src/helpers/spatialTasks.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 import { FRICTION_COSTS } from '../src/helpers/constants.js';
+import { gradientGet, getGradientGraph } from '../src/helpers/dijkstra.js';
 
 const h3Cell = latLngToCell(40.4169, -3.7035, 15);
 
@@ -42,12 +43,14 @@ describe('computeDijkstraGradientSnapshot', () => {
       [h3Cell]: 1,
     };
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should handle empty friction entries', () => {
     const result = computeDijkstraGradientSnapshot(h3Cell, {});
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph({});
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should handle Map input with single cell', () => {
@@ -55,7 +58,8 @@ describe('computeDijkstraGradientSnapshot', () => {
       [h3Cell, 1],
     ]);
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
   });
 
   it('should exclude impassable cells from gradient', () => {
@@ -66,8 +70,9 @@ describe('computeDijkstraGradientSnapshot', () => {
       [impassableCell]: 999999,
     };
     const result = computeDijkstraGradientSnapshot(h3Cell, frictionEntries);
-    expect(result[h3Cell]).toBe(0);
-    expect(result[impassableCell]).toBeUndefined();
+    const graph = getGradientGraph(frictionEntries);
+    expect(gradientGet(result, h3Cell, graph)).toBe(0);
+    expect(gradientGet(result, impassableCell, graph)).toBe(Infinity);
   });
 });
 
@@ -80,8 +85,9 @@ describe('computeGradientBatch', () => {
       frictionEntries,
       targets: [h3Cell],
     });
+    const graph = getGradientGraph(frictionEntries);
     expect(result[h3Cell]).toBeDefined();
-    expect(result[h3Cell][h3Cell]).toBe(0);
+    expect(gradientGet(result[h3Cell], h3Cell, graph)).toBe(0);
   });
 
   it('should handle empty targets list', () => {

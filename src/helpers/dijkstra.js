@@ -83,6 +83,12 @@ export function getGradientGraph(cellSource) {
     const f = getF(c);
     if (typeof f === 'number' && f < IMPASSABLE) cells.push(c);
   }
+  // Sort the passable cell list so `cellToIdx` / `idxToCell` are DETERMINISTIC
+  // for a given cell set, independent of the input object's key order. This is
+  // what lets a gradient typed-array (indexed by this graph's `cellToIdx`) be
+  // produced on the main thread and consumed in a worker that rebuilds the same
+  // graph from the same friction source — both arrive at identical indices.
+  cells.sort();
   const V = cells.length;
 
   const cellToIdx = Object.create(null);
@@ -374,7 +380,7 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
     return computeDijkstraLegacy(targetCell, frictionLookup, getNeighbors);
   }
 
-  const { V, idxToCell, frictionArr, frictionMaxC } = graph;
+  const { V, frictionArr, frictionMaxC } = graph;
   // `frictionArr` / `frictionMaxC` are precomputed once per graph (see
   // getGradientGraph) and reused across every target — no per-target V-pass.
   const C = frictionMaxC;
@@ -399,16 +405,64 @@ export function computeDijkstra(targetCell, frictionLookup, getNeighbors, graph)
     dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity);
   }
 
-  const out = Object.create(null);
+  // M1: store the gradient as a single `Float32Array(V)` indexed by the graph's
+  // `cellToIdx` (Infinity = unreachable). This replaces the old
+  // `destCell → { cellId: distance }` string-keyed object — D×V string entries
+  // (gigabytes at city scale) become D×V×4 bytes, and every hot-path lookup
+  // (`gradient[cell]`) becomes an O(1) typed-array read via `gradientGet`.
+  const out = new Float32Array(V).fill(Infinity);
   for (let i = 0; i < V; i++) {
     const dv = dist[i];
     if (useDial) {
-      if (dv !== INF_INT) out[idxToCell[i]] = dv / GRADIENT_DIAL_SCALE;
+      if (dv !== INF_INT) out[i] = dv / GRADIENT_DIAL_SCALE;
     } else if (dv !== Infinity) {
-      out[idxToCell[i]] = dv;
+      out[i] = dv;
     }
   }
   return out;
+}
+
+/**
+ * Count how many cells a gradient reaches (finite distance). Works for both the
+ * M1 `Float32Array(V)` form and the legacy plain-object form, so the
+ * "destination is walled off" check (`reachable <= 1`) is representation-agnostic.
+ */
+export function gradientReachableCount(grad) {
+  if (!grad) return 0;
+  if (ArrayBuffer.isView(grad)) {
+    let n = 0;
+    for (let i = 0; i < grad.length; i++) if (isFinite(grad[i])) n++;
+    return n;
+  }
+  let n = 0;
+  for (const k in grad) if (typeof grad[k] === 'number') n++;
+  return n;
+}
+
+/**
+ * Read a gradient value for `cell` in a representation-agnostic way.
+ *
+ * A gradient is either:
+ *  - a `Float32Array(V)` indexed by `graph.cellToIdx` (M1 typed-array form), or
+ *  - a legacy plain object `{ cellId: distance }`.
+ *
+ * Returns the distance (number) or `Infinity` when the cell is unreachable /
+ * absent. Centralizing the read here lets every consumer (main thread and the
+ * agent worker) use the same indexing without caring which shape it got.
+ *
+ * @param {Float32Array|Object} grad
+ * @param {string} cell
+ * @param {Object} [graph] gradient graph (must be the SAME graph used to build `grad`)
+ */
+export function gradientGet(grad, cell, graph) {
+  if (ArrayBuffer.isView(grad)) {
+    const idx = graph ? graph.cellToIdx[cell] : undefined;
+    if (idx === undefined) return Infinity;
+    const v = grad[idx];
+    return v === undefined ? Infinity : v;
+  }
+  const v = grad ? grad[cell] : undefined;
+  return typeof v === 'number' ? v : Infinity;
 }
 
 /**
