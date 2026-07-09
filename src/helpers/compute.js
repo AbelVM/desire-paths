@@ -935,6 +935,12 @@ export async function computeDesirePaths(state, mapInstance) {
         accumulatedFootprints,
         originDestDistances: odDistances,
         bearingMap: state._precomputedBearings?.data || null,
+        // S1-SAB (review6 §3 option 1): ship the raw packed visibility/bearing CSR
+        // buffer + the exact AOI cell order so the agent worker can REBUILD the
+        // visibility + bearing indices in-worker (structured-cloning the Proxies
+        // drops their function traps, silently degrading to the slow fallback).
+        visibilityBearingCSR: state._visibilityBearingCSR || null,
+        viewHexes: state._viewHexes || null,
         simulationParams: simParams,
       }
     );

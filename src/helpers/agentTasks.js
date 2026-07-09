@@ -3,6 +3,7 @@ import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
 import { getGradientGraph, getGraphNeighborIndicesR1, gradientGet } from './dijkstra.js';
 import { _bearingFromLatLngs, angleDiff } from './bearing.js';
+import { reconstructVisibilityBearing } from './bearingIndex.js';
 import {
   gatherCandidates,
   partitionVisibleCone,
@@ -681,6 +682,14 @@ export function computeAgentBatch({
   accumulatedFootprints = null,
   originDestDistances = null,
   bearingMap = null,
+  // S1-SAB (review6 §3 option 1): the raw packed visibility/bearing CSR buffer +
+  // the exact AOI cell order. When supplied the worker REBUILDS the visibility +
+  // bearing indices in-process instead of relying on the (broken, function-stripped)
+  // Proxy clones it would otherwise receive via structured-clone. This restores the
+  // O(log P) index off the main thread — without it every bearing/visibility lookup
+  // silently falls back to the slow trig / path-cell path.
+  visibilityBearingCSR = null,
+  viewHexes = null,
 } = {}) {
   const simulationParams = {
     ...SIMULATION_PARAMS,
@@ -689,7 +698,16 @@ export function computeAgentBatch({
 
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
-  const visibilityMap = visibilityEntries || null;
+  let visibilityMap = visibilityEntries || null;
+  // Rebuild the CSR-backed visibility + bearing indices in-worker when the packed
+  // buffer + cell order are available (worker dispatch path). This is preferred
+  // over the `visibilityEntries`/`bearingMap` Proxies, which lose their function
+  // traps under structured-clone and would degrade to the slow fallback.
+  if (visibilityBearingCSR && viewHexes) {
+    const recon = reconstructVisibilityBearing(visibilityBearingCSR, viewHexes);
+    visibilityMap = recon.visibilityData.data;
+    bearingMap = recon.bearingMap;
+  }
 
   // Build the canonical gradient graph (CSR r=1 adjacency) once per batch from
   // the friction source. spatialTasks.js already builds the same graph keyed by

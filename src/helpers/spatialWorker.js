@@ -264,29 +264,37 @@ function splitIntoBalancedChunks(items, chunkCount, costFn) {
   return chunks.filter((c) => c.length > 0);
 }
 
-// Flatten large payloads for cheaper structured-clone by converting plain
-// friction lookup objects into a transferable typed-array representation.
-function flattenPayloadAndTransfers(payload) {
-  if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
-  const fe = payload.frictionEntries;
-  if (!fe || typeof fe !== 'object') return { payload, transfer: [] };
-  // If already flattened, nothing to do
-  if (
-    fe.__flat &&
-    Array.isArray(fe.keys) &&
-    (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer)
-  )
-    return { payload, transfer: [] };
+  // Flatten large payloads for cheaper structured-clone by converting plain
+  // friction lookup objects into a transferable typed-array representation.
+  function flattenPayloadAndTransfers(payload) {
+    if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
+    const fe = payload.frictionEntries;
+    if (!fe || typeof fe !== 'object') return { payload, transfer: [] };
+    // If already flattened, nothing to do
+    if (
+      fe.__flat &&
+      Array.isArray(fe.keys) &&
+      (ArrayBuffer.isView(fe.vals) || fe.vals instanceof ArrayBuffer)
+    )
+      return { payload, transfer: [] };
 
-  // frictionEntries is always a plain object (normalised before dispatch)
-  const keys = Object.keys(fe);
-  if (keys.length === 0) return { payload, transfer: [] };
-  const vals = new Float32Array(keys.length);
-  for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
+    // frictionEntries is always a plain object (normalised before dispatch)
+    const keys = Object.keys(fe);
+    if (keys.length === 0) return { payload, transfer: [] };
+    // S1-SAB (review6 §3): back the flattened buffer with a SharedArrayBuffer when
+    // the page is cross-origin isolated, so the worker reads the SAME memory the
+    // main thread built (zero-copy share, no memcpy, and the main thread keeps its
+    // own copy for the next run). When SAB is unavailable the buffer is a plain
+    // ArrayBuffer and is transferred (detached) exactly as before.
+    const vals = new Float32Array(allocTransferBuffer(keys.length * 4));
+    for (let i = 0; i < keys.length; i++) vals[i] = Number(fe[keys[i]]) || 0;
 
-  const newPayload = Object.assign({}, payload, { frictionEntries: { __flat: true, keys, vals } });
-  return { payload: newPayload, transfer: [vals.buffer] };
-}
+    const newPayload = Object.assign({}, payload, { frictionEntries: { __flat: true, keys, vals } });
+    // A SharedArrayBuffer is shared by reference and must NOT be placed in the
+    // transfer list (doing so throws); an ArrayBuffer is transferred as before.
+    const transfer = vals.buffer instanceof SharedArrayBuffer ? [] : [vals.buffer];
+    return { payload: newPayload, transfer };
+  }
 
 function mergeFastScanEntries(target, source) {
   const sourceKeys = Object.keys(source);
@@ -631,19 +639,19 @@ export async function runAgentBatches(
     gradients: gradientsObj,
     affordanceEntries,
     hexCount,
-    visibilityEntries,
+    // Local path uses the reconstructed indices directly. The worker path receives
+    // the raw packed visibility/bearing CSR + the exact AOI cell order and rebuilds
+    // BOTH indices in-worker (S1-SAB, review6 §3 option 1): structured-cloning the
+    // BearingIndex/VisibilityIndex Proxies drops their function-valued traps, which
+    // would silently degrade every lookup to the slow trig / path-cell fallback.
+    visibilityEntries: useWorker ? null : visibilityEntries,
     neighborDisks,
     options,
     accumulatedFootprints,
     originDestDistances,
-    // S1 bearing: the precomputed `bearingMap` is a CSR-backed BearingIndex
-    // Proxy whose target holds functions. Structured-clone drops function-valued
-    // properties, so posting it to a worker would silently degrade every bearing
-    // lookup to the trig fallback. On the worker path we pass `null` and let the
-    // kernel use the correct (if slightly slower) trig path. Reconstructing the
-    // BearingIndex from the packed CSR inside the worker (option 1 in review6 §3)
-    // is a follow-up that restores the O(log P) index off-main-thread.
     bearingMap: useWorker ? null : bearingMap,
+    visibilityBearingCSR: options?.visibilityBearingCSR || null,
+    viewHexes: options?.viewHexes || null,
   };
 
   if (!useWorker) {

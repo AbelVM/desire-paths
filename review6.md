@@ -41,7 +41,7 @@ and **off-main-thread execution of the ABM loop**.
 | ID | Area | Issue | Type | Impact | Effort | Status |
 |----|------|-------|------|--------|--------|--------|
 | S1 | Sim | ABM loop runs on **main thread** (`runAgentBatches` `workerCount=1` → local `computeAgentBatch`) → UI freeze at city scale | Perf/UX | High | Med | **Implemented** (off-main-thread single-worker dispatch + graceful local fallback; node-verified, 387 pass) |
-| S1-SAB | Sim | Large read-only inputs + result are structured-cloned/transferred per dispatch; reuse `allocTransferBuffer` (SAB when `crossOriginIsolated`) for zero-copy share | Mem/Perf | Med | Med | **Partial** (dispatch done; SAB buffers + in-worker BearingIndex reconstruction are follow-ups, need browser verification) |
+| S1-SAB | Sim | Large read-only inputs + result are structured-cloned/transferred per dispatch; reuse `allocTransferBuffer` (SAB when `crossOriginIsolated`) for zero-copy share | Mem/Perf | Med | Med | **Partial** (dispatch done; in-worker BearingIndex+VisibilityIndex reconstruction + SAB-aware friction inputs done & node-verified; result-buffer SAB + gradient SAB deferred — see §3 notes) |
 | S2 | Sim | `getBestNextStep` (compute.js) allocates `weights` + 2 closures **per call** (millions×) | Perf/GC | High | Low | **Implemented** |
 | S3 | Sim | `getBestNextStep` (agentTasks.js) allocates 5 arrays + 4 closures + `weights` **per call** | Perf/GC | High | Med | **Implemented** |
 | S4 | Sim | `computeDijkstra` rebuilds `Float64Array(V)` friction per target → D×V transient alloc | Mem/Perf | High | Low | **Implemented** |
@@ -342,21 +342,44 @@ The off-main-thread dispatch is **implemented** in `spatialWorker.js`
 - A shared `normalizeAgentResult` helper (extracted from the old inline
   normalization) is used by **both** paths, so the worker and local results
   are shaped identically.
-- **Bearing:** the worker path passes `bearingMap: null` (option 2 in §3)
-  because the precomputed `bearingMap` is a `BearingIndex` **Proxy** whose
-  function-valued properties are dropped by structured-clone. The worker kernel
-  therefore uses the correct trig fallback. Option 1 (reconstruct the
-  `BearingIndex` from the packed CSR *inside* the worker) is a follow-up that
-  restores the O(log P) index off-main-thread; it needs the raw CSR +
-  `cellToIndex` shipped to the worker and a browser/worker integration test.
 - **Verified:** 387 tests pass (node uses the local fallback, `useWorker=false`).
   The browser worker path is implemented but **not yet browser-verified**; add
   the integration test from §10 (`S1` row) before relying on it in production.
-- **SAB (S1-SAB):** the dispatch is in place, but the zero-copy SAB
-  buffers (friction/affordance/visibility/neighborDisks/bearing CSR + result)
-  are a follow-up — they require the in-worker `BearingIndex` reconstruction
-  and a COOP/COEP browser test, and are intentionally deferred until the
-  worker path is browser-verified.
+
+### S1-SAB — implementation status (2026-07-09)
+
+The zero-copy / in-worker-index work is **partially implemented** and
+**node-verified** (387 tests pass; a standalone script confirmed the
+in-worker reconstruction produces byte-identical sim output to the local path):
+
+- **In-worker BearingIndex + VisibilityIndex reconstruction (option 1 in §3) —
+  DONE.** The precomputed `bearingMap` / `visibilityMap` are `BearingIndex` /
+  `VisibilityIndex` **Proxies** whose function-valued traps are dropped by
+  structured-clone, so posting them to a worker silently degraded *every*
+  bearing/visibility lookup to the slow trig / path-cell fallback. Fixed by
+  shipping the raw packed visibility/bearing CSR buffer (`state._visibilityBearingCSR`)
+  plus the exact AOI cell order (`state._viewHexes`) to the worker, which
+  rebuilds **both** indices in-process via `reconstructVisibilityBearing`
+  (extracted into a new `src/helpers/bearingIndex.js` so the worker kernel can
+  import it without a circular dependency through `grid.js`). The local path
+  still passes the reconstructed indices directly; the worker path passes the
+  CSR + `viewHexes` and reconstructs.
+- **SAB-aware friction flattening — DONE.** `flattenPayloadAndTransfers`
+  now backs the flattened `frictionEntries`/`affordanceEntries` `vals` buffer
+  with `allocTransferBuffer`, so it is a `SharedArrayBuffer` (shared zero-copy)
+  when `crossOriginIsolated` and a plain `ArrayBuffer` (transferred, as before)
+  otherwise. A SAB is never placed in the transfer list (that would throw).
+- **Deferred (need COOP/COEP browser verification, not exercisable in node):**
+  - **Result-buffer SAB** (`pathDesire` / `perTargetContribs`): the value
+    arrays can be SAB-shared, but the *keys* (cell ids) still need to cross the
+    boundary, so this is a partial win and is left for the browser integration
+    test.
+  - **Gradient SAB (closes C1):** gradients are now flat `Float32Array(V)`
+    (M1), so they *can* be SAB-shared; allocating them on a SAB and sharing
+    zero-copy is a drop-in follow-up once the worker path is browser-verified.
+  - **`visibilityEntries` / `neighborDisks` SAB:** these are already typed
+    arrays; backing their buffers with `allocTransferBuffer` is mechanical once
+    the worker path is browser-verified.
 
 ---
 
