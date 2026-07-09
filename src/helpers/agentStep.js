@@ -1,8 +1,124 @@
 import { gridDistance } from 'h3-js';
+import { getGraphNeighborIndicesR1 } from './dijkstra.js';
 
 // Shared agent-decision helpers used by both the main-thread kernel
 // (compute.js) and the worker kernel (agentTasks.js) so the two parallel
 // implementations of `getBestNextStep` cannot drift apart.
+
+// Obstacle-corner check. Returns true if stepping diagonally from cell `a` to
+// cell `b` (gridDistance 2) would cut across an impassable cell at their shared
+// corner. Two diagonal H3 cells share exactly one common neighbor; if that
+// neighbor is impassable the agent must walk around the corner rather than
+// cutting across it. `getDisk(center, r)` is a stable cache accessor and
+// `cellState`/`frictionLookup` are the friction sources (cellState wins when a
+// per-cell entry exists), so this stays agnostic to each kernel's cache home.
+export function cornersImpassable({ a, b, frictionLookup, cellState, getDisk, impassableVal }) {
+  const neighborsA = getDisk(a, 1);
+  const neighborsB = getDisk(b, 1);
+  for (let i = 0; i < neighborsA.length; i++) {
+    const c = neighborsA[i];
+    if (c === a || c === b) continue;
+    let isNeighbor = false;
+    for (let j = 0; j < neighborsB.length; j++) {
+      if (neighborsB[j] === c) {
+        isNeighbor = true;
+        break;
+      }
+    }
+    if (!isNeighbor) continue;
+    const s = cellState && cellState[c];
+    const f = s ? s.friction : frictionLookup[c];
+    if (typeof f !== 'undefined' && f >= impassableVal) return true;
+  }
+  return false;
+}
+
+// Resolve the actual cell-by-cell line the agent walks from `curr` to
+// `nextStep`. Returns the straight H3 line when it is clear of impassable cells
+// and does not cut a building corner. Otherwise performs a bounded BFS detour
+// over the local neighborhood so the agent walks *around* the obstacle instead
+// of jumping over it or stalling against the building. The r=1 BFS expansion
+// reuses the canonical gradient graph's adjacency (CSR indices) when `graph` is
+// supplied, else falls back to `getDisk(node, 1)`.
+export function resolveStepLine({
+  curr,
+  nextStep,
+  frictionLookup,
+  cellState,
+  getPathCells,
+  getDisk,
+  graph,
+  impassableVal,
+}) {
+  const straight = getPathCells(curr, nextStep);
+  let clear = true;
+  for (let i = 1; i < straight.length; i++) {
+    const c = straight[i];
+    const s = cellState && cellState[c];
+    const f = s ? s.friction : frictionLookup[c];
+    if (typeof f === 'undefined' || f >= impassableVal) {
+      clear = false;
+      break;
+    }
+    // Detect a diagonal transition that would cut an impassable corner.
+    if (i > 1 && gridDistance(straight[i - 1], c) > 1) {
+      if (
+        cornersImpassable({
+          a: straight[i - 1],
+          b: c,
+          frictionLookup,
+          cellState,
+          getDisk,
+          impassableVal,
+        })
+      ) {
+        clear = false;
+        break;
+      }
+    }
+  }
+  if (clear) return straight;
+
+  // BFS detour within the local neighborhood.
+  const prev = Object.create(null);
+  const seen = Object.create(null);
+  const queue = [curr];
+  seen[curr] = true;
+  let found = false;
+  const idxToCell = graph ? graph.idxToCell : null;
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === nextStep) {
+      found = true;
+      break;
+    }
+    const nbrIdxs = graph ? getGraphNeighborIndicesR1(graph, node) : null;
+    const disk = nbrIdxs ? null : getDisk(node, 1);
+    const count = nbrIdxs ? nbrIdxs.length : disk.length;
+    for (let i = 0; i < count; i++) {
+      const m = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
+      if (m === node || seen[m]) continue;
+      const ms = cellState && cellState[m];
+      const mf = ms ? ms.friction : frictionLookup[m];
+      if (typeof mf === 'undefined' || mf >= impassableVal) continue;
+      seen[m] = true;
+      prev[m] = node;
+      queue.push(m);
+    }
+  }
+  if (!found) return straight; // fall back; movement loop will stop safely
+
+  // Reconstruct path curr -> ... -> nextStep
+  const path = [];
+  let node = nextStep;
+  while (node !== curr) {
+    path.push(node);
+    node = prev[node];
+    if (node === undefined) return straight; // safety
+  }
+  path.reverse();
+  return [curr, ...path];
+}
 
 // 1) Visibility filter + candidate gather.
 // Walks `disk`, dropping impassable / non-visible cells, computing each

@@ -39,6 +39,7 @@ import {
   partitionVisibleCone,
   scoreCandidates,
   selectBestCandidate,
+  resolveStepLine,
 } from './agentStep.js';
 
 // Re-export for backward compatibility with existing code references
@@ -1395,96 +1396,30 @@ function isVisible(ctx, start, end) {
 }
 
 // Resolve the actual cell-by-cell line the agent walks from `curr` to
-// `nextStep`. Returns the straight H3 line when it is clear of impassable
-// cells and does not cut a building corner. Otherwise performs a bounded BFS
-// detour over the local neighborhood so the agent walks *around* the obstacle
-// instead of jumping over it or stalling against the building.
+// `nextStep`. Thin adapter over the shared `resolveStepLine` (agentStep.js) —
+// the obstacle-avoidance geometry lives there so this kernel and the worker
+// kernel cannot drift. The cache-accessor closures are memoized on ctx so no
+// closures are allocated on the hot per-step path.
 function _resolveStepLine(ctx, curr, nextStep, frictionLookup, cellState) {
-  const straight = _getCachedPathCells(ctx, curr, nextStep);
-  let clear = true;
-  for (let i = 1; i < straight.length; i++) {
-    const c = straight[i];
-    const s = cellState && cellState[c];
-    const f = s ? s.friction : frictionLookup[c];
-    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
-      clear = false;
-      break;
-    }
-    // Detect a diagonal transition that would cut an impassable corner.
-    if (i > 1 && gridDistance(straight[i - 1], c) > 1) {
-      if (_cornersImpassable(ctx, straight[i - 1], c, frictionLookup, cellState)) {
-        clear = false;
-        break;
-      }
-    }
+  let getPathCells = ctx._rslGetPathCells;
+  let getDisk = ctx._rslGetDisk;
+  if (!getPathCells || !getDisk) {
+    getPathCells = (a, b) => _getCachedPathCells(ctx, a, b);
+    getDisk = (center, r) => _getCachedDisk(ctx, center, r);
+    ctx._rslGetPathCells = getPathCells;
+    ctx._rslGetDisk = getDisk;
   }
-  if (clear) return straight;
-
-  // BFS detour within the local disk (bounded by visionDepth for cost).
-  const prev = Object.create(null);
-  const seen = Object.create(null);
-  const queue = [curr];
-  seen[curr] = true;
-  let found = false;
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (node === nextStep) {
-      found = true;
-      break;
-    }
-    // Reuse the canonical graph's r=1 adjacency (CSR indices) for the BFS
-    // expansion; map neighbor indices back to cell ids via `graph.idxToCell`.
-    const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-    const nbrIdxs = getGraphNeighborIndicesR1(graph, node);
-    const idxToCell = graph.idxToCell;
-    for (let i = 0; i < nbrIdxs.length; i++) {
-      const m = idxToCell[nbrIdxs[i]];
-      if (m === node || seen[m]) continue;
-      const ms = cellState && cellState[m];
-      const mf = ms ? ms.friction : frictionLookup[m];
-      if (typeof mf === 'undefined' || mf >= FRICTION_COSTS.IMPASSABLE) continue;
-      seen[m] = true;
-      prev[m] = node;
-      queue.push(m);
-    }
-  }
-  if (!found) return straight; // fall back; movement loop will stop safely
-
-  // Reconstruct path curr -> ... -> nextStep
-  const path = [];
-  let node = nextStep;
-  while (node !== curr) {
-    path.push(node);
-    node = prev[node];
-    if (node === undefined) return straight; // safety
-  }
-  path.reverse();
-  return [curr, ...path];
-}
-
-// Returns true if stepping diagonally from cell `a` to cell `b` (gridDistance 2)
-// would cut across an impassable cell at their shared corner. Two diagonal H3
-// cells share exactly one common neighbor; if that neighbor is impassable the
-// agent must walk around the corner rather than cutting across it.
-function _cornersImpassable(ctx, a, b, frictionLookup, cellState) {
-  const neighborsA = _getCachedDisk(ctx, a, 1);
-  const neighborsB = _getCachedDisk(ctx, b, 1);
-  for (let i = 0; i < neighborsA.length; i++) {
-    const c = neighborsA[i];
-    if (c === a || c === b) continue;
-    let isNeighbor = false;
-    for (let j = 0; j < neighborsB.length; j++) {
-      if (neighborsB[j] === c) {
-        isNeighbor = true;
-        break;
-      }
-    }
-    if (!isNeighbor) continue;
-    const stepState = cellState && cellState[c];
-    const f = stepState ? stepState.friction : frictionLookup[c];
-    if (typeof f !== 'undefined' && f >= FRICTION_COSTS.IMPASSABLE) return true;
-  }
-  return false;
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
+  return resolveStepLine({
+    curr,
+    nextStep,
+    frictionLookup,
+    cellState,
+    getPathCells,
+    getDisk,
+    graph,
+    impassableVal: FRICTION_COSTS.IMPASSABLE,
+  });
 }
 
 // Returns true if the straight H3 line from `curr` to `n` would cut across an
@@ -1612,6 +1547,7 @@ export {
   computeDijkstraGradient as _computeDijkstraGradient,
   getBearing as _getBearing,
   getGradientDirection as _getGradientDirection,
+  runSingleAgentPath as _runSingleAgentPath,
   angleDiff as _angleDiff,
   isVisible as _isVisible,
   estimateMaxTicks as _estimateMaxTicks,

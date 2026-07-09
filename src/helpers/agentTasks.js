@@ -9,6 +9,7 @@ import {
   partitionVisibleCone,
   scoreCandidates,
   selectBestCandidate,
+  resolveStepLine,
 } from './agentStep.js';
 import {
   FRICTION_COSTS,
@@ -441,94 +442,32 @@ function getBestNextStep(
 }
 
 // Resolve the actual cell-by-cell line the agent walks from `curr` to
-// `nextStep`. Returns the straight H3 line when it is clear of impassable
-// cells and does not cut a building corner. Otherwise performs a bounded BFS
-// detour over the local neighborhood so the agent walks *around* the obstacle
-// instead of jumping over it or stalling against the building.
+// `nextStep`. Thin adapter over the shared `resolveStepLine` (agentStep.js) —
+// the obstacle-avoidance geometry lives there so this worker kernel and the
+// main-thread kernel cannot drift. The cache-accessor closures are memoized at
+// module scope (getDisk rebuilt only when `neighborDisks` changes) so no
+// closures are allocated on the hot per-step path.
+const _knRslGetPathCells = (a, b) => _getCachedPathCells(a, b);
+let _knRslGetDisk = null;
+let _knRslNeighborDisks = null;
+
 function _resolveStepLine(curr, nextStep, frictionLookup, cellState, neighborDisks, graph) {
-  const straight = _getCachedPathCells(curr, nextStep);
-  let clear = true;
-  for (let i = 1; i < straight.length; i++) {
-    const c = straight[i];
-    const f = cellState && cellState[c] ? cellState[c].friction : frictionLookup[c];
-    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
-      clear = false;
-      break;
-    }
-    // Detect a diagonal transition that would cut an impassable corner.
-    if (i > 1 && gridDistance(straight[i - 1], c) > 1) {
-      if (_cornersImpassable(curr, straight[i - 1], c, frictionLookup, cellState)) {
-        clear = false;
-        break;
-      }
-    }
+  if (!_knRslGetDisk || _knRslNeighborDisks !== neighborDisks) {
+    // r=1 disks ignore `neighborDisks` (it only serves VISUAL_DEPTH), so a
+    // single accessor covers both the BFS expansion and the corner check.
+    _knRslGetDisk = (center, r) => _getCachedDisk(center, r, neighborDisks);
+    _knRslNeighborDisks = neighborDisks;
   }
-  if (clear) return straight;
-
-  // BFS detour within the local disk (bounded by VISUAL_DEPTH for cost).
-  const prev = Object.create(null);
-  const seen = Object.create(null);
-  const queue = [curr];
-  seen[curr] = true;
-  let found = false;
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (node === nextStep) {
-      found = true;
-      break;
-    }
-    // Reuse the canonical graph's r=1 adjacency (CSR indices) for the BFS
-    // expansion; map neighbor indices back to cell ids via `graph.idxToCell`.
-    const nbrIdxs = graph ? getGraphNeighborIndicesR1(graph, node) : null;
-    const disk = nbrIdxs ? null : _getCachedDisk(node, 1, neighborDisks);
-    const idxToCell = graph ? graph.idxToCell : null;
-    const count = nbrIdxs ? nbrIdxs.length : disk.length;
-    for (let i = 0; i < count; i++) {
-      const m = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
-      if (m === node || seen[m]) continue;
-      const mf = cellState && cellState[m] ? cellState[m].friction : frictionLookup[m];
-      if (typeof mf === 'undefined' || mf >= FRICTION_COSTS.IMPASSABLE) continue;
-      seen[m] = true;
-      prev[m] = node;
-      queue.push(m);
-    }
-  }
-  if (!found) return straight; // fall back; movement loop will stop safely
-
-  // Reconstruct path curr -> ... -> nextStep
-  const path = [];
-  let node = nextStep;
-  while (node !== curr) {
-    path.push(node);
-    node = prev[node];
-    if (node === undefined) return straight; // safety
-  }
-  path.reverse();
-  return [curr, ...path];
-}
-
-// Returns true if stepping diagonally from cell `a` to cell `b` (gridDistance 2)
-// would cut across an impassable cell at their shared corner. Two diagonal H3
-// cells share exactly one common neighbor; if that neighbor is impassable the
-// agent must walk around the corner rather than cutting across it.
-function _cornersImpassable(_curr, a, b, frictionLookup, cellState) {
-  const neighborsA = _getCachedDisk(a, 1, null);
-  const neighborsB = _getCachedDisk(b, 1, null);
-  for (let i = 0; i < neighborsA.length; i++) {
-    const c = neighborsA[i];
-    if (c === a || c === b) continue;
-    let isNeighbor = false;
-    for (let j = 0; j < neighborsB.length; j++) {
-      if (neighborsB[j] === c) {
-        isNeighbor = true;
-        break;
-      }
-    }
-    if (!isNeighbor) continue;
-    const f = cellState && cellState[c] ? cellState[c].friction : frictionLookup[c];
-    if (typeof f !== 'undefined' && f >= FRICTION_COSTS.IMPASSABLE) return true;
-  }
-  return false;
+  return resolveStepLine({
+    curr,
+    nextStep,
+    frictionLookup,
+    cellState,
+    getPathCells: _knRslGetPathCells,
+    getDisk: _knRslGetDisk,
+    graph,
+    impassableVal: FRICTION_COSTS.IMPASSABLE,
+  });
 }
 
 // Returns true if the straight H3 line from `curr` to `n` would cut across an

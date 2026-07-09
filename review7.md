@@ -37,7 +37,7 @@ single‑worker ABM dispatch (S1). The findings below build on top of these.
 | **B** | Mem | Friction/affordance stored **2×** — `cellFrictionMap`(Map) **and** `_frictionObj`(plain obj); `affordanceMap`(Map) **and** `_affordanceObj`(plain obj) | Mem | High | Med | **IMPLEMENTED** (§3) |
 | **F** | Sim | Per‑tick `originDestDistances[simCurrent+'::'+destCell]` lookup is a **miss for ~99% of ticks** (table is node‑only) → wasted string concat + object read every tick | Perf/GC | Med | Low | **Implemented** (byte‑identical, 387 pass) |
 | **C** | X | Dead module `cellCache.js` (imports non‑existent `DISK_CACHE_MAX`, imported nowhere) | Mem/clean | Low | Low | **Implemented** (deleted) |
-| **D** | Sim | Two ABM kernels: `runSingleAgentPath`(compute.js) duplicates `runAgentPath`(agentTasks.js); incremental API runs the main‑thread one **synchronously** (blocks UI) | Perf/maint | Med | Med | **Planned** (§5) |
+| **D** | Sim | Two ABM kernels: `runSingleAgentPath`(compute.js) duplicates `runAgentPath`(agentTasks.js); incremental API runs the main‑thread one **synchronously** (blocks UI) | Perf/maint | Med | Med | **PARTIALLY IMPLEMENTED** (§5) |
 | **G** | Sim | `getGradientGraph` cached by source *identity*; main thread passes the `Map`, worker passes the plain object → **two graph builds per run** | Mem/Perf | Med | Low | **Planned** (folded into M3) |
 | **H** | Sim | `precomputeOriginDestDistances` string‑keyed O×D object (S5) | Perf | Low | Low | **Deferred** (F already removes the per‑tick cost; §6) |
 | **I** | Map | `updateLayers` slices `_flatPool`/`_flowPool` (O(N) alloc) on every data‑version change | Perf | Low | Low | **Planned** (§7, optional) |
@@ -231,9 +231,48 @@ behavior change.
 
 ---
 
-## 5. D — Unify the two ABM kernels; offload the incremental API (Planned)
+## 5. D — Unify the two ABM kernels; offload the incremental API (PARTIALLY IMPLEMENTED)
 
-**Problem.** `runSingleAgentPath` (`compute.js`) is a near‑duplicate of
+**Status.** Shared-kernel de-duplication implemented; worker offload deferred (with
+rationale below).
+
+**Implemented.**
+- The obstacle-avoidance geometry — `resolveStepLine` + `cornersImpassable`, the most
+  correctness-sensitive duplicated logic (the local BFS detour that routes agents
+  *around* buildings) — now lives once in `agentStep.js` and is imported by both
+  `runAgentPath` (worker, `agentTasks.js`) and `runSingleAgentPath` (incremental,
+  `compute.js`). Each kernel passes stable cache-accessor closures (`getPathCells` /
+  `getDisk`) that are memoized per run, so no closures are allocated on the hot
+  per-step path (preserves review6 §0). Friction is passed as data
+  (`frictionLookup` + `cellState`), inlined in the shared function. This kills the
+  single largest drift risk (~90 lines that had to stay byte-identical by hand).
+- The candidate-scoring core (`gatherCandidates` / `partitionVisibleCone` /
+  `scoreCandidates` / `selectBestCandidate`) was already shared in `agentStep.js`.
+- New guard `tests/incrementalKernelParity.test.js` asserts `runSingleAgentPath`
+  (now exported as `_runSingleAgentPath`) and `runAgentPath` produce **byte-identical
+  agent paths** on the same deterministic scenario — both an open corridor and an
+  obstacle-detour case (which exercises the shared BFS in both kernels). This locks
+  the two kernels together behaviorally, complementing `agentBatchParity.test.js`.
+  Full suite: 392 passed, 6 skipped.
+
+**Deferred (with rationale).**
+- *Full kernel deletion / merge of `getBestNextStep` + `getGradientDirection`:* the
+  compute-side kernel has a dedicated test surface (`_getBestNextStep`,
+  `_getGradientDirection`), and the remaining per-kernel differences are
+  caching-infrastructure (ctx-scoped vs module-level buffers/closures, precomputed
+  visibility sets, the non-finite temperature-sum guard). Merging the orchestration
+  would either regress review6's no-per-call-allocation rule on the worker hot path
+  or add closure-caching bookkeeping that itself can drift. The scoring + geometry
+  cores — where drift actually hurts — are now shared, and the parity tests pin the
+  rest, so the residual duplication is low-risk glue.
+- *Worker offload of `_recomputeTargetContribs` (option b):* the incremental API
+  (`addDestination` / `updateDestinationWeight` / `removeDestination`) has **no
+  `src/` callers — it is exercised only by tests** and returns synchronously. Moving
+  it to the agent-batch worker would force an async API + worker-in-test
+  infrastructure for zero production benefit (there is currently no UI path that can
+  jank). Revisit if/when the incremental API is wired into the UI.
+
+**Problem (original).** `runSingleAgentPath` (`compute.js`) is a near‑duplicate of
 `runAgentPath` (`agentTasks.js`). The incremental API
 (`addDestination` / `updateDestinationWeight` / `removeDestination` →
 `_recomputeTargetContribs`) calls `runSingleAgentPath` **synchronously on the main
@@ -297,7 +336,7 @@ main thread `await`s, so there is no concurrent access (no `Atomics` needed).
 | **C (done)** | none (dead code, unimported) | ✅ deleted `src/helpers/cellCache.js` |
 | **M3** | `mappingBuild.test.js`, `spatialTasks.test.js` (new CSR case); `compute.test.js`, `csrBearingIndex.test.js` | adapt/extend; local fallback keeps others green |
 | **B** | `map.test.js`? (renderer reads Maps), `compute.test.js`, `integration.test.js` | change `_frictionObj`/`_affordanceObj` assertions to Maps; keep fallbacks |
-| **D** | `agentBatchParity.test.js` + new incremental‑parity test | unify kernel; add incremental dispatch test |
+| **D** | `agentBatchParity.test.js` + `incrementalKernelParity.test.js` (new) | shared geometry (`resolveStepLine`/`cornersImpassable`) + kernel parity guard |
 | **G** | folded into M3 | — |
 | **H/I/J** | minimal / none | deferred |
 
