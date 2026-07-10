@@ -293,12 +293,17 @@ export function updateLayers(state, mapInstance) {
   flatData = state._flatData;
   flowData = state._flowData;
 
+  // Anchor the footprint/flow deck layers just below the node pins so the pins
+  // always stay on top (visible + clickable). Fall back to the label layer only
+  // until the pin layers exist.
+  const pinLayerId = mapInstance.getLayer('pin-circles') ? 'pin-circles' : state.targetLabelLayerId;
+
   const baseLayerProps = {
     id: 'friction-mesh',
     data: flatData,
     extruded: false,
     pickable: false,
-    beforeId: state.targetLabelLayerId,
+    beforeId: pinLayerId,
     stroked: false,
     getLineWidth: 0,
     filled: true,
@@ -318,7 +323,7 @@ export function updateLayers(state, mapInstance) {
     extruded: false,
     pickable: true,
     onHover: (info) => handleFlowHover(info, flowData),
-    beforeId: state.targetLabelLayerId,
+    beforeId: pinLayerId,
     stroked: false,
     getLineWidth: 0,
     filled: true,

@@ -96,7 +96,7 @@ vi.mock('@deck.gl/mapbox', () => ({
 
 vi.mock('@deck.gl/geo-layers', () => ({
   H3HexagonLayer: class H3HexagonLayer {
-    constructor(opts) { this.id = opts.id; }
+    constructor(opts) { this.id = opts.id; this.props = opts; }
   },
 }));
 
@@ -741,6 +741,41 @@ describe('map.js', () => {
       updateLayers(map, map);
 
       expect(map.baseLayer).toBeDefined();
+    });
+
+    it('should keep footprint/flow layers below the node pins', async () => {
+      const map = createMockMap();
+      // Simulate the pin layers already being added to the map.
+      map.getLayer = vi.fn((id) => (id === 'pin-circles' ? { id: 'pin-circles' } : undefined));
+      for (const hex of mockHexes) {
+        map.cellFrictionMap.set(hex, 1);
+      }
+      map.pathDesireScores.set(mockHexes[0], 5);
+
+      const { updateLayers } = await import('../src/helpers/map.js');
+      updateLayers(map, map);
+
+      const layers = map.deckOverlayInstance.setProps.mock.calls.at(-1)[0].layers;
+      for (const layer of layers) {
+        expect(layer.props.beforeId).toBe('pin-circles');
+      }
+    });
+
+    it('should fall back to the label layer before pins exist', async () => {
+      const map = createMockMap();
+      map.getLayer = vi.fn(() => undefined);
+      for (const hex of mockHexes) {
+        map.cellFrictionMap.set(hex, 1);
+      }
+      map.pathDesireScores.set(mockHexes[0], 5);
+
+      const { updateLayers } = await import('../src/helpers/map.js');
+      updateLayers(map, map);
+
+      const layers = map.deckOverlayInstance.setProps.mock.calls.at(-1)[0].layers;
+      for (const layer of layers) {
+        expect(layer.props.beforeId).toBe('place-label');
+      }
     });
   });
 
