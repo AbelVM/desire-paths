@@ -246,11 +246,66 @@ describe('collectFastScanEntries', () => {
     // Every cell that received a layer map must also have a numeric friction.
     for (const cell in multiFrictionEntries) {
       expect(typeof cellFrictionEntries[cell]).toBe('number');
-      // The min of the layer map equals the cell friction entry.
+      // The min across layers of the per-layer MAX equals the cell friction entry.
       const layer = multiFrictionEntries[cell];
       let min = Infinity;
       for (const k in layer) if (layer[k] < min) min = layer[k];
       expect(cellFrictionEntries[cell]).toBe(min);
+    }
+  });
+
+  it('resolves overlapping same-level features to the highest (most restrictive) friction', () => {
+    // A pavement public space and a water fountain overlap at the SAME level.
+    // The fountain (impassable) must win over the pavement (passable) so the
+    // cell is classified as impassable, never pavement.
+    const poly = [
+      [
+        [-3.704, 40.416],
+        [-3.703, 40.416],
+        [-3.703, 40.417],
+        [-3.704, 40.417],
+        [-3.704, 40.416],
+      ],
+    ];
+    const features = [
+      { sourceLayer: 'landuse', properties: { class: 'pedestrian' }, geometry: { type: 'Polygon', coordinates: poly } },
+      { sourceLayer: 'water', properties: {}, geometry: { type: 'Polygon', coordinates: poly } },
+    ];
+    const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({
+      features,
+      viewHexes,
+    });
+    for (const cell in multiFrictionEntries) {
+      expect(cellFrictionEntries[cell]).toBe(FRICTION_COSTS.IMPASSABLE);
+    }
+  });
+
+  it('is independent of feature order (chunking-independent classification)', () => {
+    // The effective friction must not depend on the order features are
+    // processed in, which previously caused an intermittent pavement/impassable
+    // flip depending on how features were sharded across chunk workers.
+    const poly = [
+      [
+        [-3.704, 40.416],
+        [-3.703, 40.416],
+        [-3.703, 40.417],
+        [-3.704, 40.417],
+        [-3.704, 40.416],
+      ],
+    ];
+    const fountainsFirst = [
+      { sourceLayer: 'water', properties: {}, geometry: { type: 'Polygon', coordinates: poly } },
+      { sourceLayer: 'landuse', properties: { class: 'pedestrian' }, geometry: { type: 'Polygon', coordinates: poly } },
+    ];
+    const pavementFirst = [
+      { sourceLayer: 'landuse', properties: { class: 'pedestrian' }, geometry: { type: 'Polygon', coordinates: poly } },
+      { sourceLayer: 'water', properties: {}, geometry: { type: 'Polygon', coordinates: poly } },
+    ];
+    const a = collectFastScanEntries({ features: fountainsFirst, viewHexes });
+    const b = collectFastScanEntries({ features: pavementFirst, viewHexes });
+    expect(a.cellFrictionEntries).toEqual(b.cellFrictionEntries);
+    for (const cell in a.multiFrictionEntries) {
+      expect(a.cellFrictionEntries[cell]).toBe(FRICTION_COSTS.IMPASSABLE);
     }
   });
 });

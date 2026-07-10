@@ -42,6 +42,39 @@ import {
 import { computeDijkstra, getGradientGraph } from './dijkstra.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
+
+/**
+ * Derive the effective per-cell friction from a per-layer friction map.
+ *
+ * For each cell we take the MIN across its vertical layers of the per-layer MAX
+ * friction. This means:
+ *  - Overlapping features at the SAME level resolve to the HIGHEST (most
+ *    restrictive) friction — e.g. a water fountain inside a pavement public
+ *    space is impassable, never passable.
+ *  - Different vertical levels stay independent — a bridge (pavement, level 1)
+ *    over a river (water, level 0) remains passable.
+ *
+ * Deriving from the already-merged per-layer map (rather than a flat min across
+ * all layer values) also makes the result independent of how features were
+ * sharded across chunk workers, eliminating an intermittent misclassification
+ * that previously flipped between pavement and impassable depending on chunking.
+ *
+ * @param {Object} multiFrictionEntries cell -> { layerKey: friction }
+ * @returns {Object} cell -> effective friction (number)
+ */
+export function deriveCellFrictionFromLayers(multiFrictionEntries) {
+  const cellFrictionEntries = Object.create(null);
+  for (const cell in multiFrictionEntries) {
+    const layerMap = multiFrictionEntries[cell];
+    let min = Infinity;
+    for (const k in layerMap) {
+      const v = layerMap[k];
+      if (typeof v === 'number' && v < min) min = v;
+    }
+    if (isFinite(min)) cellFrictionEntries[cell] = min;
+  }
+  return cellFrictionEntries;
+}
 // Emit lightweight progress messages when running inside a Worker.
 function emitProgress(phase, processed, total) {
   try {
@@ -247,13 +280,14 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     group.geometries.push(feature.geometry);
   }
 
-  const cellFrictionEntries = Object.create(null);
   const multiFrictionEntries = Object.create(null);
 
   // Single accumulation pass: for every AOI cell a feature covers, keep the
-  // per-layer MAX (multi-friction layer map) and the per-cell MIN (effective
-  // friction). Both are maintained incrementally, so no second reduction loop or
-  // intermediate matrix is required.
+  // per-layer MAX (multi-friction layer map). The effective per-cell friction is
+  // derived afterwards from the merged layer map (see deriveCellFrictionFromLayers):
+  // MIN across vertical layers of the per-layer MAX friction. This makes
+  // overlapping same-level features resolve to the highest (most restrictive)
+  // friction instead of the cheapest, and is independent of feature order.
   for (const group of Object.values(grouped)) {
     const { layerKey, layerVal, geometries } = group;
     for (let g = 0; g < geometries.length; g++) {
@@ -276,13 +310,13 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
           if (entry[layerKey] === undefined || layerVal > entry[layerKey]) {
             entry[layerKey] = layerVal;
           }
-          // Min-keeping per cell: effective friction is the cheapest layer.
-          const cur = cellFrictionEntries[cell];
-          if (cur === undefined || layerVal < cur) cellFrictionEntries[cell] = layerVal;
         }
       }
     }
   }
+
+  // Effective per-cell friction: MIN across layers of the per-layer MAX friction.
+  const cellFrictionEntries = deriveCellFrictionFromLayers(multiFrictionEntries);
 
   return { multiFrictionEntries, cellFrictionEntries };
 }
@@ -928,9 +962,10 @@ export function mergeCellsChunk({
   for (let i = 0; i < n; i++) {
     const cell = cells[i];
 
-    // `cellFrictionEntries[cell]` already holds the min friction across all
-    // layers (computed once in the fast-scan pass), so reuse it directly instead
-    // of re-reducing the layer map here.
+    // `cellFrictionEntries[cell]` already holds the effective friction (the min
+    // across vertical layers of the per-layer MAX friction, computed once in the
+    // fast-scan pass), so reuse it directly instead of re-reducing the layer map
+    // here.
     let fr = cellFrictionEntries[cell] ?? 0;
 
     // Apply the impassable blur friction override (nudge routing around obstacles).

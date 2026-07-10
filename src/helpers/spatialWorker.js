@@ -10,6 +10,7 @@ import {
   mergeCellsChunk,
   normalizeFrictionEntries,
   computeAoiHexes,
+  deriveCellFrictionFromLayers,
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
 import { SIMULATION_PARAMS } from './constants.js';
@@ -320,15 +321,6 @@ function mergeFastScanEntries(target, source) {
       if (targetLayerMap[layer] === undefined || nextValue > targetLayerMap[layer])
         targetLayerMap[layer] = nextValue;
     }
-  }
-}
-
-function mergeScalarEntries(target, source) {
-  const sourceKeys = Object.keys(source);
-  for (let k = 0; k < sourceKeys.length; k++) {
-    const cell = sourceKeys[k];
-    const nextValue = source[cell];
-    if (target[cell] === undefined || nextValue > target[cell]) target[cell] = nextValue;
   }
 }
 
@@ -764,14 +756,20 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
     } catch (_e) {}
   }
 
-  // Merge all chunk results
+  // Merge all chunk results. The per-layer map merges with MAX per (cell, layer),
+  // which is correct for overlapping same-level features (highest friction wins).
   const multiFrictionEntries = Object.create(null);
-  const cellFrictionEntries = Object.create(null);
   for (let i = 0; i < results.length; i++) {
     const batch = results[i] ?? {};
     mergeFastScanEntries(multiFrictionEntries, batch.multiFrictionEntries ?? Object.create(null));
-    mergeScalarEntries(cellFrictionEntries, batch.cellFrictionEntries ?? Object.create(null));
   }
+  // Derive the effective per-cell friction from the fully-merged layer map
+  // (MIN across layers of the per-layer MAX). This keeps the result independent
+  // of how features were sharded across chunk workers — previously a flat min
+  // within a chunk vs. a max-of-mins across chunks caused an intermittent
+  // misclassification (e.g. a fountain inside a public space flipping between
+  // pavement and impassable). We no longer merge the per-cell scalars directly.
+  const cellFrictionEntries = deriveCellFrictionFromLayers(multiFrictionEntries);
 
   // Run blur with complete data (re-run if early version already started).
   // Resolve the r1 adjacency promise here (it was launched in parallel with the
