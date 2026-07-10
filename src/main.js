@@ -3,7 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder';
 import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css';
 import './style/geocoder.css';
-import { latLngToCell, cellToLatLng } from 'h3-js';
+import { latLngToCell } from 'h3-js';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 
 import { MAP_OPTIONS, FRICTION_COSTS, getSurface, SIMULATION_PARAMS } from './helpers/constants.js';
@@ -14,7 +14,7 @@ import {
   clearLayers,
   exportSimulationGeoJSON,
 } from './helpers/map.js';
-import { setupUI } from './helpers/ui.js';
+import { setupUI, findNodeAtScreenPoint } from './helpers/ui.js';
 import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
 
 /**
@@ -245,27 +245,11 @@ export function setMapCursorWait(mapInstance, waiting) {
 
 // Pick the cursor from cached simulation-node positions instead of a per-event
 // queryRenderedFeatures GPU readback. Pins are draggable, so we show a grab
-// cursor when the pointer is within a node's rendered radius.
+// cursor when the pointer is within a node's rendered radius. Uses the same
+// hit test as the drag handler so the cursor and draggability always agree.
 const PIN_HIT_PADDING_PX = 4;
 function updateCursorFromNodes(mapInstance, point) {
-  const nodes = mapInstance.simulationNodes ?? {};
-  const keys = Object.keys(nodes);
-  if (keys.length === 0) {
-    setMapCursor(mapInstance, 'crosshair');
-    return;
-  }
-  let hit = false;
-  for (const k of keys) {
-    const pt = cellToLatLng(k);
-    const p = mapInstance.project([pt[1], pt[0]]);
-    const radius = 7 + nodes[k].weight * 2.5 + PIN_HIT_PADDING_PX;
-    const dx = p.x - point.x;
-    const dy = p.y - point.y;
-    if (dx * dx + dy * dy <= radius * radius) {
-      hit = true;
-      break;
-    }
-  }
+  const hit = findNodeAtScreenPoint(mapInstance, point, PIN_HIT_PADDING_PX) !== null;
   setMapCursor(mapInstance, hit ? 'grab' : 'crosshair');
 }
 

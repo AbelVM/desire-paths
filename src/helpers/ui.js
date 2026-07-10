@@ -1,5 +1,5 @@
 import { clearComputeCaches } from './compute.js';
-import { latLngToCell } from 'h3-js';
+import { latLngToCell, cellToLatLng } from 'h3-js';
 import {
   SIMULATION_PARAMS,
   updateSimulationParams,
@@ -44,6 +44,29 @@ function addUIListener(target, event, handler, options) {
 
 function isActiveNode(node) {
   return node && Number(node.weight) > 0;
+}
+
+// Screen-space hit test shared by hover and drag so both use the same generous
+// clickable area. Returns the cell key of the nearest active node whose rendered
+// pin is within `paddingPx` of `point` (canvas-relative pixels), or null.
+// Mirrors the pin radius formula used by the `pin-circles` map layer.
+export function findNodeAtScreenPoint(mapInstance, point, paddingPx = 4) {
+  const nodes = mapInstance.simulationNodes ?? {};
+  let bestCell = null;
+  let bestDist = Infinity;
+  for (const cell of Object.keys(nodes)) {
+    const node = nodes[cell];
+    if (!isActiveNode(node)) continue;
+    const [lat, lng] = cellToLatLng(cell);
+    const p = mapInstance.project([lng, lat]);
+    const radius = 7 + node.weight * 2.5 + paddingPx;
+    const dist = Math.hypot(p.x - point.x, p.y - point.y);
+    if (dist <= radius && dist < bestDist) {
+      bestDist = dist;
+      bestCell = cell;
+    }
+  }
+  return bestCell;
 }
 
 function hasBuildInputs(nodes = {}) {
@@ -1106,8 +1129,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     // Block drag while computing
     if (map.isComputing || dragState.active) return;
 
-    const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
-    const node = map.simulationNodes?.[cell];
+    // Use the same generous screen-space hit area as the hover cursor so a pin
+    // is draggable wherever the grab cursor appears (the H3 cell it sits in can
+    // be smaller than the rendered pin, making the cell-based test miss clicks
+    // near the pin edge).
+    const cell = findNodeAtScreenPoint(map, e.point ?? map.project(e.lngLat), 4);
+    const node = cell ? map.simulationNodes?.[cell] : null;
     if (node && isActiveNode(node)) {
       e.preventDefault?.();
       dragState.active = true;
@@ -1351,72 +1378,24 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     // Block context menu while computing
     if (map.isComputing) return;
 
-    let node = null;
-
-    // Strategy 1: Try lngLat from the event (works for canvas clicks)
-    if (isFiniteLngLat(e.lngLat)) {
-      const cell = latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution);
-      node = map.simulationNodes?.[cell];
+    // Use the same screen-space hit test as hover and drag so right-clicking a
+    // pin is consistent with the grab cursor and dragging.
+    const containerRect = uiState.mapContainer.getBoundingClientRect();
+    let point = e.point;
+    if (!point && containerRect && (e.originalEvent?.clientX ?? 0)) {
+      // Convert viewport coords to canvas-relative pixel coords
+      point = [
+        e.originalEvent.clientX - containerRect.left,
+        e.originalEvent.clientY - containerRect.top,
+      ];
     }
 
-    // Strategy 2: If lngLat failed or no active node found, query rendered pin features at click position
-    if (!node || !isActiveNode(node)) {
-      const containerRect = uiState.mapContainer.getBoundingClientRect();
-      let point;
-      if (e.point) {
-        // e.point is canvas-relative — use directly
-        point = e.point;
-      } else if (containerRect && (e.originalEvent?.clientX ?? 0)) {
-        // Convert viewport coords to canvas-relative pixel coords
-        const cx = e.originalEvent.clientX - containerRect.left;
-        const cy = e.originalEvent.clientY - containerRect.top;
-        point = [cx, cy];
-      }
-
-      if (point) {
-        try {
-          // Query a slightly larger area for better hit detection on pin circles
-          const features = map.queryRenderedFeatures(point, { layers: ['pin-circles'] });
-          if (features.length > 0) {
-            // Find the closest feature to the click point
-            let closest = null;
-            let minDist = Infinity;
-            for (const feat of features) {
-              const [lng, lat] = feat.geometry.coordinates;
-              const projected = map.project([lat, lng]);
-              const dist = Math.hypot(projected.x - point[0], projected.y - point[1]);
-              if (dist < minDist) {
-                minDist = dist;
-                closest = { lng, lat };
-              }
-            }
-            if (closest) {
-              const cell = latLngToCell(
-                closest.lat,
-                closest.lng,
-                SIMULATION_PARAMS.h3StrideResolution
-              );
-              node = map.simulationNodes?.[cell];
-            }
-          }
-        } catch (_) {
-          /* queryRenderedFeatures may fail in tests */
-        }
-      }
-    }
+    const cell = point ? findNodeAtScreenPoint(map, point, 4) : null;
+    const node = cell ? map.simulationNodes?.[cell] : null;
 
     if (node && isActiveNode(node)) {
-      const cell =
-        node.cell ||
-        (isFiniteLngLat(e.lngLat)
-          ? latLngToCell(e.lngLat.lat, e.lngLat.lng, SIMULATION_PARAMS.h3StrideResolution)
-          : undefined);
-      if (cell) {
-        e.preventDefault();
-        showContextMenu(e, node, cell);
-      } else {
-        hideContextMenu();
-      }
+      e.preventDefault();
+      showContextMenu(e, node, cell);
     } else {
       hideContextMenu();
     }
