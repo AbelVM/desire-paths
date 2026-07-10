@@ -228,7 +228,7 @@ export async function triggerFastScan(state, mapInstance) {
   // O(N)-cellToIndex + Proxy structures on the main thread unless a preview
   // actually needs them.
   // NOTE: VISUAL_DEPTH neighbor disks are no longer precomputed here; they are filled
-  // lazily and cached during the simulation via getNeighborDisk (see compute.js).
+  // lazily and cached during the simulation via getNeighborDisk (see agentTasks.js).
   const mappingGraph = await runBuildMappingGraph(
     state.cellFrictionMap,
     viewHexes,

@@ -1,9 +1,9 @@
 import { logger } from './logger.js';
 import { gridRingUnsafe, polygonToCells, cellToLatLng } from 'h3-js';
 
-// Module-level lat/lng cache (mirrors compute.js's `_cellLatLngCache`). H3
-// `cellToLatLng` is comparatively expensive and is called N times per mapping
-// generation in `buildMappingGraph` (and again per distinct cell during the
+// Module-level lat/lng cache. H3 `cellToLatLng` is comparatively expensive and
+// is called N times per mapping generation in `buildMappingGraph` (and again
+// per distinct cell during the
 // sim), so caching across remaps avoids recomputing the same cells repeatedly.
 // Stores [lat, lng, latRad, lngRad] so the radian conversion is also cached.
 const _cellLatLngCache = new Map();

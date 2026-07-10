@@ -7,8 +7,6 @@ import {
   UPDATE_RATE,
   MAX_EXPECTED_VOLUME,
   SOFT_CAP,
-  MAX_SIM_TICKS,
-  SIM_TICK_BUFFER,
   SIMULATION_PARAMS,
 } from './constants.js';
 import {
@@ -17,10 +15,9 @@ import {
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
-// The single canonical agent-path kernel lives in agentTasks.js. The
-// main-thread incremental path (runSingleAgentPath below) is now a thin
-// adapter over runAgentPath, so both code paths share one implementation.
-import { runAgentPath } from './agentTasks.js';
+// The single canonical agent-path kernel lives in agentTasks.js. estimateMaxTicks
+// is re-exported from there to keep a single definition.
+import { estimateMaxTicks } from './agentTasks.js';
 import {
   computeDijkstra,
   getGradientGraph,
@@ -130,98 +127,12 @@ export function clearComputeCaches(ctx) {
   invalidateGradientGraph();
 }
 
-function ensureVisibilityCacheFresh(ctx) {
-  const gen = ctx._mappingGeneration ?? 0;
-  if (ctx._visibilityCacheGen !== gen) {
-    ctx._visibilityCacheObj = undefined;
-    ctx._visibilityCacheOrder = undefined;
-    ctx._visibilityCacheGen = gen;
-  }
-}
-
 function ensureGradientCacheFresh(ctx) {
   const gen = ctx._mappingGeneration ?? 0;
   if (ctx._gradientCacheGen !== gen) {
     clearGradientCache(ctx);
     ctx._gradientCacheGen = gen;
   }
-}
-
-function estimateMaxTicks(origin, dest, hexCount) {
-  const dist = gridDistance(origin, dest);
-  const pathBudget = Math.max(64, dist * SIM_TICK_BUFFER + 32);
-  const globalBudget = 2 * Math.ceil(Math.sqrt(hexCount * Math.PI));
-  return Math.min(MAX_SIM_TICKS, pathBudget, globalBudget);
-}
-
-/** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
-/**
- * Main-thread incremental agent-path kernel.
- *
- * Thin adapter over the single canonical kernel in agentTasks.js
- * (`runAgentPath`). Both the worker batch path and this incremental path call
- * the same implementation, so there is exactly one source of truth for the
- * pathfinding logic — no second kernel to drift apart (see
- * tests/incrementalKernelParity.test.js).
- *
- * `ctx` is adapted into the explicit parameters `runAgentPath` expects. The
- * graph is intentionally left undefined: the worker kernel reads affordance
- * from a typed-array snapshot (`_knAffordanceArr`) that is only built inside
- * `computeAgentBatch`; on the main thread we pass the live `_affordanceObj`
- * instead, which `runAgentPath` falls back to when no graph is supplied.
- *
- * `applyWear` is applied after the path is computed (the worker kernel does
- * not mutate affordance mid-walk); this matches the previous per-cell wear
- * since each visited cell is incremented exactly once.
- *
- * Returns traversed cells in order (including origin).
- */
-function runSingleAgentPath(
-  ctx,
-  {
-    originCell,
-    destCell,
-    destGradientObj,
-    maxTicks,
-    simAgentId,
-    pathDesireDeltas = null,
-    applyWear = false,
-    accumulatedFootprints = null,
-    bearingMap = null,
-    originDestDistances = null,
-  }
-) {
-  const frictionLookup = ctx._frictionObj;
-  const affordanceLookup = ctx._affordanceObj;
-  const visibilityMap = null;
-  // No graph on the main thread: runAgentPath falls back to the live
-  // affordance/friction plain-object lookups (see header above).
-  const graph = undefined;
-  const nodeSet = originDestDistances ? new Set(originDestDistances.nodeList) : null;
-
-  const simPath = runAgentPath(
-    originCell,
-    destCell,
-    destGradientObj,
-    maxTicks,
-    simAgentId,
-    pathDesireDeltas,
-    frictionLookup,
-    affordanceLookup,
-    visibilityMap,
-    accumulatedFootprints,
-    bearingMap,
-    originDestDistances,
-    ctx.simulationParams,
-    graph,
-    nodeSet
-  );
-
-  if (applyWear) {
-    for (let i = 0; i < simPath.length; i++) updateAffordance(ctx, simPath[i], 1);
-  }
-
-  return simPath;
 }
 
 function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
@@ -356,7 +267,6 @@ export async function computeDesirePaths(state, mapInstance) {
 
   const hexes = state.cellFrictionMap.size;
   ensureGradientCacheFresh(state);
-  ensureVisibilityCacheFresh(state);
 
   const mappingGen = state._mappingGeneration ?? 0;
   if (!state._frictionObj || state._frictionSnapshotGen !== mappingGen) {
@@ -759,7 +669,6 @@ function computeDijkstraGradient(ctx, targetCell) {
 // Expose real internals for testing/debugging (no test-only aliases).
 export {
   computeDijkstraGradient,
-  runSingleAgentPath,
   estimateMaxTicks,
   precomputeOriginDestDistances,
 };

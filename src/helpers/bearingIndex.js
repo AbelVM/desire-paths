@@ -37,8 +37,8 @@ export function binarySearchNeighbors(neighbors, start, end, target) {
 
 /**
  * CSR-backed visibility accessor. Exposes `data[a]` returning a truthy object for
- * origins (so `_getCachedVisibility`'s `if (visible)` guard still works and falls
- * through to the legacy cache for cells outside the AOI) that supports
+ * origins (so the visibility accessor's `if (visible)` guard still works and
+ * falls through to the legacy cache for cells outside the AOI) that supports
  * `visible[b]` → boolean. Lookups are O(log P_i) binary searches over the origin's
  * sorted neighbor slice, not O(P_i) object property walks.
  *

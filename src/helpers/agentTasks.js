@@ -41,11 +41,11 @@ function _strHash(s) {
 }
 
 // Small local cache (keeps worker stateless w.r.t. main thread).
-// Mirrors compute.js's `_cellLatLngCache` LRU: a Map whose insertion order
-// == recency. On a hit we delete+re-set to move the entry to the most-recent
-// end, and evict the oldest (first) key on overflow. This replaces the old
-// push/shift array + periodic *full* reset, which discarded every useful entry
-// once the cache drifted past 1.5× the cap and caused a recompute storm (C2).
+// LRU: a Map whose insertion order == recency. On a hit we delete+re-set to
+// move the entry to the most-recent end, and evict the oldest (first) key on
+// overflow. This replaces the old push/shift array + periodic *full* reset,
+// which discarded every useful entry once the cache drifted past 1.5× the cap
+// and caused a recompute storm (C2).
 const _cellLatLngCache = new Map();
 
 function _getCachedLatLng(cell) {
@@ -961,10 +961,9 @@ export function computeAgentBatch({
   return { result, transfers };
 }
 
-// Single canonical agent-path kernel. Both the worker batch path
-// (computeAgentBatch) and the main-thread incremental path (compute.js's
-// runSingleAgentPath adapter) call into these, so there is exactly one
-// implementation of the pathfinding logic — no second kernel to drift.
+// Single canonical agent-path kernel. The worker batch path (computeAgentBatch)
+// is the only caller, so there is exactly one implementation of the pathfinding
+// logic — no second kernel to drift.
 export {
   runAgentPath,
   estimateMaxTicks,
