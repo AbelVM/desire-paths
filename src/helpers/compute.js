@@ -136,7 +136,11 @@ function ensureGradientCacheFresh(ctx) {
 }
 
 function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
+  // Use the same friction source the agent batch builds its graph from
+  // (`_frictionObj`, materialized before this runs) so getGradientGraph's
+  // identity-keyed cache is hit instead of rebuilding the adjacency a second
+  // time from `cellFrictionMap` (P0).
+  const graph = getGradientGraph(ctx._frictionObj || ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
   const destCandidates = [];
   let destWeightSum = 0;
   for (let d = 0; d < destinations.length; d++) {

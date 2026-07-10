@@ -268,8 +268,6 @@ function getBestNextStep(
   const impassableVal = FRICTION_COSTS.IMPASSABLE;
   const visualAngleHalf = simulationParams.fieldOfView / 2;
 
-  const disk = _getCachedDisk(curr, simulationParams.visionDepth);
-  const sLatLng = _getCachedLatLng(curr);
   const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
   const useGradient = typeof gCurr === 'number';
 
@@ -385,6 +383,12 @@ function getBestNextStep(
     }
   }
   if (!usedIndexed) {
+    // The string kernel is the only consumer of the vision-depth disk and the
+    // current cell's lat/lng. The indexed kernel enumerates candidates directly
+    // from the visibility CSR and computes angles from precomputed bearings, so
+    // computing these here would be wasted H3/trig work on every step.
+    const disk = _getCachedDisk(curr, simulationParams.visionDepth);
+    const sLatLng = _getCachedLatLng(curr);
     const candCountFallback = gatherCandidates({
       disk,
       curr,
@@ -834,6 +838,17 @@ export function computeAgentBatch({
   const perTargetContribs = Object.create(null);
   let processed = 0;
 
+  // Global shared footprint accumulator for the WHOLE batch. Every agent in the
+  // simulation (all origin→destination pairs) accumulates into this single
+  // structure, so later agents — including those of *other* pairs — see the
+  // wear earlier agents left behind. This is the true ABM interaction that
+  // produces emergent desire paths (paper §3.4), and it is what makes the run
+  // order-dependent and therefore require a single execution context. The
+  // accumulator is owned by the worker (S5): it starts empty and is never read
+  // back on the main thread, so there is no reason to structured-clone an
+  // (empty) object across the worker boundary.
+  const abmFootprints = Object.create(null);
+
   for (let p = 0; p < plan.length; p++) {
     const entry = plan[p];
     const originCell = entry.originCell;
@@ -862,20 +877,6 @@ export function computeAgentBatch({
 
       if (!perTargetContribs[destCell]) perTargetContribs[destCell] = Object.create(null);
       const maxTicks = estimateMaxTicks(originCell, destCell, hexCount);
-
-      // True ABM loop: agents step sequentially within shared ticks.
-      // Each agent's positions accumulate as footprints that modify affordance
-      // for subsequent agents in the same origin-destination batch.
-      // This produces emergent path formation — the core phenomenon studied
-      // in the paper, as opposed to Monte-Carlo sampling where every agent
-      // plans independently against static terrain.
-      //
-      // The shared footprint accumulator is owned by the worker (S5): it
-      // starts empty and is never read back on the main thread, so there is
-      // no reason to structured-clone an (empty) object across the worker
-      // boundary. We build it here instead of consuming the dispatched
-      // `accumulatedFootprints`.
-      const abmFootprints = Object.create(null);
 
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;

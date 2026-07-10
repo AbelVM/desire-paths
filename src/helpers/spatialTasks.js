@@ -991,5 +991,8 @@ export function mergeCellsChunk({
     affArr[i] = aff;
   }
 
-  return { cells, frictionArr, affArr };
+  // `cells` is the caller's own `viewHexes` slice; the main thread iterates
+  // `viewHexes` by index and never reads it back, so dropping it here avoids
+  // structured-cloning N cell strings across the worker boundary (P1).
+  return { frictionArr, affArr };
 }
