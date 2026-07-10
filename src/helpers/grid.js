@@ -148,18 +148,22 @@ export async function triggerFastScan(state, mapInstance) {
   }
   const multiEntries = build.multiFrictionEntries ?? Object.create(null);
 
-  // Reuse existing multiFrictionMap when AOI hasn't changed to avoid re-allocating objects
+  // Lazy multiFrictionMap (P3): only cells that actually have friction layers
+  // from the fast-scan get an entry. Layer-less cells (default terrain) get NO
+  // entry — previously EVERY viewHex was pre-populated with an empty layer-map
+  // object (N wasted allocations, the largest object allocation in the mapping
+  // stage). The interactive obstacle drawer (mapCells) allocates a layer map on
+  // demand for any in-AOI cell, so drawing behavior is unchanged; nothing reads
+  // an empty layer map. AOI membership at draw time is defined by
+  // `cellFrictionMap` (populated for every viewHex below). The Map *object* is
+  // reused (cleared in place) when the AOI key is unchanged so consumers holding
+  // a reference stay valid.
   const aoiKey = state._cachedAoiKey ?? (state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '');
   if (!state.multiFrictionMap || state._lastViewHexesKey !== aoiKey) {
     state.multiFrictionMap = new Map();
-    for (let i = 0; i < viewHexes.length; i++)
-      state.multiFrictionMap.set(viewHexes[i], Object.create(null));
     state._lastViewHexesKey = aoiKey;
   } else {
-    for (const obj of state.multiFrictionMap.values()) {
-      const keys = Object.keys(obj);
-      for (let k = 0; k < keys.length; k++) delete obj[keys[k]];
-    }
+    state.multiFrictionMap.clear();
   }
 
   // Single-pass: merge multi-friction, build cellFrictionMap + affordanceMap
@@ -200,9 +204,10 @@ export async function triggerFastScan(state, mapInstance) {
     const cell = viewHexes[i];
     const fr = merged.frictionArr[i];
     const aff = merged.affArr[i];
-    const target = multiEntries[cell] || Object.create(null);
+    const target = multiEntries[cell];
     state.cellFrictionMap.set(cell, fr);
-    state.multiFrictionMap.set(cell, target);
+    // Only cells with actual fast-scan layers get a multiFrictionMap entry.
+    if (target) state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
   }
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
@@ -335,8 +340,16 @@ function mapCells(state, cells, surface) {
   const layerVal = FRICTION_COSTS[surface.cost];
   for (let i = 0, cLen = cells.length; i < cLen; i++) {
     const cell = cells[i];
-    const val = frictionMap.get(cell);
-    if (!val) continue; // outside AOI
+    let val = frictionMap.get(cell);
+    if (!val) {
+      // Lazy multiFrictionMap (P3): layer-less AOI cells have no entry until
+      // drawn on. Allocate a layer map on demand for in-AOI cells (membership
+      // defined by cellFrictionMap, populated for every viewHex at build time);
+      // cells with no cellFrictionMap entry are genuinely outside the AOI.
+      if (!cellFrictionMap || !cellFrictionMap.has(cell)) continue; // outside AOI
+      val = Object.create(null);
+      frictionMap.set(cell, val);
+    }
     if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) val[layerKey] = layerVal;
     // Recompute the per-cell min friction (cellFrictionMap) from the updated
     // layer map. The gradient graph / Dijkstra read cellFrictionMap (and its

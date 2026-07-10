@@ -719,7 +719,11 @@ function runAgentPath(
     let lastReached = simCurrent;
     for (let i = 1; i < line.length; i++) {
       const stepCell = line[i];
-      const stepF = frictionLookup[stepCell];
+      // Typed-array friction read (graph.frictionArr) when a graph is present —
+      // byte-identical to `frictionLookup[stepCell]` for every cell queried here
+      // (impassable → undefined → break; passable → same number), but avoids the
+      // string-keyed plain-object read in the inner line-walk loop.
+      const stepF = graph ? graphFriction(graph, stepCell) : frictionLookup[stepCell];
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
       simPath.push(stepCell);
       if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);

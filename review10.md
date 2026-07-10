@@ -23,8 +23,10 @@ I've now read the full pipeline (mapping stage: `grid.js` → `spatialTasks.js`/
 
 **Plan (P1):** replace the three plain-object accumulators with `Float64Array(V)` (pathDesire, per-target, footprints). `scoreCandidates` reads `abmFootprints[gIdx]` instead of `accumulatedFootprints[cellsArr[i]]`. The final flatten (`:928-943`) iterates the typed array for non-zero entries. Pairs naturally with §1.1 (the SAB accumulators *are* these typed arrays).
 
-### 1.4 `runAgentPath` line-walk uses string-keyed `frictionLookup[stepCell]`
+### 1.4 `runAgentPath` line-walk uses string-keyed `frictionLookup[stepCell]` — **IMPLEMENTED**
 `:673` `const stepF = frictionLookup[stepCell];` — a plain-object read in the inner line loop. Use `graphFriction(graph, stepCell)` (typed-array read, `dijkstra.js:574`) for consistency with the rest of the kernel. Minor but free.
+
+**Done (P3-pass):** now `const stepF = graph ? graphFriction(graph, stepCell) : frictionLookup[stepCell];`. `graphFriction` is byte-identical to the plain-object read for every cell the kernel queries (impassable → `undefined` → break; passable → same number), and the `graph`-absent fallback preserves the direct-`runAgentPath` (agentBatchParity) call path.
 
 ### 1.5 Redundant gradient-graph build per run — **IMPLEMENTED**
 `compute.js` built the graph from `ctx.cellFrictionMap` (a `Map`); `runAgentBatches` (`spatialWorker.js:571`) builds it from `state._frictionObj` (a plain object). `getGradientGraph` is keyed by object *identity* (`dijkstra.js:82`), so the graph was built **twice** per run from two sources with identical `cellToIdx` (both iterate `viewHexes` in order).
@@ -91,7 +93,7 @@ SAB is already wired for transfer buffers (`allocTransferBuffer` in both `spatia
 | **P2** | LRU for gradient cache / wire `GRADIENT_CACHE_MAX_ENTRIES` | none | S | Low — `_gradientCacheOrder` LRU now bounds `_gradientCacheObj` to `GRADIENT_CACHE_MAX_ENTRIES` carried-over entries; current-run targets are protected from eviction | ✅ done |
 | **P2** | Sparse OD-distance structure | low | S | Low–Med — replaced dense `Float32Array(M²)` (M = O∪D) with an origin-major `Float32Array(O*D)` + `originToIdx`/`destToIdx` maps; exact same lookup semantics (2nd arg is always a dest), ~4× smaller when O≈D | ✅ done |
 | **P3** | Canonical `Float32Array(N)` friction/affordance (drop duplicate Maps) | med | L | Very High (memory) — biggest steady-state win; ~2× friction/affordance + faster reads | open |
-| **P3** | Lazy `multiFrictionMap` | med | M | High (memory) — drops the largest N-object allocation | open |
+| **P3** | Lazy `multiFrictionMap` | med | M | High (memory) — drops the largest N-object allocation | ✅ done |
 
 **Implemented in this pass (all green: 57 + 105 tests):**
 - Lazy `disk`/`sLatLng` in the indexed kernel — removes a `gridDisk(visionDepth)` + `cellToLatLng` per step.
@@ -111,6 +113,17 @@ SAB is already wired for transfer buffers (`allocTransferBuffer` in both `spatia
 - **`multiFrictionMap` merge (P2).** Confirmed already addressed — `grid.js` stores the fast-scan `multiEntries[cell]` objects *by reference* into `multiFrictionMap`, so there is no transient 2× N-object set.
 
 **Recommended next:** the SAB `Atomics.add` shared-footprint parallelism (P1) — `abmFootprints` is now a `Uint32Array(V)`, so backing it with a SAB is a small step; keep it flag-guarded (cross-pair non-determinism). Then the P3 memory refactors.
+
+---
+
+## 7. Third implementation pass (all green: 346 tests, 6 skipped)
+
+- **§1.4 line-walk friction read.** `runAgentPath`'s inner line-walk now reads friction via `graphFriction(graph, stepCell)` (typed-array) when a graph is present, falling back to the plain-object `frictionLookup[stepCell]` only for the graph-less direct-call path. Byte-identical for every cell queried.
+- **Lazy `multiFrictionMap` (P3.2).** The mapping build no longer pre-populates every viewHex with an empty layer-map object (the largest N-object allocation in the mapping stage). Only cells with actual fast-scan layers get an entry; the interactive obstacle drawer (`mapCells`) allocates a layer map on demand for any in-AOI cell (AOI membership via `cellFrictionMap`), so drawing behavior is unchanged. The Map *object* is still reused (cleared in place) when the AOI key is unchanged, so the identity-reuse contract (`integration.test.js`) holds. Parity is exact: layer-less cells already defaulted to `fr = cellFrictionEntries[cell] ?? 0` in the merge, and nothing reads an empty layer map (`_multiFrictionObj` is assigned but never read as data).
+
+**Remaining (large, strategic — deliberately not rushed):**
+- **P1 SAB atomic shared-footprint parallelism** — needs multi-worker agent sharding (agent.worker.js + `runAgentBatches`), a shared SAB `Int32Array(V)` footprint with `Atomics.add`/`Atomics.load`, a cross-worker merge for `pathDesire`/`perTarget`, a flag, and a new multi-worker parity test. Introduces cross-pair non-determinism by design (accepted at the T>0 tolerance). Groundwork is in place (footprints are already a `Uint32Array(V)`).
+- **P3.1 canonical `Float32Array(N)` friction/affordance** — the single biggest steady-state memory win, but it drops `cellFrictionMap`/`affordanceMap` and touches `grid.js`, `compute.js`, `dijkstra.js`, `spatialTasks.js`, `agentTasks.js`, `map.js`, `ui.js` (including render paths with thin unit coverage). Must be phased behind the integration test rather than done in a single pass.
 
 ---
 
