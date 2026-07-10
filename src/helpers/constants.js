@@ -68,7 +68,7 @@ export const VISUAL_DEPTH = 15; // How far ahead agents can "see" to evaluate pa
 
 export const VISUAL_ANGLE = 120; // The field of view for agents when evaluating next steps (in degrees)
 
-export const AGENTS_PER_DESTINATION = 25; // Number of agents that will be spawned for each origin-destination pair
+export const AGENTS_PER_DESTINATION = 100; // Number of agents that will be spawned for each origin-destination pair
 
 export const DECAY_RATE = 0.001; // How quickly the affordance of a cell decays over time (5% per tick)
 
@@ -85,7 +85,7 @@ export const SIMULATION_PARAM_LIMITS = Object.freeze({
   distancePenalty: { min: 1, max: 8, step: 1 },
   visionDepth: { min: 5, max: 30, step: 5 },
   fieldOfView: { min: 30, max: 360, step: 30 },
-  agentsPerWeightUnit: { min: 5, max: 100, step: 5 },
+  agentsPerWeightUnit: { min: 25, max: 500, step: 5 },
   temperature: { min: 0, max: 2, step: 0.25 },
   h3StrideResolution: { min: 0, max: 15, step: 1 },
 });

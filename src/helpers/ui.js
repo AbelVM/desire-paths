@@ -4,6 +4,7 @@ import {
   SIMULATION_PARAMS,
   updateSimulationParams,
   DEFAULT_SIMULATION_PARAMS,
+  SIMULATION_PARAM_LIMITS,
 } from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
 import { createIcons, icons } from 'lucide';
@@ -395,6 +396,29 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       const active = panel.id === tabTarget;
       panel.classList.toggle('is-active', active);
       panel.hidden = !active;
+    }
+  };
+
+  // Bind each simulation slider's min/max/step to SIMULATION_PARAM_LIMITS so the
+  // UI always reflects the canonical constants (HTML defaults are just a fallback).
+  const bindSimulationParamLimits = () => {
+    const sliderToLimit = {
+      simParamWa: 'affordanceWeight',
+      simParamWd: 'distancePenalty',
+      simParamVisionDepth: 'visionDepth',
+      simParamFov: 'fieldOfView',
+      simParamAgentsPerWeight: 'agentsPerWeightUnit',
+      simParamTemperature: 'temperature',
+      simParamH3Stride: 'h3StrideResolution',
+    };
+    for (const [prop, limitKey] of Object.entries(sliderToLimit)) {
+      const el = uiState[prop];
+      const limit = SIMULATION_PARAM_LIMITS[limitKey];
+      if (el && limit) {
+        el.min = String(limit.min);
+        el.max = String(limit.max);
+        el.step = String(limit.step);
+      }
     }
   };
 
@@ -1571,6 +1595,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   map.placementWeight = clampWeight(map.placementWeight || 1);
   activateTab('panel-intro');
+  bindSimulationParamLimits();
   syncSimulationParamUI();
   syncModeUI();
   syncWeightUI();
