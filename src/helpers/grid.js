@@ -10,6 +10,7 @@ import {
 } from './spatialWorker.js';
 import { clearComputeCaches, clearGradientCache } from './compute.js';
 import { invalidateGradientGraph } from './dijkstra.js';
+import { buildCellToIdx, FrictionArrayMap } from './frictionStore.js';
 
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
@@ -142,10 +143,6 @@ export async function triggerFastScan(state, mapInstance) {
   state._mappingGeneration = (state._mappingGeneration ?? 0) + 1;
   clearComputeCaches(state);
 
-  // Reset friction maps in a single pass over viewHexes
-  if (state.cellFrictionMap && typeof state.cellFrictionMap.clear === 'function') {
-    state.cellFrictionMap.clear();
-  }
   const multiEntries = build.multiFrictionEntries ?? Object.create(null);
 
   // Lazy multiFrictionMap (P3): only cells that actually have friction layers
@@ -194,6 +191,24 @@ export async function triggerFastScan(state, mapInstance) {
   // `multiEntries` (from the fast-scan pass) directly, avoiding a 2× clone of N
   // objects. We also iterate `viewHexes` by index instead of the worker's returned
   // `cells` (N strings), avoiding a redundant clone.
+  //
+  // P3.1: the canonical friction/affordance representation is now
+  // `Float32Array(N)` indexed by `viewHexes` order, with `cellToIdx` as the only
+  // remaining N-entry container. `cellFrictionMap` / `affordanceMap` are thin
+  // Map-like VIEWS over these arrays (frictionStore.js) so every existing
+  // consumer keeps working via the Map interface while the two hottest fields
+  // drop from two N-entry Maps to one N-entry index Map + two compact typed
+  // arrays (~2x steady-state memory win). The merge loop below writes through
+  // the views into the typed arrays.
+  const cellToIdx = buildCellToIdx(viewHexes);
+  const frictionArr = new Float32Array(viewHexes.length);
+  const affArr = new Float32Array(viewHexes.length);
+  state.cellToIdx = cellToIdx;
+  state.frictionArr = frictionArr;
+  state.affArr = affArr;
+  state.cellFrictionMap = new FrictionArrayMap(frictionArr, cellToIdx);
+  state.affordanceMap = new FrictionArrayMap(affArr, cellToIdx);
+
   const merged = await runMergeCellsTask({
     cells: viewHexes,
     cellFrictionEntries: build.cellFrictionEntries,
