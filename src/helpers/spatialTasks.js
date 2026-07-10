@@ -1,33 +1,13 @@
 import { logger } from './logger.js';
 import { gridRingUnsafe, polygonToCells, cellToLatLng } from 'h3-js';
 
-// Module-level lat/lng cache. H3 `cellToLatLng` is comparatively expensive and
-// is called N times per mapping generation in `buildMappingGraph` (and again
-// per distinct cell during the
-// sim), so caching across remaps avoids recomputing the same cells repeatedly.
-// Stores [lat, lng, latRad, lngRad] so the radian conversion is also cached.
-const _cellLatLngCache = new Map();
-const CELL_LATLNG_CACHE_MAX_LOCAL = 4096;
-function cachedCellLatLng(cell) {
-  let v = _cellLatLngCache.get(cell);
-  if (v) {
-    _cellLatLngCache.delete(cell);
-    _cellLatLngCache.set(cell, v);
-    return v;
-  }
-  const ll = cellToLatLng(cell);
-  const lat = ll[0];
-  const lng = ll[1];
-  const latRad = (lat * Math.PI) / 180;
-  const lngRad = (lng * Math.PI) / 180;
-  v = [lat, lng, latRad, lngRad];
-  _cellLatLngCache.set(cell, v);
-  if (_cellLatLngCache.size > CELL_LATLNG_CACHE_MAX_LOCAL) {
-    const old = _cellLatLngCache.keys().next().value;
-    _cellLatLngCache.delete(old);
-  }
-  return v;
-}
+// NOTE: a previous module-level lat/lng cache (capped at 4096 entries) was
+// removed. `buildMappingGraph` iterates `viewHexes` in order and calls
+// `cellToLatLng` once per cell; for any real AOI (N ≫ 4096) the cache was
+// smaller than the working set, so it missed 100% of the time and only added
+// ~3 Map ops per cell of pure overhead. The radian/sin/cos values are computed
+// once in `buildMappingGraph` and stored in `latLngArr`, which is the structure
+// the visibility BFS actually consumes — so there is no repeated trig to cache.
 import {
   FRICTION_COSTS,
   SIMULATION_PARAMS,
@@ -38,6 +18,7 @@ import {
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
   getSurface,
   POLY_CELLS_CACHE_MAX,
+  classifyFrictionTier,
 } from './constants.js';
 import { computeDijkstra, getGradientGraph } from './dijkstra.js';
 
@@ -618,9 +599,9 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
     const cell = viewHexes[i];
     const f = frictionLookup[cell] ?? 0;
     frictionArr[i] = f < impassable ? f : -1; // -1 marks impassable / missing
-    const ll = cachedCellLatLng(cell);
-    const latRad = ll[2];
-    const lngRad = ll[3];
+    const ll = cellToLatLng(cell);
+    const latRad = (ll[0] * Math.PI) / 180;
+    const lngRad = (ll[1] * Math.PI) / 180;
     const b = i * 8;
     latLngArr[b] = ll[0];
     latLngArr[b + 1] = ll[1];
@@ -787,14 +768,18 @@ export function computeVisibilityBearingCSRIndexed({
   const maxPairsPerOrigin = 1 + 3 * visionDepth * (visionDepth + 1);
   let cap = Math.max(16, Math.min(M * maxPairsPerOrigin, M * 64));
   let visNeighbors = new Int32Array(cap);
-  let bearings = new Float32Array(cap);
+  // Bearings are quantized to integer degrees in [0,360) and packed to Uint16
+  // downstream (P2/D3), so store them as Uint16 here directly — this halves the
+  // intermediate bearing memory (the old Float32 buffer was 2× the final size
+  // and only re-quantized at pack time). Values fit: 360 < 65535.
+  let bearings = new Uint16Array(cap);
   let writePos = 0;
 
   // Scratch for sorting each origin's neighbor slice by index (see below). Sized
   // to the worst-case pairs for one origin, so no per-origin allocation/GC churn.
   const sortIdx = new Int32Array(maxPairsPerOrigin);
   const sortNbr = new Int32Array(maxPairsPerOrigin);
-  const sortBrg = new Float32Array(maxPairsPerOrigin);
+  const sortBrg = new Uint16Array(maxPairsPerOrigin);
 
   for (let j = 0; j < M; j++) {
     const start = origins ? origins[j] : j;
@@ -809,7 +794,7 @@ export function computeVisibilityBearingCSRIndexed({
       const vg = new Int32Array(nc);
       vg.set(visNeighbors.subarray(0, writePos));
       visNeighbors = vg;
-      const bg = new Float32Array(nc);
+      const bg = new Uint16Array(nc);
       bg.set(bearings.subarray(0, writePos));
       bearings = bg;
     }
@@ -900,7 +885,7 @@ export function computeVisibilityBearingCSRIndexed({
     const vTrim = new Int32Array(P);
     vTrim.set(visNeighbors.subarray(0, P));
     visNeighbors = vTrim;
-    const bTrim = new Float32Array(P);
+    const bTrim = new Uint16Array(P);
     bTrim.set(bearings.subarray(0, P));
     bearings = bTrim;
   }
@@ -941,23 +926,15 @@ export function mergeCellsChunk({
   blurWeights = null,
 } = {}) {
   const n = cells.length;
-  const frictionArr = new Float64Array(n);
-  const affArr = new Float64Array(n);
+  // Float32 is ample: friction lives in [1, ~7] (+ blur) and affordance in
+  // [0, 1], so the 24-bit mantissa preserves every value exactly. Using
+  // Float32 (not Float64) halves the per-cell working memory in the merge
+  // worker; the caller writes these straight into Float32Array-backed
+  // FrictionArrayMaps, so there is no precision loss on the way out.
+  const frictionArr = new Float32Array(n);
+  const affArr = new Float32Array(n);
 
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
-  const pavement = AFFORDANCE.PAVEMENT;
-  const lightPark = AFFORDANCE.LIGHT_PARK;
-  const heavyGrass = AFFORDANCE.HEAVY_GRASS;
-  // `fr` is a FRICTION value, so the impassable test must use the friction
-  // threshold (999999), not the affordance value (0.0). Using AFFORDANCE.IMPASSABLE
-  // here made `fr >= 0` always true, classifying EVERY cell as impassable
-  // affordance and rendering the whole affordance classification dead code.
-  const impassable = FRICTION_COSTS.IMPASSABLE;
-  const p = FRICTION_COSTS.PAVEMENT;
-  const l = FRICTION_COSTS.LIGHT_PARK;
-  const hg = FRICTION_COSTS.HEAVY_GRASS;
-  const midPL = (p + l) / 2;
-  const midLH = (l + hg) / 2;
 
   for (let i = 0; i < n; i++) {
     const cell = cells[i];
@@ -974,12 +951,8 @@ export function mergeCellsChunk({
       if (blurred !== undefined) fr = blurred;
     }
 
-    // Affordance classification.
-    let aff;
-    if (fr >= impassable) aff = AFFORDANCE.IMPASSABLE;
-    else if (fr < midPL) aff = pavement;
-    else if (fr < midLH) aff = lightPark;
-    else aff = heavyGrass;
+    // Affordance classification via the single canonical tier classifier.
+    let aff = AFFORDANCE[classifyFrictionTier(fr).toUpperCase()];
 
     // Apply the blur affordance penalty (cells adjacent to buildings wear faster).
     if (blurWeights) {

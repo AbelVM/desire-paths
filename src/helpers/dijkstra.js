@@ -383,14 +383,13 @@ function acquireDialBuckets(B) {
 // relaxed neighbor at distance du+w always lands in a bucket strictly ahead of
 // du in the circular order, so lazy deletion (stale duplicates skipped via
 // `visited`) is correct. Termination is tracked by nodeCount.
-function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited) {
-  const { V, adjOffsets, adjNeighbors } = graph;
+function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited, C) {
+  const { adjOffsets, adjNeighbors } = graph;
 
-  let C = 1;
-  for (let i = 0; i < V; i++) {
-    const f = frictionArr[i];
-    if (f > C) C = f;
-  }
+  // `C` is the max (quantized) edge weight, precomputed once per graph in
+  // computeDijkstra from `frictionMaxC * GRADIENT_DIAL_SCALE` — no per-target
+  // O(V) rescan (the old code re-scanned the whole friction array for every
+  // gradient target, wasting D×V ops per gradient batch at city scale).
   const B = C + 1;
   // Reuse the module-level pooled bucket array (reset in place) instead of
   // allocating B fresh `[]`s per target (S2).
@@ -522,7 +521,9 @@ export function computeDijkstra(targetCell, frictionLookup, graph) {
         q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
       graph.frictionQuantized = q;
     }
-    dist = computeDijkstraDial(targetIdx, q, graph, dialDist, visited);
+    // Bucket count must cover the max quantized edge weight (round up for safety).
+    const dialC = Math.ceil(C * GRADIENT_DIAL_SCALE);
+    dist = computeDijkstraDial(targetIdx, q, graph, dialDist, visited, dialC);
   } else {
     const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;
     dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity, heapDist, visited);

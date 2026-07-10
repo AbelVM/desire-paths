@@ -9,6 +9,7 @@ import {
   SOFT_CAP,
   SIMULATION_PARAMS,
   GRADIENT_CACHE_MAX_ENTRIES,
+  classifyFrictionTier,
 } from './constants.js';
 import {
   runGradientBatches,
@@ -488,7 +489,10 @@ export async function computeDesirePaths(state, mapInstance) {
       });
   } catch (_e) {}
   // Validate plan: ensure gradients exist for every origin->destination used in the plan.
-  const planGraph = getGradientGraph(state.cellFrictionMap, state._r1Adjacency, state._viewHexes);
+  // Reuse the SAME friction source (`_frictionObj`) that getReachableDestinations
+  // already built the gradient graph from, so this hits the cached graph instead
+  // of rebuilding an identical one keyed by the (different) cellFrictionMap object.
+  const planGraph = getGradientGraph(state._frictionObj || state.cellFrictionMap, state._r1Adjacency, state._viewHexes);
   for (let pi = 0; pi < plan.length; pi++) {
     const originCell = plan[pi].originCell;
     const destCandidates = plan[pi].destCandidates || [];
@@ -683,22 +687,12 @@ function decayAffordance(ctx, cell) {
 }
 
 /**
- * Classify affordance from friction value using numeric thresholds.
- * Returns { affordance, tier } where tier is one of:
- * 'impassable', 'pavement', 'light_park', 'heavy_grass'
+ * Classify affordance from friction value using the single canonical tier
+ * classifier (constants.classifyFrictionTier). Returns { affordance, tier }.
  */
 function classifyAffordance(friction) {
-  const p = FRICTION_COSTS.PAVEMENT;
-  const l = FRICTION_COSTS.LIGHT_PARK;
-  const h = FRICTION_COSTS.HEAVY_GRASS;
-  const midPL = (p + l) / 2;
-  const midLH = (l + h) / 2;
-
-  if (friction >= FRICTION_COSTS.IMPASSABLE)
-    return { affordance: AFFORDANCE.IMPASSABLE, tier: 'impassable' };
-  if (friction < midPL) return { affordance: AFFORDANCE.PAVEMENT, tier: 'pavement' };
-  if (friction < midLH) return { affordance: AFFORDANCE.LIGHT_PARK, tier: 'light_park' };
-  return { affordance: AFFORDANCE.HEAVY_GRASS, tier: 'heavy_grass' };
+  const tier = classifyFrictionTier(friction);
+  return { affordance: AFFORDANCE[tier.toUpperCase()], tier };
 }
 
 /**

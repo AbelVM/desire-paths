@@ -26,6 +26,32 @@ export const AFFORDANCE = {
   IMPASSABLE: 0.0,
 };
 
+/**
+ * Single canonical friction → terrain-tier classifier.
+ *
+ * Returns one of 'impassable' | 'pavement' | 'light_park' | 'heavy_grass'.
+ * Thresholds are derived from FRICTION_COSTS so there is exactly ONE source of
+ * truth (previously three divergent copies existed: here, `getCellType` in
+ * map.js, and the inline classification in spatialTasks.mergeCellsChunk —
+ * and map.js used hardcoded 1.5/3.25 cutoffs that disagreed with the canonical
+ * (p+l)/2 = 1.75 pavement cutoff, silently mislabeling cells in the
+ * 1.5–1.75 friction band).
+ */
+export function classifyFrictionTier(friction) {
+  if (friction >= FRICTION_COSTS.IMPASSABLE) return 'impassable';
+  const p = FRICTION_COSTS.PAVEMENT;
+  const l = FRICTION_COSTS.LIGHT_PARK;
+  const h = FRICTION_COSTS.HEAVY_GRASS;
+  if (friction < (p + l) / 2) return 'pavement';
+  if (friction < (l + h) / 2) return 'light_park';
+  return 'heavy_grass';
+}
+
+/** Map a friction value to its starting affordance (tier → AFFORDANCE). */
+export function affordanceForFriction(friction) {
+  return AFFORDANCE[classifyFrictionTier(friction).toUpperCase()];
+}
+
 // TUNED WEIGHTS: Designed for Emergent Path Formation
 export const WEIGHTS = {
   // Set to the paper-recommended weighted preference ratio (wa:wd = 1:4)

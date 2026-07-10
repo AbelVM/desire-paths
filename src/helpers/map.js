@@ -1,13 +1,10 @@
 import { cellToBoundary, cellToLatLng } from 'h3-js';
-import { FRICTION_COSTS, BUFFER_PX } from './constants.js';
+import { FRICTION_COSTS, BUFFER_PX, classifyFrictionTier } from './constants.js';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 
-// Classify cell type from friction value
+// Classify cell type from friction value (single canonical classifier)
 function getCellType(friction) {
-  if (friction >= FRICTION_COSTS.IMPASSABLE) return 'impassable';
-  if (friction < 1.5) return 'pavement';
-  if (friction < 3.25) return 'light_park';
-  return 'heavy_grass';
+  return classifyFrictionTier(friction);
 }
 
 // Flow hover handler — updates tooltip with hex data.
