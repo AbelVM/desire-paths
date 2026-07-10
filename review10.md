@@ -84,11 +84,12 @@ SAB is already wired for transfer buffers (`allocTransferBuffer` in both `spatia
 | **P0** | Unify gradient-graph source (`_frictionObj`) | none | S | Med — halves gradient-graph build allocation per run (O(N) adjacency) | ✅ done |
 | **P0** | Global shared `abmFootprints` (correctness fix) | none | S | High — fixes per-pair isolation bug; required for correct ABM dynamics | ✅ done |
 | **P1** | Drop `cells` from `mergeCellsChunk` return | none | S | Low–Med — avoids cloning N cell strings worker→main per mapping build | ✅ done |
-| **P1** | Typed-array accumulators (`pathDesire`/`perTarget`/`footprints`) | low | M | High — eliminates millions of string-keyed mutations/reads per run; folds into SAB design | open |
-| **P1** | SAB atomic shared footprint (the *only* dynamics-safe parallelism) | med (determinism) | L | Very High (throughput) — unlocks multi-worker agent stage without breaking dynamics; costs cross-pair non-determinism | open — flag-guarded |
-| **P2** | Merge fast-scan directly into `multiFrictionMap` | low | M | Low — removes transient 2× N-object set during mapping | open |
-| **P2** | LRU for gradient cache / remove dead `GRADIENT_CACHE_MAX_ENTRIES` | none | S | Low — bounds unbounded `_gradientCacheObj` growth | open |
-| **P2** | Sparse OD-distance structure | low | S | Low–Med — O(M·D) vs O(M²) when node count grows | open |
+| **P1** | Typed-array accumulator — `footprints` (hot per-candidate read) | low | M | High — the hottest accumulator (read per candidate per step + written per path cell) is now a `Uint32Array(V)` indexed by `graph.cellToIdx`; scorer reads `fpArr[i]` (captured at gather) instead of a cell-string hash | ✅ done |
+| **P1** | Typed-array accumulators — `pathDesire`/`perTarget` | low | M | Deferred — `runAgentPath` is exported and tested with a `Map` accumulator + no `graph` (agentBatchParity), pinning the polymorphic object/Map write; `perTargetContribs` is per-dest so full `Uint32Array(V)` rows would be *worse* on memory than the sparse objects. Kept as objects. | deferred |
+| **P1** | SAB atomic shared footprint (the *only* dynamics-safe parallelism) | med (determinism) | L | Very High (throughput) — unlocks multi-worker agent stage without breaking dynamics; costs cross-pair non-determinism. Footprints are now already a `Uint32Array(V)` (SAB-ready). | open — flag-guarded |
+| **P2** | Merge fast-scan directly into `multiFrictionMap` | low | M | Low — already effectively addressed: `grid.js` sets `multiFrictionMap` entries to the *same object references* as the fast-scan `multiEntries` (no 2× N-object set) | ✅ done (shared refs) |
+| **P2** | LRU for gradient cache / wire `GRADIENT_CACHE_MAX_ENTRIES` | none | S | Low — `_gradientCacheOrder` LRU now bounds `_gradientCacheObj` to `GRADIENT_CACHE_MAX_ENTRIES` carried-over entries; current-run targets are protected from eviction | ✅ done |
+| **P2** | Sparse OD-distance structure | low | S | Low–Med — replaced dense `Float32Array(M²)` (M = O∪D) with an origin-major `Float32Array(O*D)` + `originToIdx`/`destToIdx` maps; exact same lookup semantics (2nd arg is always a dest), ~4× smaller when O≈D | ✅ done |
 | **P3** | Canonical `Float32Array(N)` friction/affordance (drop duplicate Maps) | med | L | Very High (memory) — biggest steady-state win; ~2× friction/affordance + faster reads | open |
 | **P3** | Lazy `multiFrictionMap` | med | M | High (memory) — drops the largest N-object allocation | open |
 
@@ -99,6 +100,17 @@ SAB is already wired for transfer buffers (`allocTransferBuffer` in both `spatia
 - Dropped `cells` from `mergeCellsChunk` return — no N-string clone per mapping build.
 
 **Recommended next:** P1 typed-array accumulators (folds naturally into the SAB atomic design), then the SAB atomic shared-footprint parallelism behind a flag. P3 only after P0–P2 are green.
+
+---
+
+## 6. Second implementation pass (all green: 346 tests, 6 skipped)
+
+- **Typed-array footprint accumulator (P1, partial).** `abmFootprints` is now a `Uint32Array(graph.V)` indexed by `graph.cellToIdx`. The candidate scorer no longer hashes cell strings: each candidate's current footprint count is captured into a parallel `fpArr` at gather time (the graph index is already in hand in the indexed kernel; the string kernel resolves it via a cached `getFootprint` closure), swapped in lockstep with the other candidate arrays in `partitionVisibleCone`, and read as `fpArr[i]` in `scoreCandidates`/`selectBestCandidate`. Footprints are constant within one `getBestNextStep` call, so gather-time capture is exact and byte-parity holds (verified by `indexedKernelParity` at T=0/T>0 and `agentBatchParity`). Writes use `graph.cellToIdx[cell]`. `pathDesire`/`perTarget` were **deferred**: `runAgentPath` is exported and tested with a plain `Map` + no `graph`, and `perTargetContribs` is per-dest (dense rows would be a memory regression).
+- **LRU gradient cache (P2).** Wired the previously-dead `GRADIENT_CACHE_MAX_ENTRIES`: `_gradientCacheOrder` tracks recency, current-run targets are marked MRU and protected, and least-recently-used carried-over entries are evicted after each run so `_gradientCacheObj` no longer grows unbounded across incremental runs.
+- **Sparse OD-distance (P2).** `precomputeOriginDestDistances` now returns `{ originToIdx, destToIdx, D, matrix }` with an origin-major `Float32Array(O*D)` instead of the dense symmetric `Float32Array(M²)`. Since the per-tick lookup's second argument is always a destination, this is exact and ~4× smaller when O≈D. `lookupOriginDest` (both the compute.js and agentTasks.js copies) updated in lockstep.
+- **`multiFrictionMap` merge (P2).** Confirmed already addressed — `grid.js` stores the fast-scan `multiEntries[cell]` objects *by reference* into `multiFrictionMap`, so there is no transient 2× N-object set.
+
+**Recommended next:** the SAB `Atomics.add` shared-footprint parallelism (P1) — `abmFootprints` is now a `Uint32Array(V)`, so backing it with a SAB is a small step; keep it flag-guarded (cross-pair non-determinism). Then the P3 memory refactors.
 
 ---
 

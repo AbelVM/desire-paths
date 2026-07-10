@@ -151,6 +151,14 @@ export function gatherCandidatesIndexed({
   frictionArrOut,
   gNsArr,
   currentDirection,
+  // `footprints` (Uint32Array(V), graph-indexed) is the shared ABM wear
+  // accumulator. We capture each candidate's CURRENT footprint count into the
+  // parallel `fpArr` here — the graph index `gIdx` is already in hand, so this
+  // is a single typed-array read (no cell-string hash in the scorer). Footprints
+  // are constant across one getBestNextStep call (they only change after a path
+  // completes), so capturing at gather time is exact.
+  footprints,
+  fpArr,
 }) {
   let count = 0;
   const s = visOffsets[currVIdx];
@@ -176,6 +184,7 @@ export function gatherCandidatesIndexed({
       affsArr[count] = aff;
       frictionArrOut[count] = f;
     }
+    if (fpArr) fpArr[count] = footprints ? footprints[gIdx] : 0;
     count++;
   }
   return count;
@@ -200,6 +209,12 @@ export function gatherCandidates({
   gNsArr,
   sLatLng,
   currentDirection,
+  // Footprint accessor + parallel output (see gatherCandidatesIndexed). In the
+  // string kernel we don't have the graph index in hand, so `getFootprint(cell)`
+  // resolves it (typed-array read via graph.cellToIdx, or plain-object read when
+  // no graph). Captured here so the scorer reads `fpArr[i]` with no cell hash.
+  getFootprint,
+  fpArr,
 }) {
   let count = 0;
   const diskLen = disk.length;
@@ -225,6 +240,7 @@ export function gatherCandidates({
       affsArr[count] = aff;
       frictionArr[count] = f;
     }
+    if (fpArr) fpArr[count] = getFootprint ? getFootprint(n) : 0;
     count++;
   }
   return count;
@@ -239,6 +255,7 @@ export function partitionVisibleCone({
   affsArr,
   frictionArr,
   gNsArr,
+  fpArr,
   useGradient,
   cLen,
   visualAngleHalf,
@@ -257,6 +274,7 @@ export function partitionVisibleCone({
         swap(affsArr);
         swap(frictionArr);
         if (useGradient) swap(gNsArr);
+        if (fpArr) swap(fpArr);
       }
       hardCount++;
     }
@@ -273,10 +291,9 @@ export function scoreCandidates({
   affsArr,
   frictionArr,
   anglesArr,
-  cellsArr,
   weights,
   gCurr,
-  accumulatedFootprints,
+  fpArr,
   scores,
 }) {
   for (let i = 0; i < cLen; i++) {
@@ -287,9 +304,10 @@ export function scoreCandidates({
     // True ABM: boost effective affordance by accumulated footprints.
     // Cells that more agents have traversed become easier to enter,
     // creating positive feedback that produces emergent path formation.
-    if (accumulatedFootprints) {
-      const fp = accumulatedFootprints[cellsArr[i]] || 0;
-      aff += Math.log1p(fp) * 0.05;
+    // `fpArr[i]` is the candidate's footprint count captured at gather time
+    // (typed-array read, no cell-string hash).
+    if (fpArr) {
+      aff += Math.log1p(fpArr[i] || 0) * 0.05;
     }
 
     const delta = stepCost + gN - gCurr;
@@ -309,7 +327,7 @@ export function selectBestCandidate({
   frictionArr,
   gNsArr,
   useGradient,
-  accumulatedFootprints,
+  fpArr,
   cellsArr,
   curr,
 }) {
@@ -336,9 +354,8 @@ export function selectBestCandidate({
     } else {
       // No gradient: fall back to affordance, boosted by accumulated footprints.
       let effAff = affsArr[i];
-      if (accumulatedFootprints) {
-        const fp = accumulatedFootprints[cellsArr[i]] || 0;
-        effAff += Math.log1p(fp) * 0.05;
+      if (fpArr) {
+        effAff += Math.log1p(fpArr[i] || 0) * 0.05;
       }
       if (effAff > bestScore) {
         bestScore = effAff;

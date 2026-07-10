@@ -81,6 +81,11 @@ let _knAffs = [];
 let _knFriction = [];
 let _knGNs = null;
 let _knScores = null;
+// Per-candidate footprint counts, captured at candidate-gather time and kept in
+// lockstep with `_knCells` (swapped together in partitionVisibleCone). Lets the
+// scorer read a candidate's ABM wear as a typed-array subscript (`fpArr[i]`)
+// instead of a per-candidate cell-string hash into a plain object.
+let _knFp = null;
 
 // Cached per-batch closures. Rebuilt only when their stable inputs change
 // (identity-guarded), so getBestNextStep stops allocating closures per call.
@@ -96,6 +101,12 @@ let _knComputeAngle = null;
 let _knBearingMap = null;
 let _knWeights = null;
 let _knWeightsKey = null;
+// Cached footprint accessor for the STRING kernel (identity-guarded on the
+// footprint source + graph). The indexed kernel reads footprints[gIdx] directly
+// (no closure); the string kernel resolves cell→graph-index here.
+let _knGetFootprint = null;
+let _knFootprintSrc = undefined;
+let _knFootprintGraph = undefined;
 // Index-space kernel inputs (S1). Set once per batch when the visibility
 // CSR + viewHexes are available and the flag is on; consumed by the
 // indexed candidate-gather branch in getBestNextStep.
@@ -296,6 +307,8 @@ function getBestNextStep(
   frictionArr.length = 0;
   const gNsArr = useGradient ? (_knGNs || (_knGNs = [])) : null;
   if (gNsArr) gNsArr.length = 0;
+  const fpArr = _knFp || (_knFp = []);
+  fpArr.length = 0;
 
   // Cache the friction/affordance closures (stable per batch) on module state.
   // When a gradient graph is available, read friction/affordance from the
@@ -345,6 +358,32 @@ function getBestNextStep(
   }
   const computeAngle = _knComputeAngle;
 
+  // Footprint accessor for the string kernel. `accumulatedFootprints` is a
+  // Uint32Array(V) indexed by graph.cellToIdx in the batch path (graph present),
+  // or a plain object keyed by cell id in the (rare) no-graph path. Rebuilt only
+  // when the source or graph identity changes, so getBestNextStep allocates no
+  // closure on the hot path.
+  if (
+    _knFootprintSrc !== accumulatedFootprints ||
+    _knFootprintGraph !== graph
+  ) {
+    const fp = accumulatedFootprints;
+    if (!fp) {
+      _knGetFootprint = null;
+    } else if (graph) {
+      const c2i = graph.cellToIdx;
+      _knGetFootprint = (n) => {
+        const gi = c2i[n];
+        return gi === undefined ? 0 : fp[gi];
+      };
+    } else {
+      _knGetFootprint = (n) => fp[n] || 0;
+    }
+    _knFootprintSrc = accumulatedFootprints;
+    _knFootprintGraph = graph;
+  }
+  const getFootprint = _knGetFootprint;
+
   // Index-space candidate gather (S1). When enabled and the CSR is
   // available, enumerate `curr`'s visible neighbors directly from the
   // visibility CSR (typed-array reads, no gridDisk / isVisible
@@ -378,6 +417,8 @@ function getBestNextStep(
         frictionArrOut: frictionArr,
         gNsArr,
         currentDirection,
+        footprints: accumulatedFootprints,
+        fpArr,
       });
       usedIndexed = true;
     }
@@ -406,6 +447,8 @@ function getBestNextStep(
       gNsArr,
       sLatLng,
       currentDirection,
+      getFootprint,
+      fpArr,
     });
     candCount = candCountFallback;
   }
@@ -416,6 +459,7 @@ function getBestNextStep(
     affsArr,
     frictionArr,
     gNsArr,
+    fpArr,
     useGradient,
     cLen: candCount,
     visualAngleHalf,
@@ -431,10 +475,9 @@ function getBestNextStep(
       affsArr,
       frictionArr,
       anglesArr,
-      cellsArr,
       weights,
       gCurr,
-      accumulatedFootprints,
+      fpArr,
       scores,
     });
   }
@@ -507,7 +550,7 @@ function getBestNextStep(
     frictionArr,
     gNsArr,
     useGradient,
-    accumulatedFootprints,
+    fpArr,
     cellsArr,
     curr,
   });
@@ -560,15 +603,17 @@ function recordTraversal(map, cell) {
 
 // O(1) typed-matrix lookup for the precomputed origin-destination distances
 // (S7). Mirrors the helper in compute.js so the worker kernel reads the same
-// `{ nodeList, nodeToIdx, matrix }` shape that survives structured-clone (the
-// matrix is a Float32Array, nodeToIdx a Map — both clone; a method would not).
-// Returns the finite distance, or `undefined` for unfilled / non-node pairs.
+// `{ originToIdx, destToIdx, D, matrix }` shape that survives structured-clone
+// (the matrix is a Float32Array, the index maps are Maps — all clone; a method
+// would not). The table stores only origin→dest pairs (the second argument is
+// always a destination), so `a` is resolved via `originToIdx` and `b` via
+// `destToIdx`. Returns the finite distance, or `undefined` for unfilled pairs.
 function lookupOriginDest(od, a, b) {
   if (!od) return undefined;
-  const ai = od.nodeToIdx.get(a);
-  const bi = od.nodeToIdx.get(b);
+  const ai = od.originToIdx.get(a);
+  const bi = od.destToIdx.get(b);
   if (ai === undefined || bi === undefined) return undefined;
-  const v = od.matrix[ai * od.nodeList.length + bi];
+  const v = od.matrix[ai * od.D + bi];
   return Number.isFinite(v) ? v : undefined;
 }
 
@@ -847,7 +892,14 @@ export function computeAgentBatch({
   // accumulator is owned by the worker (S5): it starts empty and is never read
   // back on the main thread, so there is no reason to structured-clone an
   // (empty) object across the worker boundary.
-  const abmFootprints = Object.create(null);
+  //
+  // Backed by a Uint32Array(V) indexed by graph.cellToIdx (the same index space
+  // the candidate scorer reads via `fpArr`), so both the per-candidate footprint
+  // read and the per-cell write are O(1) typed-array ops instead of string-keyed
+  // plain-object mutations. Falls back to a plain object only when no gradient
+  // graph exists (degenerate empty-friction case).
+  const abmFootprints = graph ? new Uint32Array(graph.V) : Object.create(null);
+  const fpCellToIdx = graph ? graph.cellToIdx : null;
 
   for (let p = 0; p < plan.length; p++) {
     const entry = plan[p];
@@ -904,7 +956,10 @@ export function computeAgentBatch({
           // Accumulate footprint: each visit increments the shared counter.
           // This is what turns independent Monte-Carlo sampling into a true
           // ABM where agents interact through accumulated terrain wear.
-          if (abmFootprints) {
+          if (fpCellToIdx) {
+            const gi = fpCellToIdx[cell];
+            if (gi !== undefined) abmFootprints[gi]++;
+          } else {
             abmFootprints[cell] = (abmFootprints[cell] || 0) + 1;
           }
         }

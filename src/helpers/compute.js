@@ -8,6 +8,7 @@ import {
   MAX_EXPECTED_VOLUME,
   SOFT_CAP,
   SIMULATION_PARAMS,
+  GRADIENT_CACHE_MAX_ENTRIES,
 } from './constants.js';
 import {
   runGradientBatches,
@@ -36,36 +37,36 @@ function applyPathDesireDeltas(ctx, pathDesireDeltas) {
 }
 
 // Precompute grid distances for all origin-destination pairs as a typed matrix
-// (S7). Returns `{ nodeList, nodeToIdx, matrix }` where `matrix` is a
-// `Float32Array(M*M)` (M = unique origin/destination cells) indexed by node
-// indices, initialized to Infinity. Only origin×dest and dest×origin pairs are
-// filled (symmetric), matching the old string-keyed table's node-only key set.
-// This clones cheaply to the worker (one typed array + a small Map) and needs no
-// per-lookup string concat. Unfilled pairs stay Infinity, so `lookupOriginDest`
-// returns `undefined` for them — preserving the old "lookup only hits for node
-// pairs" semantics exactly (the per-tick lookup is still gated on `nodeSet`).
+// (S7). Returns `{ originToIdx, destToIdx, D, matrix }` where `matrix` is a
+// `Float32Array(O*D)` (O = unique origins, D = unique destinations) indexed by
+// origin-major order, initialized to Infinity. Only origin→dest pairs are stored
+// (the per-tick lookup is always `lookupOriginDest(od, node, destCell)` where the
+// second argument is always a destination), so an O×D table is exact — the old
+// dense M×M (M = O∪D) table wasted O²+D² cells on pairs that were never read.
+// This clones cheaply to the worker (one typed array + two small Maps) and needs
+// no per-lookup string concat. Unfilled pairs stay Infinity, so `lookupOriginDest`
+// returns `undefined` for them — preserving the old "lookup only hits for
+// origin→dest node pairs" semantics exactly (the per-tick lookup is still gated
+// on `nodeSet`).
 function precomputeOriginDestDistances(origins, destinations) {
-  const nodeSet = new Set();
-  for (let i = 0; i < origins.length; i++) nodeSet.add(origins[i]);
-  for (let j = 0; j < destinations.length; j++) nodeSet.add(destinations[j]);
-  const nodeList = Array.from(nodeSet);
-  const M = nodeList.length;
-  const nodeToIdx = new Map();
-  for (let i = 0; i < M; i++) nodeToIdx.set(nodeList[i], i);
-  const matrix = new Float32Array(M * M).fill(Infinity);
+  const originToIdx = new Map();
   for (let i = 0; i < origins.length; i++) {
-    const o = origins[i];
-    const oi = nodeToIdx.get(o);
-    for (let j = 0; j < destinations.length; j++) {
-      const d = destinations[j];
+    if (!originToIdx.has(origins[i])) originToIdx.set(origins[i], originToIdx.size);
+  }
+  const destToIdx = new Map();
+  for (let j = 0; j < destinations.length; j++) {
+    if (!destToIdx.has(destinations[j])) destToIdx.set(destinations[j], destToIdx.size);
+  }
+  const O = originToIdx.size;
+  const D = destToIdx.size;
+  const matrix = new Float32Array(O * D).fill(Infinity);
+  for (const [o, oi] of originToIdx) {
+    for (const [d, di] of destToIdx) {
       if (o === d) continue;
-      const di = nodeToIdx.get(d);
-      const dist = gridDistance(o, d);
-      matrix[oi * M + di] = dist;
-      matrix[di * M + oi] = dist; // reverse direction (table was symmetric)
+      matrix[oi * D + di] = gridDistance(o, d);
     }
   }
-  return { nodeList, nodeToIdx, matrix };
+  return { originToIdx, destToIdx, D, matrix };
 }
 
 // O(1) typed-matrix lookup for the precomputed origin-destination distances.
@@ -132,6 +133,38 @@ function ensureGradientCacheFresh(ctx) {
   if (ctx._gradientCacheGen !== gen) {
     clearGradientCache(ctx);
     ctx._gradientCacheGen = gen;
+  }
+}
+
+// LRU bookkeeping for the per-target gradient cache. `_gradientCacheOrder` holds
+// cached target-cell keys in ascending recency (least-recent first). Marks a key
+// as most-recently-used.
+function _touchGradientKey(ctx, d) {
+  let order = ctx._gradientCacheOrder;
+  if (!order) order = ctx._gradientCacheOrder = [];
+  const at = order.indexOf(d);
+  if (at !== -1) order.splice(at, 1);
+  order.push(d);
+}
+
+// Evict least-recently-used gradient entries once the cache exceeds
+// GRADIENT_CACHE_MAX_ENTRIES. Never evicts a key in `protectedSet` (the targets
+// the current run still needs), so a run whose destination count exceeds the cap
+// simply keeps all of them — the cap is a soft bound on carried-over entries.
+function _pruneGradientCache(ctx, protectedSet) {
+  const order = ctx._gradientCacheOrder;
+  const cache = ctx._gradientCacheObj;
+  if (!order || !cache) return;
+  const cap = GRADIENT_CACHE_MAX_ENTRIES;
+  let i = 0;
+  while (order.length > cap && i < order.length) {
+    const key = order[i];
+    if (protectedSet && protectedSet.has(key)) {
+      i++;
+      continue;
+    }
+    order.splice(i, 1);
+    delete cache[key];
   }
 }
 
@@ -355,6 +388,7 @@ export async function computeDesirePaths(state, mapInstance) {
         );
         for (const d of missingDestinations) {
           state._gradientCacheObj[d] = gradients[d] || Object.create(null);
+          _touchGradientKey(state, d);
         }
       } finally {
         for (const d of missingDestinations) {
@@ -395,6 +429,14 @@ export async function computeDesirePaths(state, mapInstance) {
   for (const d of destinations) {
     goalGradients.set(d, state._gradientCacheObj[d]);
   }
+
+  // Mark this run's targets as most-recently-used, then evict least-recently-used
+  // carried-over entries so the cache stays bounded (it was previously cleared
+  // only on remap and could grow unbounded across incremental runs). The current
+  // targets are protected from eviction.
+  const _protectedDests = new Set(destinations);
+  for (const d of destinations) _touchGradientKey(state, d);
+  _pruneGradientCache(state, _protectedDests);
 
   // Check for unreachable destinations (surrounded by impassable terrain)
   // A gradient with only the destination cell itself means no other cells can reach it
