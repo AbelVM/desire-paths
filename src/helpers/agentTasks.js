@@ -20,25 +20,7 @@ import {
   CELL_LATLNG_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
-
-// Deterministic seeded RNG (LCG)
-function _lcg(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
-
-// String hash (FNV-1a variant)
-function _strHash(s) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h >>> 0;
-}
+import { createLCG, strHash } from './rng.js';
 
 // Small local cache (keeps worker stateless w.r.t. main thread).
 // LRU: a Map whose insertion order == recency. On a hit we delete+re-set to
@@ -516,8 +498,8 @@ function getBestNextStep(
     typeof simulationParams.temperature === 'number' &&
     simulationParams.temperature > 0
   ) {
-    const seed = _strHash(agentId + ':' + curr);
-    const rng = _lcg(seed);
+    const seed = strHash(agentId + ':' + curr);
+    const rng = createLCG(seed);
     let maxS = -Infinity;
     for (let i = 0; i < scores.length; i++) {
       const v = scores[i];

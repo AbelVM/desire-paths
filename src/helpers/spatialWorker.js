@@ -650,12 +650,15 @@ export async function runAgentBatches(
       for (const k in gradients) gradientsObj[k] = gradients[k];
     }
   }
-  // Build the gradient graph from the (normalized) friction source so the
-  // reachability check below and the worker's own graph agree on cellToIdx.
-  // M3: pass the shared r=1 CSR (+ AOI cell order) so this build filters it
-  // instead of running a per-cell gridDisk pass.
+  // Build the gradient graph from the SAME friction source object
+  // `computeDesirePaths` used (the canonical `cellFrictionMap` /
+  // `_frictionObj` view), so the identity-keyed graph cache is shared and the
+  // graph is built only ONCE per run instead of a second time from the
+  // normalized plain-object copy we ship to the worker. M3: pass the shared
+  // r=1 CSR (+ AOI cell order) so this build filters it instead of running a
+  // per-cell gridDisk pass.
   const gradientGraph = getGradientGraph(
-    frictionEntries,
+    frictionSource,
     options?.r1Adjacency || null,
     options?.viewHexes || null
   );

@@ -22,21 +22,19 @@ import { gridDisk } from 'h3-js';
  * bucket ops with zero comparisons, still ~3× fewer ops than a 4-ary heap
  * (~170V), so Dial's remains the fastest choice even at this resolution.
  *
- * A 4-ary heap fallback (exact, handles any weight range) is kept as a safety
- * net for unexpectedly large weights (see DIAL_MAX_C); it should not trigger
- * for normal friction. Set GRADIENT_ALGO to '4ary' or 'binary' to force it.
+ * Dial's Algorithm is the optimal priority queue here: passable edge weights
+ * are small (friction lives in [1, ~7], quantized ×SCALE ≈ 80 at most), so the
+ * bucket count C+1 is tiny and Dial's does ~C·V bucket ops with zero
+ * comparisons — strictly faster than any comparison-based heap. The 4-ary heap
+ * fallback that used to guard against unexpectedly large weights has been
+ * removed: worn friction can never approach the old DIAL_MAX_C guard, so it was
+ * unreachable dead code.
  */
-export const GRADIENT_ALGO = 'dial'; // 'dial' | '4ary' | 'binary'
 // Quantization scale for Dial's. Distances are rounded to 1/SCALE. SCALE=8
 // (step 0.125) preserves the fine friction differences produced by wear while
 // keeping C small enough that Dial's stays faster than a 4-ary heap.
 const GRADIENT_DIAL_SCALE = 8;
 const INF_INT = 0x3fffffff;
-// Dial's bucket count is C = max edge weight. For normal friction passable
-// cells stay in [1, ~7] (quantized ×2 -> 14), so C is always small and Dial's
-// is optimal. This guard keeps a 4-ary heap fallback for any unexpectedly large
-// weight (e.g. if friction modeling changes), so Dial's never degrades.
-const DIAL_MAX_C = 128;
 
 // ---------------------------------------------------------------------------
 // Gradient graph: precomputed distance-1 adjacency (CSR) + cell<->index maps.
@@ -251,92 +249,6 @@ export function getGraphNeighborIndicesR1(graph, cell) {
 }
 
 // ---------------------------------------------------------------------------
-// d-ary min-heap (integer node ids, Float64 scores, zero-alloc typed arrays).
-// arity=2 reproduces the old binary MinHeap; arity=4 is the Dijkstra optimum.
-// ---------------------------------------------------------------------------
-class DaryHeap {
-  #d;
-  #nodes;
-  #scores;
-  #size = 0;
-
-  constructor(arity = 4, capacityHint = 1024) {
-    this.#d = arity;
-    this.#nodes = new Int32Array(capacityHint);
-    this.#scores = new Float64Array(capacityHint);
-  }
-
-  get size() {
-    return this.#size;
-  }
-
-  #grow() {
-    const cap = this.#nodes.length * 2;
-    const n = new Int32Array(cap);
-    n.set(this.#nodes);
-    const s = new Float64Array(cap);
-    s.set(this.#scores);
-    this.#nodes = n;
-    this.#scores = s;
-  }
-
-  insert(node, score) {
-    if (this.#size >= this.#nodes.length) this.#grow();
-    let i = this.#size++;
-    this.#nodes[i] = node;
-    this.#scores[i] = score;
-    const d = this.#d;
-    while (i > 0) {
-      const par = ((i - 1) / d) | 0;
-      if (this.#scores[i] >= this.#scores[par]) break;
-      const tn = this.#nodes[i];
-      const ts = this.#scores[i];
-      this.#nodes[i] = this.#nodes[par];
-      this.#scores[i] = this.#scores[par];
-      this.#nodes[par] = tn;
-      this.#scores[par] = ts;
-      i = par;
-    }
-  }
-
-  extractMin() {
-    if (this.#size === 0) return -1;
-    const minNode = this.#nodes[0];
-    this.#size--;
-    if (this.#size > 0) {
-      this.#nodes[0] = this.#nodes[this.#size];
-      this.#scores[0] = this.#scores[this.#size];
-      this.#down(0);
-    }
-    return minNode;
-  }
-
-  #down(i) {
-    const d = this.#d;
-    const len = this.#size;
-    const nodes = this.#nodes;
-    const scores = this.#scores;
-    for (;;) {
-      const first = i * d + 1;
-      if (first >= len) break;
-      let best = first;
-      const last = first + d < len ? first + d : len;
-      for (let c = first + 1; c < last; c++) {
-        if (scores[c] < scores[best]) best = c;
-      }
-      if (scores[i] <= scores[best]) break;
-      const tn = nodes[i];
-      const ts = scores[i];
-      nodes[i] = nodes[best];
-      scores[i] = scores[best];
-      nodes[best] = tn;
-      scores[best] = ts;
-      i = best;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Indexed Dijkstra variants (operate on integer cell indices + typed arrays).
 // `frictionArr` holds per-cell edge weight (cost of ENTERING the cell).
 // Impassable / missing cells are encoded as -1 and skipped.
@@ -350,13 +262,11 @@ class DaryHeap {
 // buffers are reset at the top of each `computeDijkstra` call, so reuse across
 // targets is safe (Dijkstra is synchronous and single-threaded per module).
 let _dialDist = null;
-let _heapDist = null;
 let _dijkstraVisited = null;
 function acquireDijkstraBuffers(V) {
   if (!_dialDist || _dialDist.length < V) _dialDist = new Int32Array(V);
-  if (!_heapDist || _heapDist.length < V) _heapDist = new Float64Array(V);
   if (!_dijkstraVisited || _dijkstraVisited.length < V) _dijkstraVisited = new Uint8Array(V);
-  return { dialDist: _dialDist, heapDist: _heapDist, visited: _dijkstraVisited };
+  return { dialDist: _dialDist, visited: _dijkstraVisited };
 }
 
 // Pooled Dial bucket array. `B = C + 1` is constant for a given graph
@@ -435,37 +345,6 @@ function computeDijkstraDial(targetIdx, frictionArr, graph, dist, visited, C) {
   return dist;
 }
 
-function computeDijkstraHeap(targetIdx, frictionArr, graph, arity, dist, visited) {
-  const { adjOffsets, adjNeighbors } = graph;
-  dist.fill(Infinity);
-  visited.fill(0);
-  const heap = new DaryHeap(arity);
-  dist[targetIdx] = 0;
-  heap.insert(targetIdx, 0);
-
-  while (heap.size > 0) {
-    const u = heap.extractMin();
-    if (visited[u]) continue;
-    visited[u] = 1;
-
-    const du = dist[u];
-    const start = adjOffsets[u];
-    const end = adjOffsets[u + 1];
-    for (let e = start; e < end; e++) {
-      const v = adjNeighbors[e];
-      if (visited[v]) continue;
-      const w = frictionArr[v];
-      if (w < 0) continue; // impassable / missing
-      const nd = du + w;
-      if (nd < dist[v]) {
-        dist[v] = nd;
-        heap.insert(v, nd);
-      }
-    }
-  }
-  return dist;
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -503,31 +382,28 @@ export function computeDijkstra(targetCell, frictionLookup, graph) {
   // getGradientGraph) and reused across every target — no per-target V-pass.
   const C = frictionMaxC;
 
-  // Decide the queue. Dial's is only worthwhile when the max weight is small;
-  // worn friction can reach IMPASSABLE, which would make its bucket count C huge.
-  const useDial = GRADIENT_ALGO === 'dial' && C <= DIAL_MAX_C;
-
   // Pooled working buffers (reset inside the algorithm), so D targets reuse one
   // dist/visited pair instead of allocating D of them.
-  const { dialDist, heapDist, visited } = acquireDijkstraBuffers(V);
+  const { dialDist, visited } = acquireDijkstraBuffers(V);
 
-  let dist;
-  if (useDial) {
-    // Quantize once per graph and cache it (depends only on frictionArr + scale).
-    let q = graph.frictionQuantized;
-    if (!q) {
-      q = new Int32Array(V);
-      for (let i = 0; i < V; i++)
-        q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
-      graph.frictionQuantized = q;
-    }
-    // Bucket count must cover the max quantized edge weight (round up for safety).
-    const dialC = Math.ceil(C * GRADIENT_DIAL_SCALE);
-    dist = computeDijkstraDial(targetIdx, q, graph, dialDist, visited, dialC);
-  } else {
-    const arity = GRADIENT_ALGO === 'binary' ? 2 : 4;
-    dist = computeDijkstraHeap(targetIdx, frictionArr, graph, arity, heapDist, visited);
+  // Dial's Algorithm is the optimal queue here: passable edge weights are small
+  // (friction lives in [1, ~7], quantized ×SCALE ≈ 80 at most), so the bucket
+  // count C+1 is tiny and Dial's does ~C·V bucket ops with zero comparisons —
+  // strictly faster than any comparison-based heap. The 4-ary heap fallback that
+  // used to guard against unexpectedly large weights has been removed: worn
+  // friction can never approach the DIAL_MAX_C guard, so it was unreachable dead
+  // code (see frictionMaxC derivation in getGradientGraph).
+  // Quantize once per graph and cache it (depends only on frictionArr + scale).
+  let q = graph.frictionQuantized;
+  if (!q) {
+    q = new Int32Array(V);
+    for (let i = 0; i < V; i++)
+      q[i] = frictionArr[i] < 0 ? -1 : Math.round(frictionArr[i] * GRADIENT_DIAL_SCALE);
+    graph.frictionQuantized = q;
   }
+  // Bucket count must cover the max quantized edge weight (round up for safety).
+  const dialC = Math.ceil(C * GRADIENT_DIAL_SCALE);
+  const dist = computeDijkstraDial(targetIdx, q, graph, dialDist, visited, dialC);
 
   // M1: store the gradient as a single `Float32Array(V)` indexed by the graph's
   // `cellToIdx` (Infinity = unreachable). This replaces the old
@@ -537,11 +413,7 @@ export function computeDijkstra(targetCell, frictionLookup, graph) {
   const out = new Float32Array(V).fill(Infinity);
   for (let i = 0; i < V; i++) {
     const dv = dist[i];
-    if (useDial) {
-      if (dv !== INF_INT) out[i] = dv / GRADIENT_DIAL_SCALE;
-    } else if (dv !== Infinity) {
-      out[i] = dv;
-    }
+    if (dv !== INF_INT) out[i] = dv / GRADIENT_DIAL_SCALE;
   }
   return out;
 }

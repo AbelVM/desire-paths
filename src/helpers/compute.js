@@ -118,11 +118,6 @@ export function clearComputeCaches(ctx) {
   ctx._perTargetContribs = null;
   ctx._assignedCounts = null;
   ctx._targetWeights = null;
-  // Drop cached hot-path closures — they capture `_frictionObj`/`_affordanceObj`,
-  // so stale closures would read a detached snapshot on the next run.
-  ctx._getFriction = null;
-  ctx._getAffordance = null;
-
   // Clear gradient cache and drop the gradient graph so the next run rebuilds
   // adjacency from the current friction instead of a stale topology.
   clearGradientCache(ctx);

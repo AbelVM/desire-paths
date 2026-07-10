@@ -328,8 +328,6 @@ describe('clearComputeCaches', () => {
       _gradientCacheGen: 1,
       _frictionObj: { a: 1 },
       _affordanceObj: { a: 0.1 },
-      _getFriction: () => {},
-      _getAffordance: () => {},
     };
     clearComputeCaches(map);
     expect(map.pathDesireScores).toEqual({});
@@ -337,8 +335,6 @@ describe('clearComputeCaches', () => {
     expect(map._gradientCacheGen).toBeUndefined();
     expect(map._frictionObj).toBeNull();
     expect(map._affordanceObj).toBeNull();
-    expect(map._getFriction).toBeNull();
-    expect(map._getAffordance).toBeNull();
   });
 });
 
