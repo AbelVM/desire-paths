@@ -902,7 +902,24 @@ export function computeAgentBatch({
   // read and the per-cell write are O(1) typed-array ops instead of string-keyed
   // plain-object mutations. Falls back to a plain object only when no gradient
   // graph exists (degenerate empty-friction case).
-  const abmFootprints = graph ? new Uint32Array(graph.V) : Object.create(null);
+  //
+  // Persistent / shared footprint accumulator (P1, review10 §4/§1.1 + wave
+  // model). `options.footprintBuffer` is a typed array (length >= graph.V) the
+  // caller OWNS and REUSES across waves, so later waves see the wear earlier
+  // waves left behind — the true ABM interaction. When it is SAB-backed (page is
+  // cross-origin isolated) writes use `Atomics.add` so multiple agent workers
+  // can share ONE global footprint; otherwise plain `++` (single-worker). When
+  // absent, a private Uint32Array is allocated per call (no cross-wave
+  // persistence), preserving the legacy single-call semantics.
+  const footprintBuffer =
+    graph &&
+    options?.footprintBuffer &&
+    ArrayBuffer.isView(options.footprintBuffer) &&
+    options.footprintBuffer.length >= graph.V
+      ? options.footprintBuffer
+      : null;
+  const useAtomics = !!footprintBuffer && footprintBuffer.buffer instanceof SharedArrayBuffer;
+  const abmFootprints = footprintBuffer || (graph ? new Uint32Array(graph.V) : Object.create(null));
   const fpCellToIdx = graph ? graph.cellToIdx : null;
 
   for (let p = 0; p < plan.length; p++) {
@@ -962,7 +979,13 @@ export function computeAgentBatch({
           // ABM where agents interact through accumulated terrain wear.
           if (fpCellToIdx) {
             const gi = fpCellToIdx[cell];
-            if (gi !== undefined) abmFootprints[gi]++;
+            if (gi !== undefined) {
+              // SAB atomic path: `Atomics.add` is the dynamics-safe way to share
+              // one global footprint across multiple agent workers (P1). The
+              // plain `++` is byte-identical for a single worker.
+              if (useAtomics) Atomics.add(abmFootprints, gi, 1);
+              else abmFootprints[gi]++;
+            }
           } else {
             abmFootprints[cell] = (abmFootprints[cell] || 0) + 1;
           }

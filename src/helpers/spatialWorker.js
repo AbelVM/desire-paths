@@ -46,6 +46,22 @@ export function getMaxAgentWorkers() {
   return MAX_AGENT_WORKERS;
 }
 
+// Dynamics-safe agent parallelism (P1, review10 §4/§1.1). When enabled AND the
+// page is cross-origin isolated (so SharedArrayBuffer is available) AND Workers
+// exist, `runAgentBatches` shards the plan across multiple agent workers that
+// all accumulate wear into ONE SAB-backed footprint via `Atomics.add`. Default
+// ON: there is no released/legacy behavior to preserve, and the runtime gates
+// (Worker + crossOriginIsolated + valid graph + parallelizable plan) already
+// prevent it from engaging unsafely — it simply falls back to single-worker
+// otherwise. Mirrors `setMaxAgentWorkers` for runtime tuning.
+let PARALLEL_AGENT_BATCHES = true;
+export function setParallelAgentBatches(v) {
+  PARALLEL_AGENT_BATCHES = !!v;
+}
+export function getParallelAgentBatches() {
+  return PARALLEL_AGENT_BATCHES;
+}
+
 const WORKER_TASK_TIMEOUT = 600_000; // 10m timeout per worker task
 const WORKER_IDLE_TIMEOUT = 300_000; // 5m — retire workers idle longer than this
 
@@ -513,6 +529,76 @@ function normalizeAgentResult(result) {
   };
 }
 
+// Split the agent plan into `workerCount` contiguous shards (one per worker).
+// Exported for testing the sharding logic in isolation.
+export function shardPlanForAgents(plan, workerCount) {
+  if (!plan || plan.length === 0) return [];
+  return splitIntoChunks(plan, Math.max(1, workerCount));
+}
+
+// Sum per-shard agent results into one result. `pathDesire` and
+// `perTargetContribs` have no cross-shard interaction (each shard owns its
+// pairs), so they merge by simple summation; `processed`/`total` are summed for
+// progress reporting. Inputs are the normalized `{ pathDesire, perTargetContribs,
+// processed, total }` shapes `normalizeAgentResult` produces.
+export function mergeAgentResults(results) {
+  const pathDesire = Object.create(null);
+  const perTargetContribs = Object.create(null);
+  let processed = 0;
+  let total = 0;
+  for (let r = 0; r < results.length; r++) {
+    const res = results[r];
+    if (!res) continue;
+    processed += res.processed || 0;
+    total += res.total || 0;
+    const pd = res.pathDesire || Object.create(null);
+    for (const cell in pd) pathDesire[cell] = (pathDesire[cell] || 0) + (pd[cell] || 0);
+    const pt = res.perTargetContribs || Object.create(null);
+    for (const dest in pt) {
+      const obj = pt[dest] || Object.create(null);
+      let target = perTargetContribs[dest];
+      if (!target) target = perTargetContribs[dest] = Object.create(null);
+      for (const cell in obj) target[cell] = (target[cell] || 0) + (obj[cell] || 0);
+    }
+  }
+  return { pathDesire, perTargetContribs, processed, total };
+}
+
+// P1 (review10 §4/§1.1): dynamics-safe agent parallelism. The plan is sharded
+// across multiple `agent-batch` workers that ALL accumulate wear into a single
+// SAB-backed `Int32Array(V)` footprint via `Atomics.add`. Because the only
+// cross-agent interaction is the integer footprint count, a shared atomic
+// accumulator preserves the global-sharing ABM dynamics correctly across shards.
+// `pathDesire`/`perTargetContribs` are per-shard, so they are merged by
+// summation on the main thread. Cross-pair ordering becomes non-deterministic
+// (accepted: same tolerance the T>0 tests already use); the default
+// single-worker path is unchanged.
+async function runParallelAgentBatches(plan, agentPayload, gradientGraph, options) {
+  const V = gradientGraph.V;
+  // Reuse a caller-provided SAB (enables cross-wave persistence: the same buffer
+  // is shared by every wave's shards) when present and correctly sized; else
+  // allocate a fresh one for this wave.
+  const provided = options?.footprintBuffer;
+  const sharedFootprints =
+    provided instanceof Int32Array &&
+    provided.buffer instanceof SharedArrayBuffer &&
+    provided.length >= V
+      ? provided
+      : new Int32Array(new SharedArrayBuffer(V * 4));
+  const workerCount = Math.min(MAX_AGENT_WORKERS, plan.length);
+  const chunks = shardPlanForAgents(plan, workerCount);
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      runWorker('agent-batch', {
+        ...agentPayload,
+        plan: chunk,
+        options: Object.assign({}, options, { footprintBuffer: sharedFootprints }),
+      })
+    )
+  );
+  return mergeAgentResults(results.map(normalizeAgentResult));
+}
+
 export async function runAgentBatches(
   plan,
   frictionSource,
@@ -669,6 +755,33 @@ export async function runAgentBatches(
     r1Adjacency: options?.r1Adjacency || null,
   };
 
+  // P1 (review10 §4/§1.1): dynamics-safe agent parallelism. Shard the plan
+  // across multiple agent workers sharing ONE SAB footprint accumulator. Gated on
+  // the opt-in flag, a real Worker environment, cross-origin isolation (SAB
+  // availability), a valid gradient graph, and enough plan entries to actually
+  // parallelize. Any failure falls back to the single-worker path below.
+  const wantParallel =
+    (options?.parallelAgentBatches ?? PARALLEL_AGENT_BATCHES) &&
+    useWorker &&
+    typeof SharedArrayBuffer !== 'undefined' &&
+    typeof globalThis !== 'undefined' &&
+    globalThis.crossOriginIsolated === true &&
+    gradientGraph &&
+    gradientGraph.V > 0 &&
+    plan.length > 1 &&
+    Math.min(MAX_AGENT_WORKERS, plan.length) > 1;
+
+  if (wantParallel) {
+    try {
+      return await runParallelAgentBatches(plan, agentPayload, gradientGraph, options);
+    } catch (err) {
+      try {
+        logger.warn('runAgentBatches: parallel dispatch failed, falling back to single worker', err);
+      } catch (_e) {}
+      // fall through to the single-worker path below
+    }
+  }
+
   if (!useWorker) {
     // run locally on main thread (Node / no Worker available)
     const ret = computeAgentBatch(agentPayload);
@@ -793,6 +906,8 @@ try {
   if (typeof window !== 'undefined' && window) {
     window.__dp_setMaxAgentWorkers = setMaxAgentWorkers;
     window.__dp_getMaxAgentWorkers = getMaxAgentWorkers;
+    window.__dp_setParallelAgentBatches = setParallelAgentBatches;
+    window.__dp_getParallelAgentBatches = getParallelAgentBatches;
   }
 } catch (_e) {}
 

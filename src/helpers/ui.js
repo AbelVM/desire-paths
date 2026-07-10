@@ -912,6 +912,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._multiFrictionSnapshotGen = undefined;
     map._gradientCacheGen = undefined;
     map._visibilityCacheGen = undefined;
+    map._footprintBuffer = undefined;
     map.simulationProgress = undefined;
     clearComputeCaches(map);
     terminateAllWorkers();
@@ -1490,6 +1491,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         if (typeof raf === 'function') raf(resolve);
         else setTimeout(resolve, 0);
       });
+      // Fresh simulation: discard any accumulated footprint wear so this reveal
+      // starts from zero (waves within the run still accumulate into the new
+      // buffer via state._footprintBuffer).
+      map._footprintBuffer = undefined;
       await map.computeDesirePaths();
       map.flowsReady = true;
     } catch (err) {

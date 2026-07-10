@@ -538,6 +538,24 @@ export async function computeDesirePaths(state, mapInstance) {
     });
 
     const mtVis = getMainThreadVisibilityBearing(state);
+
+    // Persistent footprint accumulator shared across waves (review10 §9 + wave
+    // model): later waves see the wear earlier waves left behind, which is the
+    // true ABM interaction that produces emergent desire paths. Owned by `state`
+    // and reused every call; recreated only when the gradient graph grows (remap
+    // to a larger AOI). Sized to the current graph; backed by a SharedArrayBuffer
+    // when the page is cross-origin isolated so the multi-worker path can share
+    // it atomically, otherwise a plain Uint32Array (single-worker).
+    const fpV = planGraph ? planGraph.V : 0;
+    if (!state._footprintBuffer || state._footprintBuffer.length < fpV) {
+      state._footprintBuffer =
+        typeof SharedArrayBuffer !== 'undefined' &&
+        typeof globalThis !== 'undefined' &&
+        globalThis.crossOriginIsolated === true
+          ? new Int32Array(new SharedArrayBuffer(fpV * 4))
+          : new Uint32Array(fpV);
+    }
+
     const agentResults = await runAgentBatches(
       plan,
       state._frictionObj || state.cellFrictionMap,
@@ -560,6 +578,13 @@ export async function computeDesirePaths(state, mapInstance) {
         // M3: ship the shared r=1 CSR so the agent worker's getGradientGraph
         // filters it instead of running a per-cell gridDisk pass.
         r1Adjacency: state._r1Adjacency || null,
+        // P1 (review10 §4/§1.1): dynamics-safe agent parallelism. When the
+        // environment supports it (Worker + cross-origin isolation + parallelizable
+        // plan) the plan is sharded across workers sharing one SAB footprint
+        // accumulator. Default ON; falls back to single-worker otherwise.
+        parallelAgentBatches: state._parallelAgentBatches ?? true,
+        // Persistent cross-wave footprint buffer (see above).
+        footprintBuffer: state._footprintBuffer,
         simulationParams: simParams,
       }
     );
