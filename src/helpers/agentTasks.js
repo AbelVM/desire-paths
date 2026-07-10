@@ -961,5 +961,15 @@ export function computeAgentBatch({
   return { result, transfers };
 }
 
-// Export some internals for testing parity with single-threaded kernel
-export { runAgentPath, estimateMaxTicks };
+// Single canonical agent-path kernel. Both the worker batch path
+// (computeAgentBatch) and the main-thread incremental path (compute.js's
+// runSingleAgentPath adapter) call into these, so there is exactly one
+// implementation of the pathfinding logic — no second kernel to drift.
+export {
+  runAgentPath,
+  estimateMaxTicks,
+  getBestNextStep,
+  getGradientDirection,
+  getBearingFast,
+  _resolveStepLine,
+};

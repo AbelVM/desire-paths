@@ -1,4 +1,4 @@
-import { clearComputeCaches, clearLatLngCache } from './compute.js';
+import { clearComputeCaches } from './compute.js';
 import { latLngToCell } from 'h3-js';
 import {
   SIMULATION_PARAMS,
@@ -914,7 +914,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._visibilityCacheGen = undefined;
     map.simulationProgress = undefined;
     clearComputeCaches(map);
-    clearLatLngCache();
     terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();

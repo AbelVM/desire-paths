@@ -5,10 +5,12 @@ import {
   clearComputeCaches,
   computeDesirePaths,
   computeDijkstraGradient,
-  getBestNextStep,
   estimateMaxTicks,
-  getGradientDirection,
 } from '../src/helpers/compute.js';
+// The agent-path kernel now lives in agentTasks.js and is the single source of
+// truth shared by the worker batch path and the main-thread incremental path.
+import { getBestNextStep, getGradientDirection } from '../src/helpers/agentTasks.js';
+import { SIMULATION_PARAMS } from '../src/helpers/constants.js';
 import { angleDiff } from '../src/helpers/bearing.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 import { buildSimulationGeoJSON } from '../src/helpers/map.js';
@@ -238,16 +240,16 @@ describe('computeDijkstraGradient', () => {
 });
 
 describe('getBestNextStep', () => {
+  // The canonical kernel (agentTasks.js) takes explicit params rather than a
+  // ctx object. These tests exercise the same behavior the main-thread path
+  // used to, now against the single shared implementation.
+  const step = (h3, gradient, frictionLookup, affordanceLookup = {}) =>
+    getBestNextStep(h3, gradient, 0, '', SIMULATION_PARAMS, frictionLookup, affordanceLookup, null, null, null, undefined);
+
   it('should return null when no visible neighbors', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
-    // Create a context where all neighbors are impassable
-    const frictionMap = new Map([[h3, 999999]]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
+    const frictionLookup = { [h3]: 999999 };
+    const result = step(h3, {}, frictionLookup);
     expect(result).toBeNull();
   });
 
@@ -255,34 +257,17 @@ describe('getBestNextStep', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
-    // Should return a valid neighbor or null if no visible neighbors
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
+    const result = step(h3, {}, frictionLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
-  it('should use _frictionObj when available', () => {
+  it('should use the supplied frictionLookup', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionObj = {
-      [h3]: 1,
-      [neighborCell]: 1,
-    };
-    const map = {
-      _frictionObj: frictionObj,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
+    const result = step(h3, {}, frictionLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
@@ -290,16 +275,8 @@ describe('getBestNextStep', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 999999],
-    ]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
+    const frictionLookup = { [h3]: 1, [neighborCell]: 999999 };
+    const result = step(h3, {}, frictionLookup);
     // Should not return the impassable neighbor
     expect(result).not.toBe(neighborCell);
   });
@@ -308,140 +285,81 @@ describe('getBestNextStep', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    // Provide a gradient where neighborCell has a lower gradient value
-    const gradient = {
-      [h3]: 2,
-      [neighborCell]: 1,
-    };
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, gradient, 0);
-    // Should prefer the neighbor with lower gradient
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
+    const gradient = { [h3]: 2, [neighborCell]: 1 };
+    const result = step(h3, gradient, frictionLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
-  it('should handle debugCompute flag', () => {
+  it('should not throw for a basic step', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 1],
-      [neighborCell, 1],
-    ]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-      debugCompute: true,
-    };
-    // Should not throw with debugCompute enabled
-    const result = getBestNextStep(map, h3, {}, 0, 'test-agent');
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
+    const result = getBestNextStep(h3, {}, 0, 'test-agent', SIMULATION_PARAMS, frictionLookup, {}, null, null, null, undefined);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
-  it('should handle affordanceMap as fallback', () => {
+  it('should handle affordance fallback', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const map = {
-      // _frictionObj is now the canonical lookup — provide it as a plain object
-      _frictionObj: { [h3]: 1, [neighborCell]: 1 },
-      _affordanceObj: { [h3]: 0.5, [neighborCell]: 0.8 },
-      // No _cellState
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
+    const affordanceLookup = { [h3]: 0.5, [neighborCell]: 0.8 };
+    const result = step(h3, {}, frictionLookup, affordanceLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
-  it('should handle Map gradient', () => {
+  it('should handle plain-object gradient', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    // gradient is always a plain object after the normalization refactor
+    const frictionLookup = { [h3]: 1, [neighborCell]: 1 };
     const gradientObj = { [h3]: 2, [neighborCell]: 1 };
-    const map = {
-      _frictionObj: { [h3]: 1, [neighborCell]: 1 },
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, gradientObj, 0);
+    const result = step(h3, gradientObj, frictionLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 
-  it('should handle cellsArr.length === 0 (fallback tunneling)', () => {
+  it('should return null when all neighbors are impassable', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
-    // All neighbors are impassable, so cellsArr will be empty
     const neighbors = gridDisk(h3, 1);
-    const frictionMap = new Map();
-    frictionMap.set(h3, 1);
+    const frictionLookup = { [h3]: 1 };
     for (const n of neighbors) {
-      if (n !== h3) {
-        frictionMap.set(n, 999999);
-      }
+      if (n !== h3) frictionLookup[n] = 999999;
     }
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
-    // Should return null when all neighbors are impassable
+    const result = step(h3, {}, frictionLookup);
     expect(result).toBeNull();
   });
 
-  it('should handle frictionArr[i] === 0 (falsy friction)', () => {
+  it('should handle zero friction', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const neighborCell = neighbors[1] || h3;
-    const frictionMap = new Map([
-      [h3, 0],
-      [neighborCell, 0],
-    ]);
-    const map = {
-      cellFrictionMap: frictionMap,
-      _cellState: Object.create(null),
-      _affordanceObj: Object.create(null),
-    };
-    const result = getBestNextStep(map, h3, {}, 0);
+    const frictionLookup = { [h3]: 0, [neighborCell]: 0 };
+    const result = step(h3, {}, frictionLookup);
     expect(result === null || typeof result === 'string').toBe(true);
   });
 });
 
 describe('clearComputeCaches', () => {
-  it('should clear path, disk, visibility, and gradient caches', () => {
+  it('should clear gradient cache and per-compute structures', () => {
     const map = {
-      _computePathCacheObj: { a: { b: [1] } },
-      _computePathCacheOrder: ['a'],
-      _computeDiskCacheObj: { c: { 1: [2] } },
-      _computeDiskCacheOrder: ['c'],
-      _visibilityCacheObj: { d: { e: true } },
-      _visibilityCacheOrder: ['d'],
+      pathDesireScores: { a: 1 },
       _gradientCacheObj: { f: { f: 0 } },
       _gradientCacheGen: 1,
-      _visibilityCacheGen: 1,
+      _frictionObj: { a: 1 },
+      _affordanceObj: { a: 0.1 },
+      _getFriction: () => {},
+      _getAffordance: () => {},
     };
     clearComputeCaches(map);
-    expect(map._computePathCacheObj).toBeUndefined();
-    expect(map._computeDiskCacheObj).toBeUndefined();
-    expect(map._visibilityCacheObj).toBeUndefined();
-    expect(map._gradientCacheObj).toBeDefined();
-    expect(Object.keys(map._gradientCacheObj).length).toBe(0);
+    expect(map.pathDesireScores).toEqual({});
+    expect(Object.keys(map._gradientCacheObj)).toHaveLength(0);
     expect(map._gradientCacheGen).toBeUndefined();
-  });
-
-  it('should clear the module-level lat/lng cache', () => {
-    // Verify clearLatLngCache is exported and works
-    const { clearLatLngCache } = require('../src/helpers/compute.js');
-    expect(typeof clearLatLngCache).toBe('function');
-    // Call clearLatLngCache and verify it doesn't throw
-    expect(() => clearLatLngCache()).not.toThrow();
+    expect(map._frictionObj).toBeNull();
+    expect(map._affordanceObj).toBeNull();
+    expect(map._getFriction).toBeNull();
+    expect(map._getAffordance).toBeNull();
   });
 });
 
@@ -502,16 +420,10 @@ describe('getGradientDirection', () => {
     for (const n of neighbors) gradient[n] = 5;
     gradient[target] = 1;
 
-    const map = {
-      _frictionObj: Object.create(null),
-      cellFrictionMap: new Map(),
-    };
-    for (const n of [center, ...neighbors]) {
-      map._frictionObj[n] = 1;
-      map.cellFrictionMap.set(n, 1);
-    }
+    const frictionLookup = Object.create(null);
+    for (const n of [center, ...neighbors]) frictionLookup[n] = 1;
 
-    const bearing = getGradientDirection(map, center, gradient);
+    const bearing = getGradientDirection(center, gradient, frictionLookup, null, undefined);
     expect(typeof bearing).toBe('number');
     expect(bearing).toBeGreaterThanOrEqual(0);
     expect(bearing).toBeLessThan(360);

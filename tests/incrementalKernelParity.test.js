@@ -12,12 +12,13 @@ import { runAgentPath, estimateMaxTicks } from '../src/helpers/agentTasks.js';
 import { runSingleAgentPath } from '../src/helpers/compute.js';
 import { SIMULATION_PARAMS, FRICTION_COSTS } from '../src/helpers/constants.js';
 
-// Win D parity guard: the incremental-API kernel (`runSingleAgentPath`,
-// compute.js) and the batch/worker kernel (`runAgentPath`, agentTasks.js) share
-// the obstacle-avoidance geometry (`resolveStepLine`, agentStep.js) and the
-// candidate-scoring core (agentStep.js). This test asserts they still produce
-// byte-identical agent paths on the same deterministic scenario, so the two
-// kernels cannot silently drift apart.
+// Win D guard: there is now a single agent-path kernel (`runAgentPath` in
+// agentTasks.js). The main-thread incremental API (`runSingleAgentPath`,
+// compute.js) is a thin adapter that maps its `ctx` into the explicit
+// parameters `runAgentPath` expects, so both code paths share one
+// implementation. This test asserts the adapter reproduces the kernel's
+// byte-identical path on a deterministic scenario, guarding the ctx→params
+// mapping (and the live-affordance / no-graph fallback) against drift.
 describe('incremental kernel parity (deterministic)', () => {
   function buildScenario(res = 15) {
     // A compact AOI with a clear origin -> dest corridor. A pure distance

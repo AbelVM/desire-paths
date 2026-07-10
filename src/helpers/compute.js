@@ -1,8 +1,7 @@
 import { logger } from './logger.js';
-import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
+import { gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
-  WEIGHTS,
   AFFORDANCE,
   DECAY_RATE,
   UPDATE_RATE,
@@ -10,11 +9,6 @@ import {
   SOFT_CAP,
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
-  COMPUTE_PATH_CACHE_MAX,
-  COMPUTE_DISK_CACHE_MAX,
-  COMPUTE_VISIBILITY_CACHE_MAX,
-  NEIGHBOR_DISK_CACHE_MAX,
-  CELL_LATLNG_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
 import {
@@ -23,39 +17,18 @@ import {
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
+// The single canonical agent-path kernel lives in agentTasks.js. The
+// main-thread incremental path (runSingleAgentPath below) is now a thin
+// adapter over runAgentPath, so both code paths share one implementation.
+import { runAgentPath } from './agentTasks.js';
 import {
   computeDijkstra,
   getGradientGraph,
-  getGraphNeighborIndicesR1,
   gradientGet,
   gradientReachableCount,
   invalidateGradientGraph,
-  graphFriction,
 } from './dijkstra.js';
-import { createLCG, strHash } from './rng.js';
-import { _bearingFromLatLngs, angleDiff } from './bearing.js';
-import {
-  gatherCandidates,
-  partitionVisibleCone,
-  scoreCandidates,
-  selectBestCandidate,
-  resolveStepLine,
-} from './agentStep.js';
 import { reconstructVisibilityBearing } from './bearingIndex.js';
-
-// Module-level lat/lng cache. Uses a Map so its insertion order gives us an
-// O(1) LRU for free: on a hit we delete+re-set the key to move it to the
-// most-recently-used end, and on eviction we drop the first (oldest) key.
-// This replaces the old object+order-array design whose per-hit `indexOf`
-// scan was O(n) for a 1024-entry cache.
-const _cellLatLngCache = new Map();
-// Instrumentation counters for lat/lng cache
-let _cellLatLngCacheHits = 0;
-let _cellLatLngCacheMisses = 0;
-
-function recordTraversal(pathDesireDeltas, cell) {
-  pathDesireDeltas[cell] = (pathDesireDeltas[cell] || 0) + 1;
-}
 
 function applyPathDesireDeltas(ctx, pathDesireDeltas) {
   for (const cell in pathDesireDeltas) {
@@ -63,146 +36,6 @@ function applyPathDesireDeltas(ctx, pathDesireDeltas) {
     const newDesire = (ctx.pathDesireScores?.[cell] ?? 0) + v;
     ctx.pathDesireScores[cell] = newDesire;
   }
-}
-
-function _getCachedLatLng(cell) {
-  const c = _cellLatLngCache.get(cell);
-  if (c) {
-    _cellLatLngCacheHits++;
-    // LRU: re-insert the accessed cell so it moves to the most-recently-used
-    // end (Map preserves insertion order). This is O(1) — no index scan.
-    _cellLatLngCache.delete(cell);
-    _cellLatLngCache.set(cell, c);
-    return c;
-  }
-  const v = cellToLatLng(cell);
-  // store degrees and precomputed radians to avoid repeated trig conversions
-  const lat = v[0];
-  const lng = v[1];
-  const latRad = (lat * Math.PI) / 180;
-  const lngRad = (lng * Math.PI) / 180;
-  const stored = [lat, lng, latRad, lngRad];
-  _cellLatLngCache.set(cell, stored);
-  _cellLatLngCacheMisses++;
-  // LRU eviction: drop the least-recently-used entry (the first key in
-  // insertion order) once over the cap. No periodic full reset, so useful
-  // entries are retained across AOI pans.
-  if (_cellLatLngCache.size > CELL_LATLNG_CACHE_MAX) {
-    const old = _cellLatLngCache.keys().next().value;
-    _cellLatLngCache.delete(old);
-  }
-  return stored;
-}
-
-// Compute-scoped cached wrappers for gridPathCells and gridDisk (attach caches to this)
-function _getCachedPathCells(ctx, a, b) {
-  // Use a plain-object of plain-objects for fast string-key lookup in hot paths.
-  if (!ctx._computePathCacheObj) {
-    ctx._computePathCacheObj = Object.create(null);
-    ctx._computePathCacheOrder = [];
-  }
-  if (typeof ctx._computePathCacheHits !== 'number') {
-    ctx._computePathCacheHits = 0;
-    ctx._computePathCacheMisses = 0;
-  }
-  // Normalize the key so bidirectional pairs (a,b) and (b,a) share one entry,
-  // since gridPathCells(a, b) === gridPathCells(b, a) as an unordered cell list.
-  const reversed = a > b;
-  const ka = reversed ? b : a;
-  const kb = reversed ? a : b;
-  let inner = ctx._computePathCacheObj[ka];
-  if (inner) {
-    const hit = inner[kb];
-    if (hit) {
-      ctx._computePathCacheHits++;
-      return reversed ? hit.slice().reverse() : hit;
-    }
-  }
-  const arr = gridPathCells(ka, kb);
-  if (!inner) {
-    inner = Object.create(null);
-    ctx._computePathCacheObj[ka] = inner;
-    ctx._computePathCacheOrder.push(ka);
-  }
-  inner[kb] = arr;
-  ctx._computePathCacheMisses++;
-  if (ctx._computePathCacheOrder.length > COMPUTE_PATH_CACHE_MAX) {
-    const old = ctx._computePathCacheOrder.shift();
-    delete ctx._computePathCacheObj[old];
-  }
-  return reversed ? arr.slice().reverse() : arr;
-}
-
-function _getCachedDisk(ctx, center, r) {
-  const visualDepth = ctx?.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
-  // VISUAL_DEPTH disks are served from the lazy, generation-keyed cache. This
-  // avoids the upfront N×gridDisk cost that used to block the mapping stage.
-  if (r === visualDepth) {
-    ctx._computeDiskCacheHits++;
-    return getNeighborDisk(center, visualDepth, ctx._mappingGeneration ?? 0);
-  }
-
-  // Fall back to LRU cache for other radii
-  if (!ctx._computeDiskCacheObj) {
-    ctx._computeDiskCacheObj = Object.create(null);
-    ctx._computeDiskCacheOrder = [];
-  }
-  if (typeof ctx._computeDiskCacheHits !== 'number') {
-    ctx._computeDiskCacheHits = 0;
-    ctx._computeDiskCacheMisses = 0;
-  }
-  let inner = ctx._computeDiskCacheObj[center];
-  if (inner) {
-    const hit = inner[r];
-    if (hit) {
-      ctx._computeDiskCacheHits++;
-      return hit;
-    }
-  }
-  const arr = gridDisk(center, r);
-  if (!inner) {
-    inner = Object.create(null);
-    ctx._computeDiskCacheObj[center] = inner;
-    ctx._computeDiskCacheOrder.push(center);
-  }
-  inner[r] = arr;
-  ctx._computeDiskCacheMisses++;
-  if (ctx._computeDiskCacheOrder.length > COMPUTE_DISK_CACHE_MAX) {
-    const old = ctx._computeDiskCacheOrder.shift();
-    delete ctx._computeDiskCacheObj[old];
-  }
-  return arr;
-}
-
-// Lazy, generation-keyed neighbor-disk cache (uncapped).
-// Replaces the upfront `precomputeNeighborDisks` pass that used to run N
-// `gridDisk(cell, visionDepth)` calls synchronously during the mapping stage and
-// block the main thread. Disks are now computed on first access during the
-// simulation and cached, so the mapping stage pays nothing and the total number
-// of `gridDisk` calls is unchanged (≤ N distinct cells are ever visited).
-let _neighborDiskCache = Object.create(null);
-let _neighborDiskOrder = [];
-let _neighborDiskGen = -1;
-let _neighborDiskDepth = -1;
-
-function getNeighborDisk(cell, visualDepth, gen) {
-  if (_neighborDiskGen !== gen || _neighborDiskDepth !== visualDepth) {
-    _neighborDiskCache = Object.create(null);
-    _neighborDiskOrder = [];
-    _neighborDiskGen = gen;
-    _neighborDiskDepth = visualDepth;
-  }
-  let d = _neighborDiskCache[cell];
-  if (d === undefined) {
-    d = gridDisk(cell, visualDepth);
-    _neighborDiskCache[cell] = d;
-    _neighborDiskOrder.push(cell);
-    if (_neighborDiskOrder.length > NEIGHBOR_DISK_CACHE_MAX) {
-      const old = _neighborDiskOrder.shift();
-      delete _neighborDiskCache[old];
-    }
-  }
-  return d;
 }
 
 // Precompute grid distances for all origin-destination pairs as a typed matrix
@@ -241,25 +74,16 @@ function precomputeOriginDestDistances(origins, destinations) {
 // O(1) typed-matrix lookup for the precomputed origin-destination distances.
 // Returns the finite distance, or `undefined` when the pair is not a filled
 // node pair (Infinity / non-node). Safe to call with a null `od`.
-function lookupOriginDest(od, a, b) {
-  if (!od) return undefined;
-  const ai = od.nodeToIdx.get(a);
-  const bi = od.nodeToIdx.get(b);
-  if (ai === undefined || bi === undefined) return undefined;
-  const v = od.matrix[ai * od.nodeList.length + bi];
-  return Number.isFinite(v) ? v : undefined;
-}
-
 // M3: lazily rebuild the main-thread visibility + bearing indices from the raw
 // packed CSR buffer (`_visibilityBearingCSR`) + AOI cell order (`_viewHexes`),
 // instead of holding the eagerly-built Proxy indices that grid.js used to
 // construct. The agent worker already rebuilds from this same CSR (S1); the
-// main-thread preview kernel (runSingleAgentPath / _getCachedVisibility) now does
-// the same, on first use, and caches by mapping generation. This keeps the CSR as
-// the single source of truth and avoids the O(N) cellToIndex + Proxy construction
-// when only the worker path runs. Cached in a WeakMap keyed by state so the proxy
-// get-trap (which returns undefined for unknown `_`-prefixed props) can't hide the
-// value, and so the cache is collected with the state.
+// main-thread simulation path now does the same, on first use, and caches by
+// mapping generation. This keeps the CSR as the single source of truth and avoids
+// the O(N) cellToIndex + Proxy construction when only the worker path runs.
+// Cached in a WeakMap keyed by state so the proxy get-trap (which returns
+// undefined for unknown `_`-prefixed props) can't hide the value, and so the
+// cache is collected with the state.
 const _mtVisBearingCache = new WeakMap();
 function getMainThreadVisibilityBearing(state) {
   const gen = state._mappingGeneration ?? 0;
@@ -277,61 +101,6 @@ function getMainThreadVisibilityBearing(state) {
   const result = { gen, visibilityData, bearingMap };
   _mtVisBearingCache.set(state, result);
   return result;
-}
-
-function _getCachedVisibility(ctx, a, b, frictionLookup, graph) {
-  // M3: use the lazily-rebuilt main-thread visibility index (from raw CSR).
-  const mt = getMainThreadVisibilityBearing(ctx);
-  const currentGen = ctx._mappingGeneration ?? 0;
-  if (mt.visibilityData && mt.gen === currentGen) {
-    const visible = mt.visibilityData[a];
-    if (visible) {
-      return !!visible[b];
-    }
-    // Cell not in precomputed set (e.g., outside AOI) — fall through to legacy cache
-  }
-
-  ensureVisibilityCacheFresh(ctx);
-  // Use plain-object nested cache keyed by a then b for fast boolean lookup
-  if (!ctx._visibilityCacheObj) {
-    ctx._visibilityCacheObj = Object.create(null);
-    ctx._visibilityCacheOrder = [];
-  }
-  if (typeof ctx._visibilityCacheHits !== 'number') {
-    ctx._visibilityCacheHits = 0;
-    ctx._visibilityCacheMisses = 0;
-  }
-  let outer = ctx._visibilityCacheObj[a];
-  if (outer) {
-    const v = outer[b];
-    if (typeof v !== 'undefined') {
-      ctx._visibilityCacheHits++;
-      return v;
-    }
-  }
-  const path = _getCachedPathCells(ctx, a, b);
-  let visible = true;
-  for (let i = 0; i < path.length; i++) {
-    const c = path[i];
-    const f = graph ? graphFriction(graph, c) : frictionLookup[c];
-    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) {
-      visible = false;
-      break;
-    }
-  }
-  // outer may have been created above or may be new
-  if (!outer) {
-    outer = Object.create(null);
-    ctx._visibilityCacheObj[a] = outer;
-    ctx._visibilityCacheOrder.push(a);
-  }
-  outer[b] = visible;
-  ctx._visibilityCacheMisses++;
-  if (ctx._visibilityCacheOrder.length > COMPUTE_VISIBILITY_CACHE_MAX) {
-    const old = ctx._visibilityCacheOrder.shift();
-    delete ctx._visibilityCacheObj[old];
-  }
-  return visible;
 }
 
 /** Drop path/disk/visibility caches and gradient fields after friction topology changes. */
@@ -354,38 +123,11 @@ export function clearComputeCaches(ctx) {
   ctx._getFriction = null;
   ctx._getAffordance = null;
 
-  // Reset compute cache instrumentation and LRU structures
-  ctx._computePathCacheObj = undefined;
-  ctx._computePathCacheOrder = undefined;
-  ctx._computePathCacheHits = 0;
-  ctx._computePathCacheMisses = 0;
-
-  ctx._computeDiskCacheObj = undefined;
-  ctx._computeDiskCacheOrder = undefined;
-  ctx._computeDiskCacheHits = 0;
-  ctx._computeDiskCacheMisses = 0;
-
-  ctx._visibilityCacheObj = undefined;
-  ctx._visibilityCacheOrder = undefined;
-  ctx._visibilityCacheHits = 0;
-  ctx._visibilityCacheMisses = 0;
-  ctx._visibilityCacheGen = undefined;
-
-  // Clear gradient cache and module-level lat/lng cache
+  // Clear gradient cache and drop the gradient graph so the next run rebuilds
+  // adjacency from the current friction instead of a stale topology.
   clearGradientCache(ctx);
   ctx._gradientCacheGen = undefined;
-  clearLatLngCache();
-  // The gradient graph is keyed by the (stable) cellFrictionMap reference, which
-  // the mapping stage reuses in place across remaps. Drop it so the next run
-  // rebuilds adjacency from the current friction instead of a stale topology.
   invalidateGradientGraph();
-}
-
-/** Clear the module-level lat/lng cache to prevent unbounded memory growth. */
-export function clearLatLngCache() {
-  _cellLatLngCache.clear();
-  _cellLatLngCacheHits = 0;
-  _cellLatLngCacheMisses = 0;
 }
 
 function ensureVisibilityCacheFresh(ctx) {
@@ -413,44 +155,25 @@ function estimateMaxTicks(origin, dest, hexCount) {
 }
 
 /** Paper §3.4: face the steepest descent neighbor on the goal gradient field. */
-function getGradientDirection(ctx, curr, gradientObj, bearingMap) {
-  if (!gradientObj) return null;
-  // Build the gradient graph once; its cellToIdx is what indexes the typed-array
-  // gradient (M1). The graph is cached per friction source, so this is cheap.
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  const gCurr = gradientGet(gradientObj, curr, graph);
-  if (typeof gCurr !== 'number') return null;
-
-  // Reuse the canonical gradient graph's r=1 adjacency (CSR) instead of a
-  // separate gridDisk(cell, 1) call — same passable, in-AOI neighbor set.
-  // Iterate neighbor *indices* (zero-copy CSR view) and map back to cell ids via
-  // `idxToCell`; this drops the old `cellNeighbors` string-array materialization.
-  const nbrIdxs = getGraphNeighborIndicesR1(graph, curr);
-  const idxToCell = graph.idxToCell;
-  // _frictionObj is always the canonical lookup — already built once per sim run.
-  // Direct property access on plain object is faster than iterating Map.entries().
-  const frictionLookup = ctx._frictionObj;
-  let bestNeighbor = null;
-  let bestGrad = gCurr;
-
-  for (let i = 0; i < nbrIdxs.length; i++) {
-    const n = idxToCell[nbrIdxs[i]];
-    if (n === curr) continue;
-    const f = graph ? graphFriction(graph, n) : frictionLookup[n];
-    if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) continue;
-    const gN = gradientGet(gradientObj, n, graph);
-    if (typeof gN !== 'number') continue;
-    if (gN < bestGrad) {
-      bestGrad = gN;
-      bestNeighbor = n;
-    }
-  }
-
-  return bestNeighbor ? getBearingFast(ctx, curr, bestNeighbor, bearingMap) : null;
-}
-
 /**
- * Shared agent path kernel used by batch simulation and incremental APIs.
+ * Main-thread incremental agent-path kernel.
+ *
+ * Thin adapter over the single canonical kernel in agentTasks.js
+ * (`runAgentPath`). Both the worker batch path and this incremental path call
+ * the same implementation, so there is exactly one source of truth for the
+ * pathfinding logic — no second kernel to drift apart (see
+ * tests/incrementalKernelParity.test.js).
+ *
+ * `ctx` is adapted into the explicit parameters `runAgentPath` expects. The
+ * graph is intentionally left undefined: the worker kernel reads affordance
+ * from a typed-array snapshot (`_knAffordanceArr`) that is only built inside
+ * `computeAgentBatch`; on the main thread we pass the live `_affordanceObj`
+ * instead, which `runAgentPath` falls back to when no graph is supplied.
+ *
+ * `applyWear` is applied after the path is computed (the worker kernel does
+ * not mutate affordance mid-walk); this matches the previous per-cell wear
+ * since each visited cell is incremented exactly once.
+ *
  * Returns traversed cells in order (including origin).
  */
 function runSingleAgentPath(
@@ -468,99 +191,34 @@ function runSingleAgentPath(
     originDestDistances = null,
   }
 ) {
-  let simCurrent = originCell;
-  const simTarget = destCell;
-
-  // Precomputed distance check — eliminates per-tick gridDistance H3 call.
-  // The table is keyed only by node pairs, so the per-tick
-  // `simCurrent + '::' + destCell` lookup can only hit when `simCurrent` is a
-  // node. Build a node set once (not per tick) and gate the lookup on it:
-  // byte-identical to the old "always concat + read" path, but skips the string
-  // allocation + object read for the intermediate cells (the vast majority).
-  let nodeSet = null;
-  if (originDestDistances) {
-    nodeSet = new Set(originDestDistances.nodeList);
-  }
-  let distToTarget = 0;
-  if (originDestDistances) {
-    const d = lookupOriginDest(originDestDistances, originCell, destCell);
-    if (typeof d === 'number') distToTarget = d;
-  }
-
-  let simDirection =
-    getGradientDirection(ctx, simCurrent, destGradientObj, bearingMap) ??
-    getBearingFast(ctx, simCurrent, simTarget, bearingMap);
-  const simPath = [originCell];
-
-  if (pathDesireDeltas) recordTraversal(pathDesireDeltas, originCell);
-  if (applyWear) updateAffordance(ctx, originCell, 1);
-
-  // _frictionObj is the canonical lookup — already built once per sim run.
   const frictionLookup = ctx._frictionObj;
+  const affordanceLookup = ctx._affordanceObj;
+  const visibilityMap = null;
+  // No graph on the main thread: runAgentPath falls back to the live
+  // affordance/friction plain-object lookups (see header above).
+  const graph = undefined;
+  const nodeSet = originDestDistances ? new Set(originDestDistances.nodeList) : null;
 
-  for (let tick = 0; tick < maxTicks; tick++) {
-    // Update dynamic distance to target — the precomputed origin-to-destination
-    // distance becomes stale if the agent takes a detour around obstacles.
-    // Gated on `nodeSet` (byte-identical: the table is node-only, so the lookup
-    // can only hit when `simCurrent` is a node) to skip the per-tick string
-    // concat + object read for intermediate cells.
-    if (originDestDistances) {
-      if (nodeSet && nodeSet.has(simCurrent)) {
-        const currentDist = lookupOriginDest(originDestDistances, simCurrent, destCell);
-        if (typeof currentDist === 'number') distToTarget = currentDist;
-      }
-    } else {
-      distToTarget = gridDistance(simCurrent, simTarget);
-    }
+  const simPath = runAgentPath(
+    originCell,
+    destCell,
+    destGradientObj,
+    maxTicks,
+    simAgentId,
+    pathDesireDeltas,
+    frictionLookup,
+    affordanceLookup,
+    visibilityMap,
+    accumulatedFootprints,
+    bearingMap,
+    originDestDistances,
+    ctx.simulationParams,
+    graph,
+    nodeSet
+  );
 
-    // Use dynamic distance check — eliminates stale precomputed distance bug
-    if (distToTarget <= 1) {
-      if (simTarget !== simCurrent) {
-        simPath.push(simTarget);
-        if (pathDesireDeltas) recordTraversal(pathDesireDeltas, simTarget);
-        if (applyWear) updateAffordance(ctx, simTarget, 1);
-      }
-      break;
-    }
-
-    const nextStep = getBestNextStep(
-      ctx,
-      simCurrent,
-      destGradientObj,
-      simDirection,
-      simAgentId,
-      accumulatedFootprints,
-      bearingMap
-    );
-    if (!nextStep || nextStep === simCurrent) break;
-
-    // Walk toward nextStep. Prefer the straight H3 line, but if it is blocked
-    // by an impassable cell or would cut a building corner, route a local
-    // detour around the obstacle so the agent walks *around* the corner
-    // instead of jumping over it or stalling against the building.
-    const line = _resolveStepLine(ctx, simCurrent, nextStep, frictionLookup);
-    let hitTarget = false;
-    let lastReached = simCurrent;
-    for (let i = 1; i < line.length; i++) {
-      const stepCell = line[i];
-      const f = frictionLookup[stepCell];
-      if (typeof f === 'undefined' || f >= FRICTION_COSTS.IMPASSABLE) break;
-      simPath.push(stepCell);
-      if (pathDesireDeltas) recordTraversal(pathDesireDeltas, stepCell);
-      if (applyWear) updateAffordance(ctx, stepCell, 1);
-      lastReached = stepCell;
-      if (stepCell === simTarget) {
-        hitTarget = true;
-        break;
-      }
-    }
-
-    if (hitTarget) break;
-
-    // Use precomputed bearing map — eliminates trig call per direction update
-    simDirection = getBearingFast(ctx, simCurrent, nextStep, bearingMap);
-    simCurrent = lastReached;
-    if (simCurrent === simTarget) break;
+  if (applyWear) {
+    for (let i = 0; i < simPath.length; i++) updateAffordance(ctx, simPath[i], 1);
   }
 
   return simPath;
@@ -1001,399 +659,6 @@ export async function computeDesirePaths(state, mapInstance) {
   state.flowsReady = true;
 }
 
-/**
- * Tactical Decision: BDI (Belief-Desire-Intention)(Section 3.3/2.4)
- */
-function getBestNextStep(
-  ctx,
-  curr,
-  gradient,
-  currentDirection,
-  agentId = '',
-  accumulatedFootprints = null,
-  bearingMap = null
-) {
-  const simParams = ctx.simulationParams || SIMULATION_PARAMS;
-  const affordanceLookup = ctx._affordanceObj;
-  // `weights` depends only on simParams; cache it on ctx and rebuild only when
-  // the relevant params change (getBestNextStep runs millions of times per sim,
-  // so allocating this object every call is pure GC churn).
-  const wKey = simParams.affordanceWeight + ':' + simParams.distancePenalty;
-  let weights = ctx._bestNextWeights;
-  if (!weights || ctx._bestNextWeightsKey !== wKey) {
-    weights = {
-      w_a: simParams.affordanceWeight,
-      w_d: simParams.distancePenalty,
-      w_theta: WEIGHTS.w_theta,
-    };
-    ctx._bestNextWeights = weights;
-    ctx._bestNextWeightsKey = wKey;
-  }
-  const impassableVal = FRICTION_COSTS.IMPASSABLE;
-  const visualAngleHalf = simParams.fieldOfView / 2;
-
-  // _frictionObj is the canonical lookup — already built once per sim run.
-  // For tests/incremental paths where it may not exist, build lazily (non-IIFE).
-  let frictionLookup = ctx._frictionObj;
-  if (!frictionLookup && ctx.cellFrictionMap) {
-    frictionLookup = Object.create(null);
-    for (const [k, v] of ctx.cellFrictionMap) frictionLookup[k] = v;
-    ctx._frictionObj = frictionLookup;
-  }
-
-  const disk = _getCachedDisk(ctx, curr, simParams.visionDepth);
-  const sLatLng = _getCachedLatLng(curr);
-  // Build the gradient graph once (cached per friction source) so the typed-array
-  // gradient (M1) can be indexed by cellToIdx. Cheap after the first call.
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  const gradientLookup = gradient ? (n) => gradientGet(gradient, n, graph) : null;
-  const gCurr = gradientLookup ? gradientLookup(curr) : undefined;
-  const useGradient = typeof gCurr === 'number';
-
-  // Hoist friction/affordance lookups out of the per-call hot path. They only
-  // depend on frictionLookup/affordanceLookup, which are stable for
-  // the lifetime of a sim run, so build them once and cache on ctx instead of
-  // re-allocating two closures on every one of the millions of invocations.
-  // When a gradient graph is available, read friction from its typed-array
-  // `frictionArr` (indexed by `cellToIdx`) — byte-identical to
-  // `frictionLookup[n]` but a typed-array read that drops the hot-path
-  // dependency on the N-entry `_frictionObj` plain object.
-  let getFriction = ctx._getFriction;
-  let getAffordance = ctx._getAffordance;
-  if (!getFriction || !getAffordance) {
-    getFriction = graph
-      ? (n) => graphFriction(graph, n)
-      : (n) => frictionLookup[n];
-    getAffordance = (n) => affordanceLookup?.[n] ?? 0.1;
-    ctx._getFriction = getFriction;
-    ctx._getAffordance = getAffordance;
-  }
-
-  // Reuse preallocated candidate buffers across calls instead of allocating
-  // fresh arrays on every invocation. cells are H3 strings (no typed-array
-  // equivalent), so cellsArr stays a plain array; the numeric sets use
-  // Float64Arrays. Buffers are grown only when a larger disk is encountered.
-  const diskLen = disk.length;
-  let cellsArr = ctx._candCells;
-  let anglesArr = ctx._candAngles;
-  let affsArr = ctx._candAffs;
-  let frictionArr = ctx._candFriction;
-  let gNsArr = ctx._candGNs;
-  if (!cellsArr || cellsArr.length < diskLen) {
-    cellsArr = new Array(diskLen);
-    anglesArr = new Float64Array(diskLen);
-    affsArr = new Float64Array(diskLen);
-    frictionArr = new Float64Array(diskLen);
-    gNsArr = new Float64Array(diskLen);
-    ctx._candCells = cellsArr;
-    ctx._candAngles = anglesArr;
-    ctx._candAffs = affsArr;
-    ctx._candFriction = frictionArr;
-    ctx._candGNs = gNsArr;
-  }
-  // `isVisible` only closes over `frictionLookup`/`graph` (stable per run).
-  // Cache it on ctx, rebuilding only if the friction source changes (e.g. a
-  // remap that swaps in a different _frictionObj). Avoids a closure
-  // allocation on every one of the millions of getBestNextStep invocations.
-  // When a gradient graph is available, friction is read from its typed-array
-  // `frictionArr` (byte-identical to `frictionLookup`) so the hot path
-  // drops the N-entry `_frictionObj` dependency.
-  let isVisible = ctx._isVisibleFn;
-  if (
-    !isVisible ||
-    ctx._isVisibleFrictionLookup !== frictionLookup ||
-    ctx._isVisibleGraph !== graph
-  ) {
-    isVisible = (a, b) => _getCachedVisibility(ctx, a, b, frictionLookup, graph);
-    ctx._isVisibleFn = isVisible;
-    ctx._isVisibleFrictionLookup = frictionLookup;
-    ctx._isVisibleGraph = graph;
-  }
-  // `computeAngle` closes over `bearingMap` (stable per run); `curr` and
-  // `currentDirection` vary per call, so they are passed as arguments. Cache the
-  // closure on ctx, rebuilding only when the bearing map changes.
-  let computeAngle = ctx._computeAngleFn;
-  if (!computeAngle || ctx._computeAngleBearingMap !== bearingMap) {
-    computeAngle = (n, sLatLng, currentDirection, curr) => {
-      if (bearingMap) {
-        const bng = bearingMap.get?.(curr + '::' + n);
-        if (typeof bng === 'number') return angleDiff(bng, currentDirection);
-      }
-      const eLatLng = _getCachedLatLng(n);
-      return angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-    };
-    ctx._computeAngleFn = computeAngle;
-    ctx._computeAngleBearingMap = bearingMap;
-  }
-
-  const candCount = gatherCandidates({
-    disk,
-    curr,
-    getFriction,
-    isVisible,
-    computeAngle,
-    getAffordance,
-    gradientLookup,
-    useGradient,
-    impassableVal,
-    cellsArr,
-    anglesArr,
-    affsArr,
-    frictionArr,
-    gNsArr,
-    sLatLng,
-    currentDirection,
-  });
-
-  const hardCount = partitionVisibleCone({
-    cellsArr,
-    anglesArr,
-    affsArr,
-    frictionArr,
-    gNsArr,
-    useGradient,
-    cLen: candCount,
-    visualAngleHalf,
-  });
-  const cLen = hardCount > 0 ? hardCount : candCount;
-  let scores = null;
-  if (useGradient) {
-    scores = ctx._candScores;
-    if (!scores || scores.length < cLen) {
-      scores = new Float64Array(cLen);
-      ctx._candScores = scores;
-    }
-  }
-
-  if (useGradient) {
-    scoreCandidates({
-      cLen,
-      gNsArr,
-      affsArr,
-      frictionArr,
-      anglesArr,
-      cellsArr,
-      weights,
-      gCurr,
-      accumulatedFootprints,
-      scores,
-    });
-  }
-
-  if (ctx.debugCompute) {
-    try {
-      const dbg = [];
-      for (let i = 0; i < cLen; i++) {
-        const s = scores?.[i];
-        if (typeof s === 'number') dbg.push({ cell: cellsArr[i], S_ij: s });
-      }
-      dbg.sort((a, b) => b.S_ij - a.S_ij);
-      console.log('getBestNextStep: candidates', { curr, topCandidates: dbg.slice(0, 12) });
-    } catch (_e) {
-      // debug logging is non-critical
-    }
-  }
-
-  if (candCount === 0) {
-    // depth=1 reuses the canonical graph's r=1 adjacency (CSR indices); deeper
-    // rings fall back to the disk cache (the graph only encodes distance-1 edges).
-    const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-    const idxToCell = graph.idxToCell;
-    for (let depth = 1; depth <= 3; depth++) {
-      const nbrIdxs = depth === 1 ? getGraphNeighborIndicesR1(graph, curr) : null;
-      const disk = depth === 1 ? null : _getCachedDisk(ctx, curr, depth);
-      const count = nbrIdxs ? nbrIdxs.length : disk.length;
-      let bestGrad = Infinity;
-      let bestCandidate = null;
-
-      for (let i = 0; i < count; i++) {
-        const n = nbrIdxs ? idxToCell[nbrIdxs[i]] : disk[i];
-        if (n === curr) continue;
-        const f = getFriction(n);
-        if (f === undefined || f >= impassableVal) continue;
-        if (!_getCachedVisibility(ctx, curr, n, frictionLookup)) continue;
-
-        const eLatLng = _getCachedLatLng(n);
-        let ang;
-        if (bearingMap) {
-          const bng = bearingMap.get?.(curr + '::' + n);
-          if (typeof bng === 'number') {
-            ang = angleDiff(bng, currentDirection);
-          } else {
-            ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-          }
-        } else {
-          ang = angleDiff(_bearingFromLatLngs(sLatLng, eLatLng), currentDirection);
-        }
-        if (ang > visualAngleHalf) continue;
-
-        const g = gradientLookup ? (gradientLookup(n) ?? Infinity) : (gradientGet(gradient, n, graph) ?? Infinity);
-        if (g < bestGrad) {
-          bestGrad = g;
-          bestCandidate = n;
-        }
-      }
-      if (bestCandidate) {
-        if (ctx.debugCompute) {
-          try {
-            console.log('getBestNextStep:fallback', { curr, depth, bestCandidate, bestGrad });
-          } catch (_e) {
-            // debug logging is non-critical
-          }
-        }
-        return getBearingFast(ctx, curr, bestCandidate, bearingMap);
-      }
-    }
-    return null;
-  }
-
-  const hasValidScores = useGradient && scores?.length > 0 && typeof scores[0] === 'number';
-  if (hasValidScores && typeof simParams.temperature === 'number' && simParams.temperature > 0) {
-    const seed = strHash(agentId + ':' + curr);
-    const rng = createLCG(seed);
-    let maxS = -Infinity;
-    for (let i = 0; i < scores.length; i++) {
-      const v = scores[i];
-      if (v > maxS) maxS = v;
-    }
-
-    let weightsArr = ctx._candWeights;
-    if (!weightsArr || weightsArr.length < scores.length) {
-      weightsArr = new Float64Array(scores.length);
-      ctx._candWeights = weightsArr;
-    }
-    let sum = 0;
-    for (let i = 0; i < scores.length; i++) {
-      const w = Math.exp((scores[i] - maxS) / simParams.temperature);
-      weightsArr[i] = w;
-      sum += w;
-    }
-
-    // Guard against non-finite sum (temperature too small → overflow to Infinity)
-    if (!isFinite(sum) || sum === 0) {
-      // Fallback: return the cell with the highest score
-      let bestIdx = 0;
-      let bestVal = scores[0];
-      for (let i = 1; i < scores.length; i++) {
-        if (scores[i] > bestVal) {
-          bestVal = scores[i];
-          bestIdx = i;
-        }
-      }
-      return cellsArr[bestIdx];
-    }
-
-    const r = rng() * sum;
-    let acc = 0;
-    for (let i = 0; i < scores.length; i++) {
-      acc += weightsArr[i];
-      if (r <= acc) {
-        const chosen = cellsArr[i];
-        if (ctx.debugCompute) {
-          try {
-            console.log('getBestNextStep: sampled', { curr, chosen, chosenScore: scores[i] });
-          } catch (_e) {
-            // debug logging is non-critical
-          }
-        }
-        return chosen;
-      }
-    }
-    return cellsArr[cLen - 1];
-  }
-
-  const bestIndex = selectBestCandidate({
-    cLen,
-    scores,
-    affsArr,
-    frictionArr,
-    gNsArr,
-    useGradient,
-    accumulatedFootprints,
-    cellsArr,
-    curr,
-  });
-
-  const chosen = bestIndex >= 0 ? cellsArr[bestIndex] : null;
-  if (ctx.debugCompute) {
-    try {
-      console.log('getBestNextStep: chosen', { curr, chosen });
-    } catch (_e) {
-      // debug logging is non-critical
-    }
-  }
-
-  return chosen;
-}
-
-/**
- * Optimized Dijkstra Gradient (Production-Ready)
- */
-function computeDijkstraGradient(ctx, targetCell) {
-  // _frictionObj may not be built yet during incremental gradient computation.
-  // Use it when available; otherwise build once from cellFrictionMap.
-  let frictionLookup = ctx._frictionObj;
-  if (!frictionLookup && ctx.cellFrictionMap) {
-    frictionLookup = Object.create(null);
-    for (const [k, v] of ctx.cellFrictionMap) frictionLookup[k] = v;
-    ctx._frictionObj = frictionLookup;
-  }
-
-  const getFriction = (n) => frictionLookup?.[n];
-
-  // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
-  // cellFrictionMap reference. Topology is static per mapping generation; only
-  // the per-cell friction (which can change via emergent wear) is rebuilt.
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  return computeDijkstra(targetCell, getFriction, graph);
-}
-
-/**
- * Geometric Helpers (Visibility & Bearing)
- */
-
-// Resolve the actual cell-by-cell line the agent walks from `curr` to
-// `nextStep`. Thin adapter over the shared `resolveStepLine` (agentStep.js) —
-// the obstacle-avoidance geometry lives there so this kernel and the worker
-// kernel cannot drift. The cache-accessor closures are memoized on ctx so no
-// closures are allocated on the hot per-step path.
-function _resolveStepLine(ctx, curr, nextStep, frictionLookup) {
-  let getPathCells = ctx._rslGetPathCells;
-  let getDisk = ctx._rslGetDisk;
-  if (!getPathCells || !getDisk) {
-    getPathCells = (a, b) => _getCachedPathCells(ctx, a, b);
-    getDisk = (center, r) => _getCachedDisk(center, r);
-    ctx._rslGetPathCells = getPathCells;
-    ctx._rslGetDisk = getDisk;
-  }
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  return resolveStepLine({
-    curr,
-    nextStep,
-    frictionLookup,
-    getPathCells,
-    getDisk,
-    graph,
-    impassableVal: FRICTION_COSTS.IMPASSABLE,
-  });
-}
-
-// Returns true if the straight H3 line from `curr` to `n` would cut across an
-// impassable cell at any diagonal transition. Used to reject `nextStep`
-// candidates the agent cannot actually reach without jumping a building corner.
-
-// Fast bearing lookup: uses precomputed bearing map when available,
-// falls back to trig-based calculation otherwise.
-function getBearingFast(ctx, a, b, bearingMap) {
-  if (bearingMap) {
-    const bng = bearingMap.get?.(a + '::' + b);
-    if (typeof bng === 'number') return bng;
-  }
-  // Fallback: compute via lat/lng (expensive, called rarely for uncached pairs)
-  const s = _getCachedLatLng(a);
-  const e = _getCachedLatLng(b);
-  return _bearingFromLatLngs(s, e);
-}
 
 /**
  * Terrain-Aware Update
@@ -1469,11 +734,31 @@ export function initializeAffordanceMap(ctx) {
   }
 }
 
+/**
+ * Optimized Dijkstra Gradient (Production-Ready)
+ */
+function computeDijkstraGradient(ctx, targetCell) {
+  // _frictionObj may not be built yet during incremental gradient computation.
+  // Use it when available; otherwise build once from cellFrictionMap.
+  let frictionLookup = ctx._frictionObj;
+  if (!frictionLookup && ctx.cellFrictionMap) {
+    frictionLookup = Object.create(null);
+    for (const [k, v] of ctx.cellFrictionMap) frictionLookup[k] = v;
+    ctx._frictionObj = frictionLookup;
+  }
+
+  const getFriction = (n) => frictionLookup?.[n];
+
+  // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
+  // cellFrictionMap reference. Topology is static per mapping generation; only
+  // the per-cell friction (which can change via emergent wear) is rebuilt.
+  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
+  return computeDijkstra(targetCell, getFriction, graph);
+}
+
 // Expose real internals for testing/debugging (no test-only aliases).
 export {
-  getBestNextStep,
   computeDijkstraGradient,
-  getGradientDirection,
   runSingleAgentPath,
   estimateMaxTicks,
   precomputeOriginDestDistances,
