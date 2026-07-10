@@ -59,7 +59,7 @@ describe('agent batch parity (deterministic)', () => {
 
     const frictionLookup = normalizeFrictionEntries(frictionEntries);
     const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
-    const baselinePath = new Map();
+    const baselinePath = Object.create(null);
     const baselinePerTarget = Object.create(null);
 
     for (let p = 0; p < plan.length; p++) {
@@ -78,17 +78,34 @@ describe('agent batch parity (deterministic)', () => {
         const maxTicks = estimateMaxTicks(originCell, destCell, hexCount);
         for (let sim = 0; sim < count; sim++) {
           const simAgentId = `${originCell}:${destCell}:${sim}`;
-          const simPath = runAgentPath(originCell, destCell, destGradient, maxTicks, simAgentId, baselinePath, frictionLookup, affordanceLookup, null);
-          for (let k = 0; k < simPath.length; k++) {
-            const cell = simPath[k];
-            baselinePerTarget[destCell][cell] = (baselinePerTarget[destCell][cell] || 0) + 1;
-          }
+          // G (review11 §G): drive the baseline through the same inline
+          // accumulators the worker uses, so the parity assertion is unchanged.
+          runAgentPath(
+            originCell,
+            destCell,
+            destGradient,
+            maxTicks,
+            simAgentId,
+            baselinePath,
+            frictionLookup,
+            affordanceLookup,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            baselinePerTarget[destCell],
+            null,
+            false
+          );
         }
       }
     }
 
     const baselinePathObj = Object.create(null);
-    for (const [k, v] of baselinePath) baselinePathObj[k] = v;
+    for (const k in baselinePath) baselinePathObj[k] = baselinePath[k];
 
     expect(workerPathDesire).toEqual(baselinePathObj);
     expect(workerPerTarget).toEqual(baselinePerTarget);

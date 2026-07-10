@@ -383,10 +383,14 @@ export function buildSimulationGeoJSON(state, mapInstance) {
     // copy `_affordanceObj` (accumulated wear) when present, else the Map.
     const affordanceObj = state._affordanceObj;
     const friction = state.cellFrictionMap?.get(cell) ?? 0;
+    // `_affordanceObj` is the canonical `affordanceMap` view (a FrictionArrayMap
+    // in production, a Map in tests) — read it through the Map interface when
+    // available, falling back to bracket access for any legacy plain-object
+    // fixture. Either way prefer it over `affordanceMap` (the pre-sim snapshot).
     const affordance =
-      affordanceObj && typeof affordanceObj[cell] === 'number'
-        ? affordanceObj[cell]
-        : (state.affordanceMap?.get(cell) ?? 0);
+      (affordanceObj && typeof affordanceObj.get === 'function'
+        ? affordanceObj.get(cell)
+        : affordanceObj?.[cell]) ?? (state.affordanceMap?.get(cell) ?? 0);
 
     features.push({
       type: 'Feature',

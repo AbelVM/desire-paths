@@ -14,6 +14,8 @@ import {
 import {
   runGradientBatches,
   runAgentBatches,
+  runBuildMappingGraph,
+  runVisibilityBearingTask,
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
 } from './spatialWorker.js';
@@ -21,7 +23,6 @@ import {
 // is re-exported from there to keep a single definition.
 import { estimateMaxTicks } from './agentTasks.js';
 import {
-  computeDijkstra,
   getGradientGraph,
   gradientGet,
   gradientReachableCount,
@@ -306,41 +307,58 @@ export async function computeDesirePaths(state, mapInstance) {
   const hexes = state.cellFrictionMap.size;
   ensureGradientCacheFresh(state);
 
-  const mappingGen = state._mappingGeneration ?? 0;
-  if (!state._frictionObj || state._frictionSnapshotGen !== mappingGen) {
-    state._frictionObj = Object.create(null);
-    for (const [k, v] of state.cellFrictionMap) state._frictionObj[k] = v;
-    state._frictionSnapshotGen = mappingGen;
+  // J (review11 §J, option 1): the visibility/bearing CSR is the dominant
+  // steady-state memory cost at city scale (~2 GB at N=5e5, visionDepth=15).
+  // It is released at the end of this function; if a subsequent run needs it
+  // again we rebuild it lazily here (the same worker pipeline buildMapping
+  // uses) rather than holding it in memory forever. The rebuild is skipped
+  // unless the inputs needed to reproduce it are present, and any failure
+  // degrades gracefully to the (correct, slower) path-cell visibility path.
+  if (!state._visibilityBearingCSR && state.cellFrictionMap && state._viewHexes) {
+    try {
+      const mappingGraph = await runBuildMappingGraph(
+        state.cellFrictionMap,
+        state._viewHexes,
+        state._r1Adjacency || null
+      );
+      const csr = await runVisibilityBearingTask(
+        mappingGraph,
+        state._viewHexes,
+        state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth
+      );
+      state._visibilityBearingCSR = { gen: state._mappingGeneration ?? 0, ...csr };
+    } catch (err) {
+      try {
+        logger.warn('computeDesirePaths: lazy visibility CSR rebuild failed', err);
+      } catch (_e) {}
+      state._visibilityBearingCSR = null;
+    }
   }
-  // B: `_affordanceObj` is no longer pre-built by grid.js — materialize it lazily
-  // here from `affordanceMap` (the single source of truth at mapping time), gated
-  // on the mapping generation like `_frictionObj`. Once built it becomes the live
-  // working copy for the run: `updateAffordance`/`decayAffordance` and the wear
-  // pass below mutate it in place, so it must exist before the decay loop. It is
-  // dropped by clearComputeCaches on the next remap (bumping mappingGen), so a
-  // fresh remap always reseeds it from the rebuilt `affordanceMap`.
-  if (!state._affordanceObj || state._affordanceSnapshotGen !== mappingGen) {
-    state._affordanceObj = Object.create(null);
-    for (const [k, v] of state.affordanceMap) state._affordanceObj[k] = v;
-    state._affordanceSnapshotGen = mappingGen;
-  }
+
+  // I (review11 §I): `_frictionObj`/`_affordanceObj` are no longer separate
+  // N-entry plain-object copies of the canonical maps — they ARE the canonical
+  // FrictionArrayMap views (`cellFrictionMap`/`affordanceMap`). This removes the
+  // redundant 2× steady-state memory the old comments claimed to eliminate. Both
+  // are Map-like (get/set/has/size/keys/entries), so every consumer reads and
+  // writes them through the Map interface. They are re-seeded from the canonical
+  // views on every run (clearComputeCaches nulls them on remap), so a fresh
+  // mapping always reseeds them from the rebuilt maps.
+  if (state.cellFrictionMap) state._frictionObj = state.cellFrictionMap;
+  if (state.affordanceMap) state._affordanceObj = state.affordanceMap;
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same cell→layer-map
   // references), not a second copy — this avoids holding N object references in
   // a separate plain-object container at steady state.
-  if (!state._multiFrictionObj || state._multiFrictionSnapshotGen !== mappingGen) {
+  if (!state._multiFrictionObj) {
     state._multiFrictionObj = state.multiFrictionMap || Object.create(null);
-    state._multiFrictionSnapshotGen = mappingGen;
   }
 
   // Grass recovery between user-triggered simulation runs (not after wear in the
-  // same pass). Iterate the friction-object key set. decayAffordance reads/writes
-  // `_affordanceObj`.
-  if (state._frictionObj) {
-    for (const cell in state._frictionObj) {
-      decayAffordance(state, cell);
-    }
-  } else {
-    for (const cell of state.affordanceMap.keys()) {
+  // same pass). Iterate the canonical cell set — `cellFrictionMap` is always
+  // Map-like (a FrictionArrayMap in production, a Map in tests) — so this covers
+  // every cell that carries affordance state. decayAffordance reads/writes
+  // `_affordanceObj` (the same view).
+  if (state.cellFrictionMap) {
+    for (const cell of state.cellFrictionMap.keys()) {
       decayAffordance(state, cell);
     }
   }
@@ -642,6 +660,13 @@ export async function computeDesirePaths(state, mapInstance) {
   state._layerDataVersion = (state._layerDataVersion || 0) + 1;
   mapInstance?.updateLayers?.();
   state.flowsReady = true;
+
+  // J (review11 §J, option 1): release the visibility/bearing CSR now that the
+  // simulation has consumed it. It is the dominant steady-state memory cost at
+  // city scale and is no longer needed until the next run, where it is rebuilt
+  // lazily if required (see the top of this function). This trades the rebuild
+  // cost for a large steady-state memory win.
+  state._visibilityBearingCSR = null;
 }
 
 
@@ -651,19 +676,19 @@ export async function computeDesirePaths(state, mapInstance) {
  * LIGHT_PARK is easily worn (more wear)
  */
 function updateAffordance(ctx, cell, volume = 1) {
-  const friction = ctx._frictionObj?.[cell];
+  const friction = ctx._frictionObj?.get(cell);
 
   // Skip update for permanent infrastructure
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const resistanceFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 1.5 : 0.8;
-  const current = ctx._affordanceObj?.[cell] ?? 0.1;
+  const current = ctx._affordanceObj?.get(cell) ?? 0.1;
   const newVal = Math.min(
     SOFT_CAP,
     current + (volume * UPDATE_RATE) / (MAX_EXPECTED_VOLUME * resistanceFactor)
   );
 
-  if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
+  if (ctx._affordanceObj) ctx._affordanceObj.set(cell, newVal);
 }
 
 /**
@@ -672,18 +697,18 @@ function updateAffordance(ctx, cell, volume = 1) {
  * LIGHT_PARK recovers faster (path fades quickly)
  */
 function decayAffordance(ctx, cell) {
-  const friction = ctx._frictionObj?.[cell];
+  const friction = ctx._frictionObj?.get(cell);
 
   if (friction === FRICTION_COSTS.PAVEMENT || friction === FRICTION_COSTS.IMPASSABLE) return;
 
   const recoveryFactor = friction === FRICTION_COSTS.HEAVY_GRASS ? 0.5 : 1.5;
-  const current = ctx._affordanceObj?.[cell] ?? 0.1;
+  const current = ctx._affordanceObj?.get(cell) ?? 0.1;
   // Exponential decay: vegetation recovers quickly at first, then slows as
   // roots reestablish — producing a realistic non-linear persistence curve.
   // Heavy grass (recoveryFactor 0.5) decays slower than light park (1.5).
   const newVal = Math.max(0.1, current * Math.exp(-DECAY_RATE * recoveryFactor));
 
-  if (ctx._affordanceObj) ctx._affordanceObj[cell] = newVal;
+  if (ctx._affordanceObj) ctx._affordanceObj.set(cell, newVal);
 }
 
 /**
@@ -705,35 +730,12 @@ export function initializeAffordanceMap(ctx) {
     const { affordance } = classifyAffordance(friction);
     ctx.affordanceMap.set(cell, affordance);
 
-    if (ctx._affordanceObj) ctx._affordanceObj[cell] = affordance;
+    if (ctx._affordanceObj) ctx._affordanceObj.set(cell, affordance);
   }
-}
-
-/**
- * Optimized Dijkstra Gradient (Production-Ready)
- */
-function computeDijkstraGradient(ctx, targetCell) {
-  // _frictionObj may not be built yet during incremental gradient computation.
-  // Use it when available; otherwise build once from cellFrictionMap.
-  let frictionLookup = ctx._frictionObj;
-  if (!frictionLookup && ctx.cellFrictionMap) {
-    frictionLookup = Object.create(null);
-    for (const [k, v] of ctx.cellFrictionMap) frictionLookup[k] = v;
-    ctx._frictionObj = frictionLookup;
-  }
-
-  const getFriction = (n) => frictionLookup?.[n];
-
-  // Reuse the precomputed gradient graph (CSR adjacency) keyed by the stable
-  // cellFrictionMap reference. Topology is static per mapping generation; only
-  // the per-cell friction (which can change via emergent wear) is rebuilt.
-  const graph = getGradientGraph(ctx.cellFrictionMap, ctx._r1Adjacency, ctx._viewHexes);
-  return computeDijkstra(targetCell, getFriction, graph);
 }
 
 // Expose real internals for testing/debugging (no test-only aliases).
 export {
-  computeDijkstraGradient,
   estimateMaxTicks,
   precomputeOriginDestDistances,
 };

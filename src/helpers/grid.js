@@ -377,7 +377,11 @@ function mapCells(state, cells, surface) {
     }
     const fr = isFinite(min) ? min : 0;
     if (cellFrictionMap) cellFrictionMap.set(cell, fr);
-    if (frictionObj) frictionObj[cell] = fr;
+    // `_frictionObj` is the canonical `cellFrictionMap` view (I, review11 §I), so
+    // this write is redundant when the alias is in place and a safe no-op when
+    // it is still null during mapping (the canonical `cellFrictionMap` write
+    // above already updates the single source of truth).
+    if (frictionObj) frictionObj.set(cell, fr);
   }
 }
 

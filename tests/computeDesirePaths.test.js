@@ -324,11 +324,11 @@ describe('computeDesirePaths regression', () => {
     }
 
     const originCell = pathCells[0];
-    const before = ctx._affordanceObj[originCell];
+    const before = ctx.affordanceMap.get(originCell);
 
     await computeDesirePaths(ctx, ctx);
 
-    const after = ctx._cellState?.[originCell]?.affordance ?? ctx._affordanceObj?.[originCell];
+    const after = ctx._cellState?.[originCell]?.affordance ?? ctx.affordanceMap.get(originCell);
     expect(after).toBeGreaterThan(before);
   });
 });

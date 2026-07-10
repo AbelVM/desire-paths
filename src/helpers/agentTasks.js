@@ -592,12 +592,24 @@ function estimateMaxTicks(origin, dest, hexCount) {
   return Math.min(MAX_SIM_TICKS, pathBudget, globalBudget);
 }
 
-function recordTraversal(map, cell) {
-  // Support both plain objects and Map for backward compatibility with tests.
-  if (typeof map.set === 'function') {
-    map.set(cell, (map.get(cell) || 0) + 1);
-  } else {
-    map[cell] = (map[cell] || 0) + 1;
+// G (review11 §G): inline per-cell accumulation used by runAgentPath. Replaces
+// the old `simPath` array + post-run re-scan. `pathDesireMap`/`destContrib` are
+// plain objects (string-key → count); `accumulatedFootprints` is a Uint32Array(V)
+// indexed by `fpCellToIdx` when a graph is present, or a plain object keyed by
+// cell id in the (rare) no-graph path. All arguments are optional so the
+// function is a no-op for any accumulator that is absent. Module-level (allocated
+// once), so it adds no per-agent / per-tick closure churn.
+function _recordCell(cell, pathDesireMap, destContrib, accumulatedFootprints, fpCellToIdx, useAtomics) {
+  if (pathDesireMap) pathDesireMap[cell] = (pathDesireMap[cell] || 0) + 1;
+  if (destContrib) destContrib[cell] = (destContrib[cell] || 0) + 1;
+  if (fpCellToIdx) {
+    const gi = fpCellToIdx[cell];
+    if (gi !== undefined) {
+      if (useAtomics) Atomics.add(accumulatedFootprints, gi, 1);
+      else accumulatedFootprints[gi]++;
+    }
+  } else if (accumulatedFootprints) {
+    accumulatedFootprints[cell] = (accumulatedFootprints[cell] || 0) + 1;
   }
 }
 
@@ -639,7 +651,17 @@ function runAgentPath(
   // is therefore byte-identical to the old "always concat + read" behavior but
   // skips the string allocation + object read for the ~99% of ticks spent on
   // intermediate cells (millions of saved allocations per city-scale run).
-  nodeSet
+  nodeSet,
+  // G (review11 §G): the per-target contribution accumulator and the footprint
+  // index/atomic flag are passed in so each visited cell is recorded inline
+  // instead of being collected into a `simPath` array and re-iterated after the
+  // run. This removes the per-agent array allocation (up to `maxTicks` cell
+  // refs) and the post-run re-scan — the dominant per-agent GC source at city
+  // scale. The cell strings are shared `viewHexes` references, so only the array
+  // itself (not the strings) was wasted.
+  destContrib,
+  fpCellToIdx,
+  useAtomics
 ) {
   const params = simulationParams || SIMULATION_PARAMS;
   let simCurrent = originCell;
@@ -654,8 +676,11 @@ function runAgentPath(
       bearingMap,
       graph
     ) ?? getBearingFast(simCurrent, simTarget, bearingMap);
-  const simPath = [originCell];
-  if (pathDesireMap) recordTraversal(pathDesireMap, originCell);
+
+  // G: record the origin cell inline into the path-desire, per-target, and
+  // footprint accumulators (replaces `simPath.push(originCell)` +
+  // `recordTraversal`).
+  _recordCell(originCell, pathDesireMap, destContrib, accumulatedFootprints, fpCellToIdx, useAtomics);
 
   let stuckCount = 0;
   const STUCK_THRESHOLD = 3;
@@ -678,8 +703,7 @@ function runAgentPath(
     // Use dynamic distance check — eliminates stale precomputed distance bug
     if (distToTarget <= 1) {
       if (simTarget !== simCurrent) {
-        simPath.push(simTarget);
-        if (pathDesireMap) recordTraversal(pathDesireMap, simTarget);
+        _recordCell(simTarget, pathDesireMap, destContrib, accumulatedFootprints, fpCellToIdx, useAtomics);
       }
       break;
     }
@@ -725,8 +749,7 @@ function runAgentPath(
       // string-keyed plain-object read in the inner line-walk loop.
       const stepF = graph ? graphFriction(graph, stepCell) : frictionLookup[stepCell];
       if (typeof stepF === 'undefined' || stepF >= FRICTION_COSTS.IMPASSABLE) break;
-      simPath.push(stepCell);
-      if (pathDesireMap) recordTraversal(pathDesireMap, stepCell);
+      _recordCell(stepCell, pathDesireMap, destContrib, accumulatedFootprints, fpCellToIdx, useAtomics);
       lastReached = stepCell;
       if (stepCell === simTarget) {
         hitTarget = true;
@@ -741,9 +764,9 @@ function runAgentPath(
     simCurrent = lastReached;
     if (simCurrent === simTarget) break;
   }
-
-  return simPath;
 }
+
+
 
 export function computeAgentBatch({
   plan = [],
@@ -953,7 +976,10 @@ export function computeAgentBatch({
 
       for (let sim = 0; sim < count; sim++) {
         const simAgentId = `${originCell}:${destCell}:${sim}`;
-        const simPath = runAgentPath(
+        // G (review11 §G): pass the per-target contribution accumulator and the
+        // footprint index/atomic flag so runAgentPath records each visited cell
+        // inline — no `simPath` array is built or re-scanned afterwards.
+        runAgentPath(
           originCell,
           destCell,
           destGradientObj,
@@ -968,28 +994,11 @@ export function computeAgentBatch({
           originDestDistances,
           simulationParams,
           graph,
-          nodeSet
+          nodeSet,
+          perTargetContribs[destCell],
+          fpCellToIdx,
+          useAtomics
         );
-
-        for (let k = 0; k < simPath.length; k++) {
-          const cell = simPath[k];
-          perTargetContribs[destCell][cell] = (perTargetContribs[destCell][cell] || 0) + 1;
-          // Accumulate footprint: each visit increments the shared counter.
-          // This is what turns independent Monte-Carlo sampling into a true
-          // ABM where agents interact through accumulated terrain wear.
-          if (fpCellToIdx) {
-            const gi = fpCellToIdx[cell];
-            if (gi !== undefined) {
-              // SAB atomic path: `Atomics.add` is the dynamics-safe way to share
-              // one global footprint across multiple agent workers (P1). The
-              // plain `++` is byte-identical for a single worker.
-              if (useAtomics) Atomics.add(abmFootprints, gi, 1);
-              else abmFootprints[gi]++;
-            }
-          } else {
-            abmFootprints[cell] = (abmFootprints[cell] || 0) + 1;
-          }
-        }
 
         processed++;
         if (processed % emitEvery === 0) {

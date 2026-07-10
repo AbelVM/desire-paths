@@ -4,7 +4,6 @@ import {
   clearGradientCache,
   clearComputeCaches,
   computeDesirePaths,
-  computeDijkstraGradient,
   estimateMaxTicks,
 } from '../src/helpers/compute.js';
 // The agent-path kernel now lives in agentTasks.js and is the single source of
@@ -14,7 +13,7 @@ import { SIMULATION_PARAMS } from '../src/helpers/constants.js';
 import { angleDiff } from '../src/helpers/bearing.js';
 import { latLngToCell, gridDisk } from 'h3-js';
 import { buildSimulationGeoJSON } from '../src/helpers/map.js';
-import { gradientGet, getGradientGraph } from '../src/helpers/dijkstra.js';
+import { gradientGet, getGradientGraph, computeDijkstra } from '../src/helpers/dijkstra.js';
 
 describe('angleDiff', () => {
   it('should return 0 for equal angles', () => {
@@ -145,16 +144,12 @@ describe('gradient cache helpers', () => {
 
 });
 
-describe('computeDijkstraGradient', () => {
+describe('computeDijkstra gradient', () => {
   it('should return gradient with target cell at distance 0', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const frictionMap = new Map([[h3, 1]]);
-    // Don't set _cellState so it uses cellFrictionMap directly
-    const map = {
-      cellFrictionMap: frictionMap,
-    };
-    const result = computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(frictionMap);
+    const result = computeDijkstra(h3, frictionMap, graph);
     expect(gradientGet(result, h3, graph)).toBe(0);
   });
 
@@ -167,12 +162,8 @@ describe('computeDijkstraGradient', () => {
     for (const n of neighbors) {
       frictionMap.set(n, 1);
     }
-    // Don't set _cellState so it uses cellFrictionMap directly
-    const map = {
-      cellFrictionMap: frictionMap,
-    };
-    const result = computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(frictionMap);
+    const result = computeDijkstra(h3, frictionMap, graph);
     expect(gradientGet(result, h3, graph)).toBe(0);
     // All neighbors should be reachable with distance = 1
     for (const n of neighbors) {
@@ -182,7 +173,7 @@ describe('computeDijkstraGradient', () => {
     }
   });
 
-  it('should use _frictionObj when available instead of cellFrictionMap', () => {
+  it('should build the gradient graph from the cellFrictionMap', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
     const neighbors = gridDisk(h3, 1);
     const frictionObj = { [h3]: 1 };
@@ -190,17 +181,11 @@ describe('computeDijkstraGradient', () => {
       frictionObj[n] = 1;
     }
     // The gradient graph is always built from `cellFrictionMap` (the stable
-    // AOI cell set); `_frictionObj` supplies the per-cell friction lookup.
-    // Mirror that here so the graph is non-empty (P2-12 removed the legacy
-    // no-graph Dijkstra fallback that previously masked a missing graph).
+    // AOI cell set); mirror that here so the graph is non-empty.
     const cellFrictionMap = new Map();
     for (const k in frictionObj) cellFrictionMap.set(k, frictionObj[k]);
-    const map = {
-      _frictionObj: frictionObj,
-      cellFrictionMap,
-    };
-    const result = computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(cellFrictionMap);
+    const result = computeDijkstra(h3, cellFrictionMap, graph);
     expect(gradientGet(result, h3, graph)).toBe(0);
     for (const n of neighbors) {
       if (n !== h3) {
@@ -217,24 +202,18 @@ describe('computeDijkstraGradient', () => {
       [h3, 1],
       [neighborCell, 999999],
     ]);
-    // Don't set _cellState so it uses cellFrictionMap directly
-    const map = {
-      cellFrictionMap: frictionMap,
-    };
-    const result = computeDijkstraGradient(map, h3);
     const graph = getGradientGraph(frictionMap);
+    const result = computeDijkstra(h3, frictionMap, graph);
     expect(gradientGet(result, h3, graph)).toBe(0);
     expect(gradientGet(result, neighborCell, graph)).toBe(Infinity);
   });
 
   it('should handle empty friction map', () => {
     const h3 = latLngToCell(40.4169, -3.7035, 15);
-    const map = {
-      cellFrictionMap: new Map(),
-    };
-    const result = computeDijkstraGradient(map, h3);
-    const graph = getGradientGraph(new Map());
+    const frictionMap = new Map();
+    const graph = getGradientGraph(frictionMap);
     // Target cell is not in the (empty) navigable graph, so it is unreachable.
+    const result = computeDijkstra(h3, frictionMap, graph);
     expect(gradientGet(result, h3, graph)).toBe(Infinity);
   });
 });

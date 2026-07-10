@@ -281,14 +281,14 @@ function splitIntoBalancedChunks(items, chunkCount, costFn) {
   return chunks.filter((c) => c.length > 0);
 }
 
-  // Flatten large payloads for cheaper structured-clone by converting plain
-  // friction/affordance lookup objects into transferable typed-array
-  // representations. `frictionEntries` was already flattened; extend the same
-  // treatment to `affordanceEntries` (S4) so the agent-batch worker no
-  // longer structured-clones a second N-entry plain object on every run.
-  function flattenPayloadAndTransfers(payload) {
-    if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
-    function flattenOne(fe) {
+// Flatten large payloads for cheaper structured-clone by converting plain
+// friction/affordance lookup objects into transferable typed-array
+// representations. `frictionEntries` was already flattened; extend the same
+// treatment to `affordanceEntries` (S4) so the agent-batch worker no
+// longer structured-clones a second N-entry plain object on every run.
+function flattenPayloadAndTransfers(payload) {
+  if (!payload || typeof payload !== 'object') return { payload, transfer: [] };
+  function flattenOne(fe) {
     if (!fe || typeof fe !== 'object') return null;
     // Already flattened — nothing to do.
     if (
@@ -320,8 +320,8 @@ function splitIntoBalancedChunks(items, chunkCount, costFn) {
     newPayload = Object.assign({}, newPayload, { affordanceEntries: aFlat.flat });
     transfer = transfer.concat(aFlat.transfer);
   }
-    return { payload: newPayload, transfer };
-  }
+  return { payload: newPayload, transfer };
+}
 
 function mergeFastScanEntries(target, source) {
   const sourceKeys = Object.keys(source);
