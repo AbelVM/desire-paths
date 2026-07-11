@@ -1571,6 +1571,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (!container) return;
     container.classList.toggle('collapsed', collapsed);
     uiState.panelToggleBtn?.setAttribute('aria-pressed', String(!collapsed));
+    // On mobile the legend is parked top-right; hide it while the panel is open
+    // so it never peeks out from behind the panel. Scoped to mobile via CSS.
+    document.body.classList.toggle('panel-open', !collapsed);
   };
 
   if (uiState.panelToggleBtn) {

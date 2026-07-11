@@ -644,8 +644,8 @@ html {
   }
 
   .panel-tab-content {
-    height: min(54dvh, 460px);
-    min-height: 280px;
+    height: min(70dvh, 540px);
+    min-height: 300px;
   }
 
   .btn-group .btn {
@@ -2414,5 +2414,42 @@ html {
   .se-tool {
     width: 34px;
     height: 34px;
+  }
+
+  /* The centered bottom toolbar is full-width on mobile and collides with the
+     bottom-right legend, and the panel lives at the top-left. Park the legend
+     at the top-right, just below the collapsed geocoder. Hide it whenever the
+     panel is open so it never peeks out from behind the panel. Key the hide off
+     the panel-container's own .collapsed state (a following sibling) as well as
+     body.panel-open, so it tracks the panel reliably on mobile. */
+  .legend {
+    top: 84px;
+    bottom: auto;
+    left: auto;
+    right: 16px;
+    width: min(254px, calc(100vw - 32px));
+  }
+
+  .panel-container:not(.collapsed) ~ .legend,
+  body.panel-open .legend {
+    display: none;
+  }
+
+  /* Simulation panel: keep the desktop behaviour — the disclosure grows and
+     scrolls internally while the Run controls stay pinned at the bottom. This
+     stops the advanced-parameter body from overlapping the CTA buttons (which
+     happened when the whole panel scrolled with a sticky Run). The panel itself
+     can still scroll as a fallback on very short viewports. */
+  #panel-simulation {
+    overflow-y: auto;
+  }
+
+  #simulation-params-disclosure {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #simulation-params-disclosure[open] {
+    overflow-y: auto;
   }
 }
