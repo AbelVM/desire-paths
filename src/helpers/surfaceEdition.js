@@ -139,6 +139,14 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     if (draw && selectedId) {
       draw.removeFeatures([selectedId]);
       selectedId = null;
+      // If that was the last polygon, select mode has nothing left to act on —
+      // deactivate it (and any other active tool) so the map returns to free
+      // node placement.
+      const hasFeatures = draw
+        .getSnapshot()
+        .some((f) => f.geometry?.type === 'Polygon');
+      if (!hasFeatures && currentMode) setMode(null);
+      syncEditButtons();
     } else {
       toast('Select a surface first to delete it', 'warning');
     }
