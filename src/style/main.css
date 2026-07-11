@@ -2354,6 +2354,47 @@ html {
   background: var(--border);
 }
 
+/* ── Mode affordance: floating mode badge (mobile-safe) ───────
+   A detached pill that floats above the edition toolbar (positioned via JS so
+   the toolbar never resizes). Avoids the top-center toast zone. It is an
+   aria-live region. */
+.se-mode-badge {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 120px; /* overridden by JS to sit above the toolbar */
+  z-index: 901; /* above the toolbar (900), below toasts (1000) */
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--card-bg-start-rgb), 0.9),
+    rgba(var(--card-bg-end-rgb), 0.98)
+  );
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px) saturate(1.08);
+  white-space: nowrap;
+}
+
+.se-mode-badge.is-visible {
+  display: inline-flex;
+}
+
+.se-mode-badge svg,
+.se-mode-badge [data-lucide] {
+  width: 14px;
+  height: 14px;
+}
+
 @media (max-width: 599px) {
   .surface-edition {
     bottom: 12px;

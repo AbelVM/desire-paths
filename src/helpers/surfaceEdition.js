@@ -196,6 +196,44 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   bar.appendChild(toolRow);
   document.body.appendChild(bar);
 
+  // ── Mode affordance: floating mode badge ────────────────────
+  // A detached pill that floats above the edition toolbar (not inside it, so
+  // the toolbar never resizes). Mobile-safe (no cursor needed) and clear of the
+  // top-center toast zone. It is an aria-live region for screen readers.
+  const modeBadge = document.createElement('div');
+  modeBadge.className = 'se-mode-badge';
+  modeBadge.setAttribute('role', 'status');
+  modeBadge.setAttribute('aria-live', 'polite');
+  document.body.appendChild(modeBadge);
+
+  // Keep the badge pinned a fixed gap above the toolbar, recomputed on resize
+  // since the toolbar's height changes between desktop and mobile breakpoints.
+  const positionModeBadge = () => {
+    const r = bar.getBoundingClientRect();
+    modeBadge.style.bottom = `${window.innerHeight - r.top + 8}px`;
+  };
+  positionModeBadge();
+  window.addEventListener('resize', positionModeBadge);
+
+  function updateModeBadge(mode) {
+    if (!mode) {
+      modeBadge.classList.remove('is-visible');
+      modeBadge.textContent = '';
+      return;
+    }
+    const t = drawTools.find((d) => d.mode === mode);
+    const icon = mode === 'select' ? 'mouse-pointer-2' : t ? t.icon : 'pen-tool';
+    const label = mode === 'select' ? 'Editing surface' : `Drawing · ${t ? t.label : mode}`;
+    modeBadge.innerHTML = `<i data-lucide="${icon}" aria-hidden="true"></i><span>${label}</span>`;
+    modeBadge.classList.add('is-visible');
+    positionModeBadge();
+    try {
+      createIcons({ icons, attrs: { 'stroke-width': 1.8, color: 'currentColor' } });
+    } catch {
+      /* icons are decorative; ignore if the runtime is unavailable */
+    }
+  }
+
   // Clicking anywhere in the main UI panel deactivates the current drawing
   // mode (returns to "none"). The Surface Edition toolbar lives on <body>,
   // outside the panel, so interacting with it never triggers this.
@@ -233,6 +271,10 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     // drawing modes keep the crosshair, while Select mode computes its own
     // pointer/grab/move cursor (see the select-mode mousemove handler below).
     map._surfaceMode = mode;
+    // Show the floating mode badge whenever a Surface Edition mode is active so
+    // the user can tell drawing/editing apart from free node placement. Cleared
+    // when the mode is deactivated (mode === null).
+    updateModeBadge(mode);
     for (const [m, b] of modeButtons) {
       const on = m === mode;
       b.classList.toggle('is-active', on);
