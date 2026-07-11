@@ -32,6 +32,9 @@
   --text: #e6eef2;
   --muted: #8aa3b0;
   --muted-rgb: 138, 163, 176;
+  /* Brighter muted — used for enabled button text/icons so they read as
+     active and stay distinct from dimmed (disabled) buttons. */
+  --muted-bright: #adc2d0;
   --text-strong: #ffffff;
   --text-dim: rgb(from var(--text) r g b / 0.72);
   --muted-weak: rgb(from var(--muted-rgb) r g b / 0.68);
@@ -266,7 +269,7 @@ html {
   border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(var(--white-rgb), 0.03);
-  color: var(--muted);
+  color: var(--muted-bright);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -707,7 +710,7 @@ html {
   padding: 7px 12px;
   border-radius: 999px;
   background: rgba(var(--white-rgb), 0.03);
-  color: var(--muted);
+  color: var(--muted-bright);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -824,7 +827,7 @@ html {
   padding-inline: 12px;
   border-radius: 999px;
   background: rgba(var(--white-rgb), 0.03);
-  color: var(--muted);
+  color: var(--muted-bright);
   font-weight: 600;
   font-size: 12px;
   border: 1px solid var(--border);
@@ -982,6 +985,7 @@ html {
 .btn-segment:disabled {
   background: rgba(var(--white-rgb), 0.01);
   border-color: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
 }
 
 /* ── Accent / Ghost / Danger buttons (mt-router style) ─── */
@@ -1008,6 +1012,10 @@ html {
 .btn-ghost:hover:not(:disabled) {
   background: rgba(var(--white-rgb), 0.08);
   color: var(--text-strong);
+}
+
+.btn-ghost:disabled {
+  color: var(--muted);
 }
 
 .btn-danger {
@@ -1070,6 +1078,10 @@ html {
   background: rgba(var(--white-rgb), 0.08);
   color: var(--text-strong);
   box-shadow: 0 12px 40px rgba(var(--black-rgb), 0.3);
+}
+
+.btn-group .btn.btn-ghost:disabled {
+  color: var(--muted);
 }
 
 .btn-group .btn.btn-danger {
@@ -1168,6 +1180,13 @@ html {
 
 .legend-icon-button.is-active .toggle-icon {
   transform: rotate(360deg);
+}
+
+.legend-icon-button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 #friction-legend-body[hidden] {
@@ -1948,7 +1967,7 @@ html {
   margin-right: 4px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--muted-bright);
   line-height: 1;
 }
 
@@ -2175,7 +2194,7 @@ html {
   border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(var(--white-rgb), 0.03);
-  color: var(--muted);
+  color: var(--muted-bright);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -2255,7 +2274,7 @@ html {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(var(--white-rgb), 0.03);
-  color: var(--muted);
+  color: var(--muted-bright);
   cursor: pointer;
   transition:
     transform 140ms ease,
@@ -2286,7 +2305,7 @@ html {
 }
 
 .se-tool:disabled {
-  color: var(--border);
+  color: var(--muted);
   background: rgba(var(--white-rgb), 0.02);
   border-color: var(--border);
   opacity: 0.5;
