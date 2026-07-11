@@ -212,6 +212,14 @@ html {
   cursor: wait !important;
 }
 
+/* Move — hovering an editable vertex/midpoint of a selected surface */
+#map.map-cursor-move,
+#map.map-cursor-move canvas,
+#map.map-cursor-move .maplibregl-canvas,
+#map.map-cursor-move .maplibregl-canvas-container {
+  cursor: move !important;
+}
+
 /* ── Panel ─────────────────────────────────────────────── */
 
 .panel {

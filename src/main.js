@@ -247,7 +247,8 @@ export function setMapCursor(mapInstance, cursor) {
     'map-cursor-grab',
     'map-cursor-grabbing',
     'map-cursor-wait',
-    'map-cursor-crosshair'
+    'map-cursor-crosshair',
+    'map-cursor-move'
   );
   if (cursor) {
     target.classList.add(`map-cursor-${cursor}`);
@@ -401,10 +402,14 @@ const init = () => {
     // During computation, always show wait cursor regardless of hover target
     if (desireMap.isComputing) return;
 
-    // While a Surface Edition draw/select mode is active, terra-draw owns the
-    // map and the cursor should stay a crosshair (not a node grab cursor).
+    // While a Surface Edition mode is active, terra-draw owns the map. Drawing
+    // modes keep a crosshair (not a node grab cursor). Select mode computes its
+    // own pointer/grab/move cursor via surfaceEdition's mousemove handler, so
+    // leave it alone here.
     if (desireMap._surfaceEditActive) {
-      setMapCursor(desireMap, 'crosshair');
+      if (desireMap._surfaceMode !== 'select') {
+        setMapCursor(desireMap, 'crosshair');
+      }
       return;
     }
 
@@ -420,6 +425,10 @@ const init = () => {
   desireMap.on('mouseout', () => {
     if (desireMap.isComputing) {
       setMapCursorWait(desireMap, true);
+    } else if (desireMap._surfaceEditActive) {
+      // Drawing modes → crosshair; Select mode → pointer (nothing to grab
+      // until the pointer re-enters and is tested by surfaceEdition).
+      setMapCursor(desireMap, desireMap._surfaceMode === 'select' ? 'pointer' : 'crosshair');
     } else {
       setMapCursor(desireMap, 'crosshair');
     }

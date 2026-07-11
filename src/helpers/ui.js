@@ -1605,7 +1605,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   // underlying friction field. Initialised last so the toast/state helpers above
   // are all in scope.
   try {
-    initSurfaceEdition(map, { showToast: showToastNotification });
+    initSurfaceEdition(map, { showToast: showToastNotification, setMapCursor });
   } catch (err) {
     console.error('[ui] Surface Edition failed to start:', err);
   }

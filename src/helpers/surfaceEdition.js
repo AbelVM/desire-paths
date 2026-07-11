@@ -34,9 +34,12 @@ function classOf(feature) {
  * lucide icons and returns a small control handle.
  *
  * @param {object} map - the DesireMap proxy (exposes `.state` and `.getRawMap()`)
- * @param {{ showToast?: (msg: string, type?: string, dur?: number) => void }} opts
+ * @param {{
+ *   showToast?: (msg: string, type?: string, dur?: number) => void,
+ *   setMapCursor?: (mapInstance: object, cursor: string | null) => void,
+ * }} opts
  */
-export function initSurfaceEdition(map, { showToast } = {}) {
+export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   const toast = typeof showToast === 'function' ? showToast : () => { };
   const state = map.state;
   const rawMap = typeof map.getRawMap === 'function' ? map.getRawMap() : map;
@@ -226,6 +229,10 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     // remain fully interactive and terra-draw's select mode is just a harmless
     // fallback (no polygon can be selected without the Select tool active).
     map._surfaceEditActive = !!mode;
+    // Track the specific active surface mode so main.js can decide the cursor:
+    // drawing modes keep the crosshair, while Select mode computes its own
+    // pointer/grab/move cursor (see the select-mode mousemove handler below).
+    map._surfaceMode = mode;
     for (const [m, b] of modeButtons) {
       const on = m === mode;
       b.classList.toggle('is-active', on);
@@ -241,10 +248,23 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     if (mode && mode !== 'select') toast(`Draw mode: ${mode}`, 'info', 1500);
     // Surface class buttons only make sense once a drawing mode is active.
     syncClassButtons();
-    // Crosshair cursor while any draw/select mode is active; cleared when the
-    // mode is deactivated so the map restores its normal (node) cursor.
-    const container = rawMap.getContainer();
-    if (container) container.classList.toggle('map-cursor-crosshair', !!mode);
+    // Cursor while a tool is active; cleared when the mode is deactivated so
+    // the map restores its normal (node) cursor. Route through the shared
+    // `setMapCursor` helper (same one the node-pin management uses for
+    // add/grab/drag) so it clears any lingering node-pin cursor classes
+    // (grab/grabbing) first. A plain classList.toggle would leave those in
+    // place, and because every cursor rule in main.css is `!important` with
+    // grab/grabbing declared after crosshair, the node cursor would win and
+    // override the expected tool cursor.
+    //   • drawing modes → crosshair (to place points)
+    //   • select mode    → pointer until a polygon is selected (the per-move
+    //                       pointer/grab/move logic lives in the select-mode
+    //                       mousemove handler below)
+    if (setMapCursor) {
+      if (!mode) setMapCursor(rawMap, null);
+      else if (mode === 'select') setMapCursor(rawMap, 'pointer');
+      else setMapCursor(rawMap, 'crosshair');
+    }
   }
 
   // Surface class buttons only matter when actively drawing a new shape. They
@@ -266,7 +286,8 @@ export function initSurfaceEdition(map, { showToast } = {}) {
   }
 
   // Enable the edit/action buttons only when at least one painted polygon
-  // exists; otherwise select / delete / clear have nothing to act on.
+  // exists; otherwise select / clear have nothing to act on. The delete button
+  // is gated separately on an actual selection (see below).
   function syncEditButtons() {
     let hasFeatures = false;
     if (draw) {
@@ -277,8 +298,9 @@ export function initSurfaceEdition(map, { showToast } = {}) {
       }
     }
     selectBtn.disabled = !hasFeatures;
-    deleteBtn.disabled = !hasFeatures;
     clearBtn.disabled = !hasFeatures;
+    // Delete is only meaningful when a polygon is currently selected.
+    deleteBtn.disabled = !selectedId;
   }
 
   // ── terra-draw initialisation (non-fatal) ────────────────────
@@ -351,9 +373,11 @@ export function initSurfaceEdition(map, { showToast } = {}) {
   // ── Event wiring ──────────────────────────────────────────────
   draw.on('select', (id) => {
     selectedId = id;
+    syncEditButtons();
   });
   draw.on('deselect', () => {
     selectedId = null;
+    syncEditButtons();
   });
 
   // Painting is deferred to the `finish` event so nothing is triggered while a
@@ -457,6 +481,69 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     const hit = pickPolygon(ll.lng, ll.lat);
     if (hit) draw.selectFeature(hit.id);
     else if (selectedId) draw.deselectFeature(selectedId);
+  });
+
+  // ── Select-mode cursor ───────────────────────────────────────
+  // In Select mode the cursor reflects what sits under the pointer so the user
+  // can tell what an action will do before clicking:
+  //   • nothing selected yet              → pointer
+  //   • outside the selected polygon     → pointer
+  //   • over the selected polygon body   → grab   (drag to move the shape)
+  //   • over an editable vertex/midpoint → move   (drag to reshape)
+  // Drawing modes keep the crosshair (handled in main.js). Coalesce mousemove
+  // into one rAF like main.js does.
+  const SELECT_VERTEX_HIT_PX = 8;
+  // Editable points = the polygon's ring vertices plus the midpoints between
+  // them (terra-draw renders both as draggable handles in select mode).
+  function editablePoints(ring) {
+    const pts = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      pts.push(a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    }
+    return pts;
+  }
+  function updateSelectCursor(point) {
+    if (!setMapCursor || currentMode !== 'select' || !draw) return;
+    if (!selectedId) {
+      setMapCursor(rawMap, 'pointer');
+      return;
+    }
+    const feat = draw.getSnapshotFeature(selectedId);
+    const ring = feat?.geometry?.type === 'Polygon' ? feat.geometry.coordinates[0] : null;
+    if (!ring) {
+      setMapCursor(rawMap, 'pointer');
+      return;
+    }
+    // Over an editable vertex/midpoint → move
+    for (const [lng, lat] of editablePoints(ring)) {
+      const p = rawMap.project([lng, lat]);
+      if (Math.hypot(p.x - point.x, p.y - point.y) <= SELECT_VERTEX_HIT_PX) {
+        setMapCursor(rawMap, 'move');
+        return;
+      }
+    }
+    // Inside the selected polygon → grab (drag to move the whole shape)
+    const ll = rawMap.unproject([point.x, point.y]);
+    if (pointInRing(ll.lng, ll.lat, ring)) {
+      setMapCursor(rawMap, 'grab');
+      return;
+    }
+    // Otherwise → pointer
+    setMapCursor(rawMap, 'pointer');
+  }
+  let selectCursorPending = false;
+  let lastSelectPoint = null;
+  rawMap.on('mousemove', (e) => {
+    if (currentMode !== 'select') return;
+    lastSelectPoint = e.point;
+    if (selectCursorPending) return;
+    selectCursorPending = true;
+    requestAnimationFrame(() => {
+      selectCursorPending = false;
+      if (lastSelectPoint) updateSelectCursor(lastSelectPoint);
+    });
   });
 
   // ── Clear hook for the main "Clear map" button ───────────────
