@@ -2372,8 +2372,8 @@ html {
   border: 1px solid var(--border);
   background: linear-gradient(
     180deg,
-    rgba(var(--card-bg-start-rgb), 0.9),
-    rgba(var(--card-bg-end-rgb), 0.98)
+    rgba(var(--card-bg-start-rgb), 0.8),
+    rgba(var(--card-bg-end-rgb), 0.9)
   );
   color: var(--accent);
   font-size: 11px;
