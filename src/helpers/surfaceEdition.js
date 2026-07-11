@@ -12,23 +12,12 @@ import { createIcons, icons } from 'lucide';
 import { SURFACE_CLASSES, SURFACE_CLASS_BY_KEY } from './constants.js';
 import { applySurfaceOverride, removeSurfaceOverride, clearSurfaceEditions } from './grid.js';
 
-// Resolve the surface class for a terra-draw feature. While a shape is still
-// being drawn (before its class is assigned) it falls back to the first class so
-// it renders with a real color instead of blank.
+// Resolve the surface class for a terra-draw feature. A finished feature carries
+// its class in `properties.surfaceClass`; anything else falls back to the first
+// class so it renders with a real color instead of blank.
 function classOf(feature) {
   const key = feature?.properties?.surfaceClass;
   return SURFACE_CLASS_BY_KEY[key] || SURFACE_CLASSES[0];
-}
-
-// Per-feature styling: a translucent fill plus a significantly bolder/darker
-// stroke of the same hue (see SURFACE_CLASSES in constants.js).
-function makeDrawStyles() {
-  return {
-    fillColor: (f) => classOf(f).fill,
-    fillOpacity: 0.45,
-    outlineColor: (f) => classOf(f).stroke,
-    outlineWidth: 3,
-  };
 }
 
 // terra-draw keeps each feature's `id` at the top level. We resolve the clicked
@@ -58,6 +47,31 @@ export function initSurfaceEdition(map, { showToast } = {}) {
   let selectedId = null;
   let currentMode = null; // null = no tool selected
   let draw = null;
+
+  // Per-feature styling for the drawing tools. Unlike `classOf` (used for
+  // finished features), a shape that is still being drawn has no `surfaceClass`
+  // property yet, so it falls back to the *currently selected* class — the
+  // in-progress polygon renders in the chosen surface color instead of always
+  // looking like the first class. `currentSurfaceClass` is read at render time.
+  const liveClassOf = (feature) =>
+    SURFACE_CLASS_BY_KEY[feature?.properties?.surfaceClass || currentSurfaceClass] ||
+    SURFACE_CLASSES[0];
+  const liveDrawStyles = () => ({
+    fillColor: (f) => liveClassOf(f).fill,
+    fillOpacity: 0.45,
+    outlineColor: (f) => liveClassOf(f).stroke,
+    outlineWidth: 3,
+  });
+
+  // A painted surface only recolors the friction mesh once a mapping exists
+  // (i.e. after "Reveal desire lines" ran a fast-scan that populated
+  // `cellFrictionMap`). Before that there are no AOI hexes to color: calling
+  // `updateLayers` would compute the AOI H3 cells purely from the node pins'
+  // `aoi_polygon` and render every cell as the default (blue), which is exactly
+  // the premature-AOI bug we must avoid. Edits are still recorded in
+  // `state.surfaceEdits` and applied when the mapping is next built (see
+  // `applySurfaceEdits` in triggerFastScan).
+  const mappingBuilt = () => !!(state.cellFrictionMap && state.cellFrictionMap.size > 0);
 
   // ── Floating toolbar (center-bottom) — built first so it is always visible,
   // even if terra-draw fails to initialise below. ──────────────────────────
@@ -259,10 +273,10 @@ export function initSurfaceEdition(map, { showToast } = {}) {
   }
 
   // ── terra-draw initialisation (non-fatal) ────────────────────
-  const polygonMode = new TerraDrawPolygonMode({ styles: makeDrawStyles() });
-  const freehandMode = new TerraDrawFreehandMode({ styles: makeDrawStyles() });
-  const circleMode = new TerraDrawCircleMode({ styles: makeDrawStyles() });
-  const rectangleMode = new TerraDrawRectangleMode({ styles: makeDrawStyles() });
+  const polygonMode = new TerraDrawPolygonMode({ styles: liveDrawStyles() });
+  const freehandMode = new TerraDrawFreehandMode({ styles: liveDrawStyles() });
+  const circleMode = new TerraDrawCircleMode({ styles: liveDrawStyles() });
+  const rectangleMode = new TerraDrawRectangleMode({ styles: liveDrawStyles() });
   const selectMode = new TerraDrawSelectMode({
     // terra-draw's own click-to-select relies on its internal hit-testing
     // (featuresAtMouseEvent), which is blocked by the interleaved deck.gl
@@ -333,26 +347,40 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     selectedId = null;
   });
 
+  // Painting is deferred to the `finish` event so nothing is triggered while a
+  // polygon is still being drawn — terra-draw emits `change`/`update` on every
+  // vertex, but the surface must only be applied once the shape is complete (or
+  // edited in select mode). `finish` fires for both a completed draw
+  // (action 'draw') and post-draw edits (drag/resize/edit actions).
+  draw.on('finish', (id, context) => {
+    const feat = draw.getSnapshotFeature(id);
+    if (!feat || feat.geometry?.type !== 'Polygon') {
+      syncEditButtons();
+      return;
+    }
+    const sc = feat.properties?.surfaceClass || currentSurfaceClass;
+    // Persist the class on the feature so styling reads it directly.
+    if (feat.properties?.surfaceClass !== sc) {
+      draw.updateFeatureProperties(id, { surfaceClass: sc });
+    }
+    const count = applySurfaceOverride(state, feat, sc);
+    // Only repaint the friction mesh once a mapping exists (post-Reveal).
+    // Otherwise the edit is recorded and applied when the mapping is built.
+    if (mappingBuilt()) map.updateLayers?.();
+    if (context?.action === 'draw' && count > 0) {
+      toast(`Surface painted: ${SURFACE_CLASS_BY_KEY[sc].label}`, 'success');
+    }
+    syncEditButtons();
+  });
+
+  // `change` only handles deletions here (painting happens on `finish`). The
+  // in-progress `create`/`update` events fired while drawing must NOT paint or
+  // rebuild layers — doing so would compute and render the AOI hexes before the
+  // user has finished the polygon (and before Reveal has built a mapping).
   draw.on('change', (ids, type) => {
-    if (type === 'create' || type === 'update') {
-      let count = 0;
-      for (const id of ids) {
-        const feat = draw.getSnapshotFeature(id);
-        if (!feat || feat.geometry?.type !== 'Polygon') continue;
-        const sc = feat.properties?.surfaceClass || currentSurfaceClass;
-        // Persist the class on the feature so styling reads it directly.
-        if (feat.properties?.surfaceClass !== sc) {
-          draw.updateFeatureProperties(id, { surfaceClass: sc });
-        }
-        count += applySurfaceOverride(state, feat, sc);
-      }
-      map.updateLayers?.();
-      if (type === 'create' && count > 0) {
-        toast(`Surface painted: ${SURFACE_CLASS_BY_KEY[currentSurfaceClass].label}`, 'success');
-      }
-    } else if (type === 'delete') {
+    if (type === 'delete') {
       for (const id of ids) removeSurfaceOverride(state, id);
-      map.updateLayers?.();
+      if (mappingBuilt()) map.updateLayers?.();
     }
     syncEditButtons();
   });
