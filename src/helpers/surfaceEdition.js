@@ -106,10 +106,10 @@ export function initSurfaceEdition(map, { showToast } = {}) {
 
   // Group 1 — drawing tools
   const drawTools = [
-    { mode: 'polygon', icon: 'pentagon', label: 'Polygon' },
-    { mode: 'freehand', icon: 'pen-tool', label: 'Freehand' },
-    { mode: 'circle', icon: 'circle', label: 'Circle' },
-    { mode: 'rectangle', icon: 'square', label: 'Rectangle' },
+    { mode: 'polygon', icon: 'pentagon', label: 'Polygon', tip: 'Draw a polygon' },
+    { mode: 'freehand', icon: 'pen-tool', label: 'Freehand', tip: 'Draw freehand' },
+    { mode: 'circle', icon: 'circle', label: 'Circle', tip: 'Draw a circle' },
+    { mode: 'rectangle', icon: 'square', label: 'Rectangle', tip: 'Draw a rectangle' },
   ];
   const modeButtons = new Map();
   for (const t of drawTools) {
@@ -117,8 +117,9 @@ export function initSurfaceEdition(map, { showToast } = {}) {
     b.type = 'button';
     b.className = 'se-tool';
     b.dataset.mode = t.mode;
-    b.title = t.label;
-    b.setAttribute('aria-label', t.label);
+    b.dataset.baseTitle = t.tip;
+    b.title = t.tip;
+    b.setAttribute('aria-label', t.tip);
     b.setAttribute('aria-pressed', 'false');
     b.innerHTML = `<i data-lucide="${t.icon}" aria-hidden="true"></i>`;
     b.addEventListener('click', () => setMode(t.mode));
@@ -135,8 +136,9 @@ export function initSurfaceEdition(map, { showToast } = {}) {
   selectBtn.type = 'button';
   selectBtn.className = 'se-tool';
   selectBtn.dataset.mode = 'select';
-  selectBtn.title = 'Select / move';
-  selectBtn.setAttribute('aria-label', 'Select / move');
+  selectBtn.dataset.baseTitle = 'Select and edit or move a surface';
+  selectBtn.title = 'Select and edit or move a surface';
+  selectBtn.setAttribute('aria-label', 'Select and edit or move a surface');
   selectBtn.setAttribute('aria-pressed', 'false');
   selectBtn.innerHTML = `<i data-lucide="mouse-pointer-2" aria-hidden="true"></i>`;
   selectBtn.addEventListener('click', () => setMode('select'));
@@ -228,6 +230,13 @@ export function initSurfaceEdition(map, { showToast } = {}) {
       const on = m === mode;
       b.classList.toggle('is-active', on);
       b.setAttribute('aria-pressed', String(on));
+      // When a tool is the active one, its tooltip invites exiting that mode;
+      // otherwise it shows the tool's normal label.
+      b.title = on
+        ? m === 'select'
+          ? 'Exit selecting mode'
+          : 'Exit drawing mode'
+        : b.dataset.baseTitle;
     }
     if (mode && mode !== 'select') toast(`Draw mode: ${mode}`, 'info', 1500);
     // Surface class buttons only make sense once a drawing mode is active.

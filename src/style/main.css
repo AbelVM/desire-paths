@@ -2244,6 +2244,12 @@ html {
   background: var(--se-fill);
 }
 
+/* On hover, fill the swatch like the active state to preview the selection.
+   Placed before the disabled rule so disabled buttons stay hollow on hover. */
+.se-class:not(:disabled):hover .se-swatch {
+  background: var(--se-fill);
+}
+
 /* While disabled, drop the semantic surface colors and render the swatch in
    a muted neutral gray so the buttons read as inactive rather than
    color-coded. Placed after the active rule so it wins for disabled+active. */
@@ -2253,6 +2259,8 @@ html {
 }
 
 .se-class-label {
+  flex: 1 1 auto;
+  text-align: center;
   white-space: nowrap;
 }
 
