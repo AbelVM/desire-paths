@@ -210,6 +210,9 @@ function getPathScore(pathObj, h) {
 
 export function updateLayers(state, mapInstance) {
   const viewHexes = mapInstance.getHexes?.() ?? Array.from(state.cellFrictionMap?.keys() ?? []);
+  // No AOI / no cells yet (e.g. surface polygons drawn before any node exists)
+  // — nothing to render, so skip the layer rebuild instead of throwing.
+  if (!viewHexes || !viewHexes.length) return;
 
   // B: the Maps are the single source of truth at mapping/render time — we no
   // longer keep a full plain-object copy (`_frictionObj`/`_affordanceObj`) of

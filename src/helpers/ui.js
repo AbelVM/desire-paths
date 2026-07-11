@@ -8,6 +8,7 @@ import {
 } from './constants.js';
 import { terminateAllWorkers } from './spatialWorker.js';
 import { createIcons, icons } from 'lucide';
+import { initSurfaceEdition } from './surfaceEdition.js';
 
 function isFiniteLngLat(value) {
   return value && Number.isFinite(value.lng) && Number.isFinite(value.lat);
@@ -965,6 +966,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
+    // Wipe painted surfaces (terra-draw features + friction overrides).
+    map._clearSurfaceEditions?.();
     syncFlowReadout();
     syncSimulationUI();
   };
@@ -1147,6 +1150,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const handleDragStart = (e) => {
     if (!isFiniteLngLat(e.lngLat)) return;
 
+    // Don't start a node drag while a Surface Edition draw tool is active.
+    if (map._surfaceEditActive) return;
+
     // Don't intercept right-click — it would suppress the native contextmenu event
     if ((e.originalEvent?.button ?? 0) !== 0) return;
 
@@ -1228,6 +1234,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   const handleTouchStart = (e) => {
     if (!isFiniteLngLat(e.lngLat)) return;
     if (map.isComputing || touchDragState.active) return;
+    // Don't start a node drag while a Surface Edition draw tool is active.
+    if (map._surfaceEditActive) return;
 
     const containerRect = uiState.mapContainer?.getBoundingClientRect();
     if (!containerRect) return;
@@ -1592,6 +1600,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   // Expose uiState on map for external access if needed
   map.uiState = uiState;
+
+  // Surface Edition — terra-draw powered polygon painting that overrides the
+  // underlying friction field. Initialised last so the toast/state helpers above
+  // are all in scope.
+  try {
+    initSurfaceEdition(map, { showToast: showToastNotification });
+  } catch (err) {
+    console.error('[ui] Surface Edition failed to start:', err);
+  }
 
   map.placementWeight = clampWeight(map.placementWeight || 1);
   activateTab('panel-intro');

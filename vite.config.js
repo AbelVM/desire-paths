@@ -1,6 +1,21 @@
 import { defineConfig } from "vite";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
+
+// terra-draw and its maplibre adapter ship an `exports` map with only
+// `require` + `default` conditions (no `import`), which Vite's dev/esbuild
+// resolver cannot match for ESM imports. Alias both bare specifiers to their
+// explicit ESM builds so dev (`vite`) and the production build agree.
+const terraDrawEsm = fileURLToPath(
+  new URL("./node_modules/terra-draw/dist/terra-draw.module.js", import.meta.url)
+);
+const terraDrawMaplibreEsm = fileURLToPath(
+  new URL(
+    "./node_modules/terra-draw-maplibre-gl-adapter/dist/terra-draw-maplibre-gl-adapter.module.js",
+    import.meta.url
+  )
+);
 
 // Vite plugin: copy static files from public/ to dist/ during build
 function copyPublicFiles() {
@@ -30,6 +45,12 @@ function copyPublicFiles() {
 export default defineConfig({
   base: "./",
   plugins: [copyPublicFiles()],
+  resolve: {
+    alias: {
+      "terra-draw": terraDrawEsm,
+      "terra-draw-maplibre-gl-adapter": terraDrawMaplibreEsm,
+    },
+  },
   build: {
     minify: "terser",
     terserOptions: {

@@ -281,7 +281,7 @@ function createMockMap(extra = {}) {
   map.showAlertCard = vi.fn();
   map.syncSimulationUI = vi.fn();
   map.getHexes = () => mockHexes;
-  map.updateLayers = () => {};
+  map.updateLayers = () => { };
 
   return map;
 }
@@ -401,7 +401,7 @@ describe('grid.js', () => {
 
     it('should handle impassable friction values', async () => {
       const map = createMockMap();
-      map.updateLayers = () => {};
+      map.updateLayers = () => { };
       const { triggerFastScan } = await import('../src/helpers/grid.js');
       await triggerFastScan(map, map);
       // Check that impassable cells get IMPASSABLE affordance
@@ -1634,12 +1634,12 @@ describe('main.js', () => {
         unproject: () => ({ lng: 0, lat: 0 }),
         queryRenderedFeatures: () => [],
         getSource: () => null,
-        addSource: () => {},
-        addLayer: () => {},
-        addControl: () => {},
+        addSource: () => { },
+        addLayer: () => { },
+        addControl: () => { },
         fitBounds: vi.fn(),
         getCanvas: () => null,
-        on: () => {},
+        on: () => { },
       };
       const dm = new DesireMap(mockMap);
       expect(dm.simulationNodes).toEqual({});
@@ -1703,12 +1703,12 @@ describe('main.js', () => {
         unproject: () => ({ lng: 0, lat: 0 }),
         queryRenderedFeatures: () => [],
         getSource: () => null,
-        addSource: () => {},
-        addLayer: () => {},
-        addControl: () => {},
+        addSource: () => { },
+        addLayer: () => { },
+        addControl: () => { },
         fitBounds: vi.fn(),
         getCanvas: () => null,
-        on: () => {},
+        on: () => { },
       };
       const dm = new DesireMap(mockMap);
       dm.simulationNodes = { hex1: { type: 'origin', weight: 1 } };
@@ -1804,12 +1804,12 @@ describe('main.js', () => {
         unproject: () => ({ lng: 0, lat: 0 }),
         queryRenderedFeatures: () => [],
         getSource: () => null,
-        addSource: () => {},
-        addLayer: () => {},
-        addControl: () => {},
+        addSource: () => { },
+        addLayer: () => { },
+        addControl: () => { },
         fitBounds: vi.fn(),
         getCanvas: () => null,
-        on: () => {},
+        on: () => { },
       };
       const dm = new DesireMap(mockMap);
 
@@ -1872,12 +1872,12 @@ describe('main.js', () => {
         unproject: () => ({ lng: 0, lat: 0 }),
         queryRenderedFeatures: () => [],
         getSource: () => null,
-        addSource: () => {},
-        addLayer: () => {},
-        addControl: () => {},
+        addSource: () => { },
+        addLayer: () => { },
+        addControl: () => { },
         fitBounds: vi.fn(),
         getCanvas: () => null,
-        on: () => {},
+        on: () => { },
       };
       const dm = new DesireMap(mockMap);
 
@@ -2034,7 +2034,7 @@ describe('main.js', () => {
       dm.addControl({});
       dm.fitBounds([[0, 0], [1, 1]], { padding: 0 });
       dm.getCanvas();
-      dm.on('click', () => {});
+      dm.on('click', () => { });
 
       expect(getContainerSpy).toHaveBeenCalled();
       expect(getLayerSpy).toHaveBeenCalledWith('test');
@@ -2100,23 +2100,23 @@ describe('main.js', () => {
         unproject: () => ({ lng: 0, lat: 0 }),
         queryRenderedFeatures: () => [],
         getSource: () => null,
-        addSource: () => {},
-        addLayer: () => {},
-        addControl: () => {},
+        addSource: () => { },
+        addLayer: () => { },
+        addControl: () => { },
         fitBounds: vi.fn(),
         getCanvas: () => null,
-        on: () => {},
+        on: () => { },
         getHexes: () => mockHexes,
-        triggerFastScan: async () => {},
-        mapPolygonCells: () => {},
-        mapLineCells: () => {},
-        renderInterfacePins: () => {},
-        updateLayers: () => {},
-        clearLayers: () => {},
-        computeDesirePaths: async () => {},
-        initializeAffordanceMap: () => {},
-        _showAlertCard: () => {},
-        _syncSimulationUI: () => {},
+        triggerFastScan: async () => { },
+        mapPolygonCells: () => { },
+        mapLineCells: () => { },
+        renderInterfacePins: () => { },
+        updateLayers: () => { },
+        clearLayers: () => { },
+        computeDesirePaths: async () => { },
+        initializeAffordanceMap: () => { },
+        _showAlertCard: () => { },
+        _syncSimulationUI: () => { },
       };
       const dm = new DesireMap(mockMap);
 
@@ -2149,11 +2149,11 @@ describe('main.js', () => {
       dm.initializeAffordanceMap();
 
       // showAlertCard - need to set _showAlertCard on the instance
-      dm._showAlertCard = () => {};
+      dm._showAlertCard = () => { };
       dm.showAlertCard('Test');
 
       // syncSimulationUI - need to set _syncSimulationUI on the instance
-      dm._syncSimulationUI = () => {};
+      dm._syncSimulationUI = () => { };
       dm.syncSimulationUI();
     });
   });

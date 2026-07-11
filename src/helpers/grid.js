@@ -1,5 +1,5 @@
 import { polygonToCells, latLngToCell, gridPathCells } from 'h3-js';
-import { FRICTION_COSTS, PATH_CACHE_MAX, POLY_CACHE_MAX, SIMULATION_PARAMS } from './constants.js';
+import { FRICTION_COSTS, AFFORDANCE, PATH_CACHE_MAX, POLY_CACHE_MAX, SIMULATION_PARAMS } from './constants.js';
 import {
   runFastScanTask,
   runAoiHexesTask,
@@ -71,7 +71,11 @@ function _polyKey(coords) {
 }
 
 export function getHexes(state, _mapInstance) {
-  const aoiKey = state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '';
+  // No AOI yet (e.g. surface polygons drawn before any start/end node exists) —
+  // nothing to generate hexes for. Return an empty array so callers skip
+  // gracefully (updateLayers bails on a zero-length hex set).
+  if (!state.aoi_polygon || !state.aoi_polygon.length) return [];
+  const aoiKey = _aoiKey(state.aoi_polygon);
   const cacheKey = `${aoiKey}:${SIMULATION_PARAMS.h3StrideResolution}`;
   // Return cached hexes when AOI and resolution haven't changed to avoid repeated expensive H3 calls
   if (state._cachedViewHexes && state._cachedAoiKey === cacheKey) return state._cachedViewHexes;
@@ -225,6 +229,15 @@ export async function triggerFastScan(state, mapInstance) {
     if (target) state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
   }
+
+  // Snapshot the freshly-built base friction/affordance so Surface Edition
+  // overrides can be reverted/restored without a full remap. `surfaceEdits`
+  // (painted polygons) persists across remaps because it is keyed by feature id
+  // with cached H3 cells; re-applying here keeps edits valid on the new AOI.
+  state._baseFrictionArr = frictionArr.slice();
+  state._baseAffArr = affArr.slice();
+  if (!state.surfaceEdits) state.surfaceEdits = new Map();
+  applySurfaceEdits(state);
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
   // so we don't hold a second N-entry container at steady state.
   state._multiFrictionObj = state.multiFrictionMap;
@@ -383,6 +396,106 @@ function mapCells(state, cells, surface) {
     // above already updates the single source of truth).
     if (frictionObj) frictionObj.set(cell, fr);
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Surface Edition — complete friction override from painted polygons
+// ─────────────────────────────────────────────────────────────
+//
+// Unlike `mapCells` (which takes the MAX friction per layer and can only raise
+// resistance), Surface Edition *completely overrides* the underlying surface of
+// every H3 cell inside a painted polygon — even when the new surface is easier
+// to walk than what it covers (e.g. paving a path across a meadow, or carving a
+// temporary path through a building). This is the core requirement: the drawn
+// polygon's surface class wins outright.
+//
+// Implementation: we keep a snapshot of the base friction/affordance taken right
+// after the fast-scan (`_baseFrictionArr` / `_baseAffArr`) plus an ordered list
+// of painted edits (`surfaceEdits: Map<featureId, { surfaceClass, cells }>`).
+// Re-applying is O(edited cells), not O(all cells): we restore only the cells
+// ever touched by an edit back to base, then stamp each edit in draw order (so
+// later paints win on overlap). Deleting a polygon just drops its entry and
+// re-applies, which restores the underlying surface for free.
+
+/**
+ * Recompute the effective friction/affordance from the base snapshot + all
+ * painted edits. No-op until a mapping has built the base arrays.
+ */
+export function applySurfaceEdits(state) {
+  const base = state._baseFrictionArr;
+  const baseAff = state._baseAffArr;
+  const cellFrictionMap = state.cellFrictionMap;
+  const affordanceMap = state.affordanceMap;
+  const cellToIdx = state.cellToIdx;
+  if (!base || !cellFrictionMap || !cellToIdx) return;
+
+  // Union of every cell touched by any edit = the only cells we ever mutate.
+  const dirty = new Set();
+  for (const edit of state.surfaceEdits.values()) {
+    for (const c of edit.cells) dirty.add(c);
+  }
+  // Restore previously-edited cells to their base values.
+  for (const cell of dirty) {
+    const i = cellToIdx.get(cell);
+    if (i !== undefined) {
+      cellFrictionMap.set(cell, base[i]);
+      if (affordanceMap) affordanceMap.set(cell, baseAff[i]);
+    }
+  }
+  // Stamp each edit in draw order (later paints override earlier ones).
+  for (const edit of state.surfaceEdits.values()) {
+    const fr = FRICTION_COSTS[edit.surfaceClass];
+    const aff = AFFORDANCE[edit.surfaceClass];
+    for (const cell of edit.cells) {
+      const i = cellToIdx.get(cell);
+      if (i !== undefined) {
+        cellFrictionMap.set(cell, fr);
+        if (affordanceMap) affordanceMap.set(cell, aff);
+      }
+    }
+  }
+
+  // Friction changed outside a remap — drop the cached gradient graph/topology
+  // so the next run reflects the new barriers (mirrors mapCells, C5).
+  invalidateGradientGraph();
+  clearGradientCache(state);
+  state._layerDataVersion = (state._layerDataVersion || 0) + 1;
+}
+
+/**
+ * Paint (or re-paint) a single terra-draw feature with a surface class.
+ * Returns the number of H3 cells covered.
+ */
+export function applySurfaceOverride(state, feature, surfaceClass) {
+  if (!feature || feature.geometry?.type !== 'Polygon') return 0;
+  const coords = feature.geometry.coordinates;
+  if (!coords || !coords.length) return 0;
+
+  let cells;
+  try {
+    cells = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
+  } catch {
+    return 0;
+  }
+  if (!state.surfaceEdits) state.surfaceEdits = new Map();
+  state.surfaceEdits.set(feature.id, { surfaceClass, cells });
+  applySurfaceEdits(state);
+  return cells.length;
+}
+
+/** Remove a painted feature's override and restore the underlying surface. */
+export function removeSurfaceOverride(state, id) {
+  if (!state.surfaceEdits) return;
+  state.surfaceEdits.delete(id);
+  applySurfaceEdits(state);
+}
+
+/** Wipe every painted surface and reset the friction field to the base map. */
+export function clearSurfaceEditions(state) {
+  state.surfaceEdits = new Map();
+  state._baseFrictionArr = undefined;
+  state._baseAffArr = undefined;
+  applySurfaceEdits(state);
 }
 
 // CSR-backed visibility + bearing index reconstruction lives in `bearingIndex.js`

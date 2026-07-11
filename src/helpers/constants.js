@@ -27,6 +27,24 @@ export const AFFORDANCE = {
 };
 
 /**
+ * Surface Edition classes — the 4 terrain types a user can paint onto the map.
+ *
+ * `friction` is sourced from FRICTION_COSTS (single source of truth). The
+ * `fill`/`stroke` hex colors mirror the walking-resistance legend in map.js
+ * (`baseLayerProps.getFillColor`): pavement #0096ff, lawn #a6d854, dense
+ * planting #27ae60, barrier #e74c3c. `stroke` is a significantly darker hue of
+ * `fill` so the polygon border reads as a bold outline against the base map.
+ */
+export const SURFACE_CLASSES = [
+  { key: 'PAVEMENT', label: 'Pavement', fill: '#0096ff', stroke: '#006bb3', friction: FRICTION_COSTS.PAVEMENT },
+  { key: 'LIGHT_PARK', label: 'Lawn / soft', fill: '#a6d854', stroke: '#6f9a2f', friction: FRICTION_COSTS.LIGHT_PARK },
+  { key: 'HEAVY_GRASS', label: 'Dense planting', fill: '#27ae60', stroke: '#1b7a43', friction: FRICTION_COSTS.HEAVY_GRASS },
+  { key: 'IMPASSABLE', label: 'Barrier', fill: '#e74c3c', stroke: '#a93226', friction: FRICTION_COSTS.IMPASSABLE },
+];
+
+export const SURFACE_CLASS_BY_KEY = Object.fromEntries(SURFACE_CLASSES.map((c) => [c.key, c]));
+
+/**
  * Single canonical friction → terrain-tier classifier.
  *
  * Returns one of 'impassable' | 'pavement' | 'light_park' | 'heavy_grass'.

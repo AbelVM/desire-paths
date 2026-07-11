@@ -26,6 +26,11 @@ class DesireMap {
 
   constructor(map) {
     this.#map = map;
+    // Public alias of the underlying maplibre Map. Exposed (instead of reading
+    // the private #map) so callers going through the Proxy get-trap — which
+    // binds methods to the receiver (the Proxy), breaking private-field access
+    // — can still reach the real map (e.g. terra-draw's adapter).
+    this.rawMap = map;
     // Single consolidated state bag (replace many delegated properties)
     this._state = Object.create(null);
 
@@ -111,6 +116,14 @@ class DesireMap {
           if (typeof mv === 'function') return mv.bind(mp);
           return mv;
         }
+        // Last-resort fallback to the state bag for properties stored there
+        // directly (e.g. private `_`-prefixed flags like `_surfaceEditActive`
+        // that the set trap writes into `_state` when they can't be set on the
+        // underlying map instance). Without this, such flags read back as
+        // `undefined` and guards that depend on them never fire.
+        if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target._state, prop)) {
+          return target._state[prop];
+        }
         return undefined;
       },
       set(target, prop, value) {
@@ -191,6 +204,13 @@ class DesireMap {
   renderInterfacePins(...args) {
     return renderInterfacePins(this._state, this, ...args);
   }
+  // Expose the underlying maplibre Map (terra-draw's adapter needs the real
+  // instance, not this Proxy). Returns the public `rawMap` field so it resolves
+  // correctly even when called through the Proxy get-trap (which binds `this`
+  // to the Proxy and cannot read the private `#map`).
+  getRawMap() {
+    return this.rawMap;
+  }
   updateLayers(...args) {
     return updateLayers(this._state, this, ...args);
   }
@@ -256,6 +276,7 @@ function updateCursorFromNodes(mapInstance, point) {
 const init = () => {
   const map = new maplibregl.Map(MAP_OPTIONS);
   const desireMap = new DesireMap(map);
+  if (typeof window !== 'undefined') window.__map = desireMap; // TEMP DEBUG
 
   desireMap.multiFrictionMap = new Map();
   desireMap.cellFrictionMap = new Map();
@@ -380,6 +401,13 @@ const init = () => {
     // During computation, always show wait cursor regardless of hover target
     if (desireMap.isComputing) return;
 
+    // While a Surface Edition draw/select mode is active, terra-draw owns the
+    // map and the cursor should stay a crosshair (not a node grab cursor).
+    if (desireMap._surfaceEditActive) {
+      setMapCursor(desireMap, 'crosshair');
+      return;
+    }
+
     lastMousePoint = e.point;
     if (mouseMovePending) return;
     mouseMovePending = true;
@@ -410,6 +438,9 @@ const init = () => {
       desireMap.dragOccurred = false;
       return;
     }
+
+    // While a Surface Edition draw tool is active, terra-draw owns the click.
+    if (desireMap._surfaceEditActive) return;
 
     let coords = e.lngLat;
     // Clicks on rendered features may not carry lngLat — skip them

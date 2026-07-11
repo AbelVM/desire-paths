@@ -2134,3 +2134,209 @@ html {
   font-size: 0.925rem;
   padding-left: 1.5em;
 }
+
+/* ── Surface Edition (terra-draw) floating toolbar ─────── */
+
+.surface-edition {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--card-bg-start-rgb), 0.9),
+    rgba(var(--card-bg-end-rgb), 0.98)
+  );
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px) saturate(1.08);
+  max-width: calc(100vw - 32px);
+}
+
+/* Surface class selector */
+.se-classes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.se-class {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--white-rgb), 0.03);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.se-class:hover {
+  transform: translateY(-1px);
+  color: var(--text);
+  border-color: rgba(var(--muted-rgb), 0.25);
+  background: rgba(var(--white-rgb), 0.06);
+}
+
+.se-class.is-active {
+  color: var(--text-strong);
+  border-color: var(--se-stroke);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--se-stroke);
+}
+
+.se-class:disabled {
+  color: var(--muted);
+  background: transparent;
+  border-color: rgba(var(--muted-rgb), 0.25);
+  box-shadow: none;
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none; /* no hover reaction while disabled */
+}
+
+.se-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: transparent;
+  border: 2px solid var(--se-stroke);
+  flex: 0 0 auto;
+}
+
+/* The swatch fill is shown only for the active (selected) surface class;
+   inactive swatches are hollow outlines so the row stays calm. */
+.se-class.is-active .se-swatch {
+  background: var(--se-fill);
+}
+
+/* While disabled, drop the semantic surface colors and render the swatch in
+   a muted neutral gray so the buttons read as inactive rather than
+   color-coded. Placed after the active rule so it wins for disabled+active. */
+.se-class:disabled .se-swatch {
+  background: rgba(var(--muted-rgb), 0.18);
+  border-color: rgba(var(--muted-rgb), 0.4);
+}
+
+.se-class-label {
+  white-space: nowrap;
+}
+
+/* Tool buttons */
+.se-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.se-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(var(--white-rgb), 0.03);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.se-tool:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--primary-rgb), 0.32);
+  background: rgba(var(--primary-rgb), 0.1);
+}
+
+.se-tool:hover svg,
+.se-tool:hover [data-lucide] {
+  color: var(--primary);
+}
+
+.se-tool.is-active {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.se-tool.is-active svg,
+.se-tool.is-active [data-lucide] {
+  color: var(--accent);
+}
+
+.se-tool:disabled {
+  color: var(--border);
+  background: rgba(var(--white-rgb), 0.02);
+  border-color: var(--border);
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none; /* no hover reaction while disabled */
+}
+
+.se-tool.se-danger:hover {
+  color: #fff;
+  border-color: rgba(234, 93, 93, 0.4);
+  background: rgba(234, 93, 93, 0.22);
+}
+
+.se-tool.se-danger:hover svg,
+.se-tool.se-danger:hover [data-lucide] {
+  color: var(--danger);
+}
+
+.se-tool svg,
+.se-tool [data-lucide] {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+}
+
+.se-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--border);
+}
+
+@media (max-width: 599px) {
+  .surface-edition {
+    bottom: 12px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .se-class-label {
+    display: none;
+  }
+
+  .se-class {
+    padding: 6px 8px;
+    justify-content: center;
+  }
+
+  .se-tool {
+    width: 34px;
+    height: 34px;
+  }
+}

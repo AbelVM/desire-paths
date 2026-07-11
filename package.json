@@ -41,7 +41,9 @@
     "@maplibre/maplibre-gl-geocoder": "^1.9.4",
     "h3-js": "^4.5.0",
     "lucide": "^1.24.0",
-    "maplibre-gl": "^5.24.0"
+    "maplibre-gl": "^5.24.0",
+    "terra-draw": "^1.31.2",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -49,11 +51,12 @@
     "@vitest/coverage-v8": "^4.1.10",
     "@vitest/web-worker": "^4.1.10",
     "cssnano": "^8.0.2",
-    "eslint": "^10.6.0",
+    "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.7.0",
     "postcss": "^8.5.16",
-    "prettier": "^3.9.4",
+    "prettier": "^3.9.5",
+    "puppeteer-core": "^25.3.0",
     "push-dir": "^0.4.1",
     "terser": "^5.49.0",
     "vite": "^8.1.4",
