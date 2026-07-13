@@ -13,7 +13,7 @@ import {
   deriveCellFrictionFromLayers,
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
-import { SIMULATION_PARAMS } from './constants.js';
+import { SIMULATION_PARAMS, AGENTS_PER_DESTINATION } from './constants.js';
 import { gradientGet, getGradientGraph } from './dijkstra.js';
 import { PowerRetry } from 'performance-helpers/powerRetry';
 import { PowerHistogram } from 'performance-helpers/powerHistogram';
@@ -664,6 +664,108 @@ async function runParallelAgentBatches(plan, agentPayload, gradientGraph, option
   return mergeAgentResults(results.map(normalizeAgentResult));
 }
 
+// ── Wave-ordered parallel agent batches ────────────────────────────────────
+// The fully-concurrent single-pass path (runParallelAgentBatches) shards the
+// whole plan across workers at once, so there is no "later agent" ordering and
+// the ABM positive feedback ("later agents follow earlier trails") is lost. To
+// recover it without giving up worker parallelism, we run the plan in K ordered
+// WAVES: within a wave the subset is sharded across workers and runs concurrently
+// (fast), but each wave awaits the previous one so later waves see the wear
+// earlier waves deposited into the shared SAB footprint. K is derived from the
+// simulation shape (no new tunable) — see computeWaveCount.
+
+// Split the plan into `waveCount` ordered waves such that EVERY wave contains
+// agents from EVERY origin/dual node (see splitPlanIntoWaves). Each wave is later
+// sharded across workers internally by runParallelAgentBatches.
+// Split a count `n` as evenly as possible into `k` non-negative integers that
+// sum to `n` (round-robin remainder). Used to divide one origin's agents across
+// waves so every wave keeps a share of every origin.
+function distributeCount(n, k) {
+  const out = new Array(k).fill(0);
+  if (n <= 0 || k <= 0) return out;
+  const base = Math.floor(n / k);
+  for (let i = 0; i < k; i++) out[i] = base;
+  let rem = n - base * k;
+  for (let i = 0; rem > 0; i = (i + 1) % k, rem--) out[i]++;
+  return out;
+}
+
+// Split the plan into `waveCount` ORDERED waves such that EVERY wave contains
+// agents from EVERY origin/dual node. Rather than chunking origins contiguously
+// (which would put disjoint origin sets in different waves), we divide each
+// origin's per-destination `assigned` counts round-robin across waves. Each wave
+// therefore holds the full set of origins, each with a reduced agent share, so
+// the ABM feedback is interleaved: later waves see wear from every origin's
+// earlier agents, not just a subset. `destCandidates`/`originCell` are preserved;
+// each wave's `totalVolume` is recomputed as the sum of its split `assigned`.
+export function splitPlanIntoWaves(plan, waveCount) {
+  if (!plan || plan.length === 0) return [];
+  waveCount = Math.max(1, waveCount);
+  if (waveCount === 1) {
+    return [plan.map((e) => ({ ...e, assigned: e.assigned ? e.assigned.slice() : e.assigned }))];
+  }
+  const waves = Array.from({ length: waveCount }, () => []);
+  for (const entry of plan) {
+    const destCandidates = entry.destCandidates || [];
+    const assigned = entry.assigned || [];
+    const perDest = destCandidates.map((_dc, i) => distributeCount(assigned[i] || 0, waveCount));
+    for (let w = 0; w < waveCount; w++) {
+      const waveAssigned = destCandidates.map((_dc, i) => perDest[i][w]);
+      let waveVolume = 0;
+      for (let i = 0; i < waveAssigned.length; i++) waveVolume += waveAssigned[i] || 0;
+      waves[w].push({
+        originCell: entry.originCell,
+        totalVolume: waveVolume,
+        destCandidates,
+        assigned: waveAssigned,
+      });
+    }
+  }
+  return waves;
+}
+
+// Derive the number of agent waves from the simulation shape. More origin/dual
+// nodes and a higher `agentsPerWeightUnit` both call for more (finer) waves so
+// that earlier agents' trails are visible to later ones. Bounded so the
+// between-wave synchronization barriers stay negligible. Pure function of the
+// plan length (active origin nodes) and the existing `agentsPerWeightUnit` param
+// — no new tunable is exposed.
+export function computeWaveCount(plan, options) {
+  const nodeCount = plan ? plan.length : 0;
+  if (nodeCount <= 1) return 1;
+  const apwu =
+    (options && options.simulationParams && options.simulationParams.agentsPerWeightUnit) ||
+    SIMULATION_PARAMS.agentsPerWeightUnit;
+  const BASE_ORIGINS_PER_WAVE = 4;
+  const MIN_WAVES = 1;
+  const MAX_WAVES = 16;
+  // Higher density (apwu) => fewer origins per wave => more waves, keeping each
+  // wave's agent volume roughly constant and balanced across waves.
+  const originsPerWave = Math.min(
+    nodeCount,
+    Math.max(1, Math.round(BASE_ORIGINS_PER_WAVE * (AGENTS_PER_DESTINATION / apwu)))
+  );
+  return Math.min(MAX_WAVES, Math.max(MIN_WAVES, Math.ceil(nodeCount / originsPerWave)));
+}
+
+// Run the plan in ordered waves, sharding each wave across workers concurrently
+// and synchronizing between waves so the shared SAB footprint accumulates. The
+// same `options.footprintBuffer` (SAB when cross-origin isolated) is reused
+// across waves, so wear from earlier waves is visible to later ones. Wave results
+// are summed via mergeAgentResults (pathDesire/perTargetContribs are additive).
+export async function runParallelAgentWaves(plan, agentPayload, gradientGraph, options) {
+  const waveCount = computeWaveCount(plan, options);
+  if (waveCount <= 1) {
+    return runParallelAgentBatches(plan, agentPayload, gradientGraph, options);
+  }
+  const waves = splitPlanIntoWaves(plan, waveCount);
+  const waveResults = [];
+  for (let w = 0; w < waves.length; w++) {
+    waveResults.push(await runParallelAgentBatches(waves[w], agentPayload, gradientGraph, options));
+  }
+  return mergeAgentResults(waveResults);
+}
+
 export async function runAgentBatches(
   plan,
   frictionSource,
@@ -778,19 +880,19 @@ export async function runAgentBatches(
 
   // The agent simulation is a true ABM: agents accumulate footprints into a single
   // shared `accumulatedFootprints` structure that boosts affordance for subsequent
-  // agents (paper §3.4 — friction/affordance updates). That shared state MUST be
-  // consistent across the whole run, so the plan cannot be split across multiple
-  // workers (each worker would receive an independent structured-clone and the ABM
-  // interaction would be lost). Running in a single execution context also removes
-  // the 2+ worker trigger that produced SIGILL with 2+ origins. Gradient batches
+  // agents (paper §3.4 — friction/affordance updates). That shared state MUST stay
+  // consistent, so the plan runs in ORDERED WAVES (runParallelAgentWaves): each wave
+  // shards its agent subset across workers and runs concurrently, but every wave
+  // awaits the previous one so later waves read the wear earlier waves committed to
+  // the shared SAB footprint. This preserves the ABM "later agents follow earlier
+  // trails" interaction while keeping worker parallelism. Gradient batches
   // (runGradientBatches) remain parallel because they are independent per destination.
   //
-  // S1: run the WHOLE plan in ONE `agent-batch` worker, off the main thread, so
-  // the UI never blocks on the ABM loop (thousands of agents × hundreds of ticks
-  // × getBestNextStep). A single worker == one execution context == consistent
-  // shared ABM state. When `Worker` is unavailable (Node tests, SSR) we fall back
-  // to running computeAgentBatch synchronously on the main thread — behavior is
-  // identical. The worker kernel is allocation-free (S3) so the hot path stays fast.
+  // S1: run off the main thread so the UI never blocks on the ABM loop (thousands of
+  // agents × hundreds of ticks × getBestNextStep). When `Worker` is unavailable (Node
+  // tests, SSR) we fall back to running computeAgentBatch synchronously on the main
+  // thread — behavior is identical. The worker kernel is allocation-free (S3) so the
+  // hot path stays fast.
   const useWorker = typeof Worker !== 'undefined';
   logger.debug(
       `runAgentBatches: dispatching agent-batches useWorker=${useWorker} planLength=${plan.length}`
@@ -837,7 +939,7 @@ export async function runAgentBatches(
 
   if (wantParallel) {
     try {
-      return await runParallelAgentBatches(plan, agentPayload, gradientGraph, options);
+      return await runParallelAgentWaves(plan, agentPayload, gradientGraph, options);
     } catch (err) {
       try {
         logger.warn('runAgentBatches: parallel dispatch failed, falling back to single worker', err);

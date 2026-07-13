@@ -6,6 +6,8 @@ import {
   mergeAgentResults,
   shardPlanForAgents,
   runAgentBatches,
+  splitPlanIntoWaves,
+  computeWaveCount,
 } from '../src/helpers/spatialWorker.js';
 import { latLngToCell, gridDisk, gridDistance } from 'h3-js';
 
@@ -177,5 +179,65 @@ describe('P1 SAB atomic shared-footprint parallelism', () => {
     // And the per-wave pathDesire is identical (wear-independent at w_a=0), while
     // the shared buffer proves the cross-wave accumulation happened.
     expect(wave1.pathDesire).toEqual(wave0.pathDesire);
+  });
+
+  it('splitPlanIntoWaves puts every origin/dual node in every wave', () => {
+    const origins = ['A', 'B', 'C', 'D'];
+    const dests = ['x', 'y', 'z'];
+    const plan = origins.map((o) => ({
+      originCell: o,
+      totalVolume: 12,
+      destCandidates: dests.map((d) => ({ dest: d })),
+      assigned: dests.map(() => 4),
+    }));
+
+    const waves = splitPlanIntoWaves(plan, 3);
+    expect(waves.length).toBe(3);
+
+    for (const wave of waves) {
+      // Every wave contains every origin.
+      const waveOrigins = wave.map((e) => e.originCell).sort();
+      expect(waveOrigins).toEqual(origins.slice().sort());
+      // Each wave entry keeps the same destination candidates.
+      for (const e of wave) {
+        expect(e.destCandidates.map((d) => d.dest)).toEqual(dests);
+      }
+    }
+
+    // Agent counts are preserved: sum of each origin's assigned across waves
+    // equals the original, and each wave's totalVolume equals its assigned sum.
+    for (let oi = 0; oi < origins.length; oi++) {
+      let acrossWaves = 0;
+      for (const wave of waves) {
+        const e = wave[oi];
+        const sum = e.assigned.reduce((a, b) => a + b, 0);
+        expect(e.totalVolume).toBe(sum);
+        acrossWaves += sum;
+      }
+      expect(acrossWaves).toBe(12);
+    }
+  });
+
+  it('computeWaveCount derives K from origin count and agentsPerWeightUnit', () => {
+    const plan = Array.from({ length: 8 }, (_, i) => ({ originCell: `o${i}` }));
+    // Default agentsPerWeightUnit (100) with 8 origins -> more than 1 wave.
+    const kDefault = computeWaveCount(plan, {});
+    expect(kDefault).toBeGreaterThan(1);
+    expect(kDefault).toBeLessThanOrEqual(16);
+
+    // A single origin collapses to a single wave (no ordering needed).
+    expect(computeWaveCount([{ originCell: 'only' }], {})).toBe(1);
+
+    // Higher agentsPerWeightUnit (denser) yields more (finer) waves.
+    const kDense = computeWaveCount(plan, {
+      simulationParams: { agentsPerWeightUnit: 400 },
+    });
+    expect(kDense).toBeGreaterThanOrEqual(kDefault);
+
+    // Lower agentsPerWeightUnit (sparser) yields fewer waves.
+    const kSparse = computeWaveCount(plan, {
+      simulationParams: { agentsPerWeightUnit: 25 },
+    });
+    expect(kSparse).toBeLessThanOrEqual(kDefault);
   });
 });
