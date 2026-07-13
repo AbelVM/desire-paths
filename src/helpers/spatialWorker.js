@@ -469,6 +469,48 @@ function runWorker(kind, payload) {
   );
 }
 
+/**
+ * Run a spatial worker task with the same resilience as the fast-scan chunks
+ * (review12 #4): retry with exponential backoff + jitter (PowerRetry), and fall
+ * back to a local main-thread compute if every worker attempt fails, so a single
+ * flaky/hung worker can no longer abort the whole mapping. Used by the
+ * mapping-graph / visibility / merge / gradient tasks, which previously had no
+ * retry/fallback (unlike fast-scan).
+ *
+ * On local-fallback failure we re-throw (rather than swallow) so the caller's
+ * existing error handling degrades gracefully — these tasks are monolithic, so a
+ * failed result is not safely mergeable like fast-scan's partial chunks.
+ */
+function runWorkerWithRetry(kind, payload) {
+  return PowerRetry.run(
+    () => runWorker(kind, payload),
+    {
+      maxAttempts: 3,
+      baseDelay: 200,
+      backoff: 'exponential',
+      jitter: true,
+      retryIf: () => true,
+      onRetry: (attempt, err) => {
+        try {
+          logger.warn(`spatialWorker: ${kind} retry`, { attempt, err });
+        } catch (_e) {}
+      },
+    }
+  ).catch((err) => {
+    try {
+      logger.warn(`spatialWorker: ${kind} retries exhausted, falling back to local compute`, err);
+    } catch (_e) {}
+    try {
+      return runLocally(kind, payload);
+    } catch (localErr) {
+      try {
+        logger.error(`spatialWorker: ${kind} local fallback failed`, localErr);
+      } catch (_e) {}
+      throw localErr;
+    }
+  });
+}
+
 export async function runGradientBatches(targets, frictionSource, options = {}) {
   if (!targets || targets.length === 0) return Object.create(null);
 
@@ -491,7 +533,7 @@ export async function runGradientBatches(targets, frictionSource, options = {}) 
   const chunks = splitIntoChunks(targets, workerCount);
   const results = await Promise.all(
     chunks.map((chunk) =>
-      runWorker('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes })
+      runWorkerWithRetry('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes })
     )
   );
 
@@ -1089,7 +1131,7 @@ export async function runBuildMappingGraph(frictionSource, viewHexes, r1Adjacenc
     frictionSource && typeof frictionSource.entries !== 'function'
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
-  return runWorker('mapping-graph', { frictionEntries, viewHexes, r1Adjacency });
+  return runWorkerWithRetry('mapping-graph', { frictionEntries, viewHexes, r1Adjacency });
 }
 
 /**
@@ -1125,7 +1167,7 @@ export async function runVisibilityBearingTask(graph, viewHexes, visionDepth) {
   const idxChunks = splitIntoChunks(allIdx, workerCount);
   const shards = await Promise.all(
     idxChunks.map((originIdx) =>
-      runWorker('visibility-bearing-indexed', { ...graph, visionDepth, originIdx })
+      runWorkerWithRetry('visibility-bearing-indexed', { ...graph, visionDepth, originIdx })
     )
   );
 
@@ -1179,7 +1221,7 @@ export async function runMergeCellsTask({
   // thread writes `multiFrictionMap` from its local `multiEntries` directly,
   // avoiding a 2× structured-clone of N objects. We also drop the returned
   // `cells` (N strings) — the caller iterates `viewHexes` by index instead.
-  const result = await runWorker('merge-cells', {
+  const result = await runWorkerWithRetry('merge-cells', {
     cells,
     cellFrictionEntries,
     blurUpdateMap,

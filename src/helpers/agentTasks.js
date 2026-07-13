@@ -487,7 +487,7 @@ function getBestNextStep(
           bestCandidate = n;
         }
       }
-      if (bestCandidate) return getBearingFast(curr, bestCandidate, bearingMap);
+      if (bestCandidate) return bestCandidate;
     }
     return null;
   }

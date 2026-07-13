@@ -94,7 +94,13 @@ function getMainThreadVisibilityBearing(state) {
   const viewHexes = state._viewHexes || null;
   let visibilityData = null;
   let bearingMap = null;
-  if (csr && viewHexes) {
+  // M3/#5 (review12): the worker path rebuilds the visibility + bearing indices
+  // IN-WORKER from the raw packed CSR + `viewHexes` (agentTasks.js), so the
+  // eagerly-built main-thread Proxies are only consumed by the non-worker
+  // fallback (Node/SSR, where `Worker` is undefined). Skipping the O(N)
+  // cellToIndex Map + two Proxies here when a Worker is available avoids the
+  // dominant per-run allocation the indexed kernel (S1, the default) never reads.
+  if (csr && viewHexes && typeof Worker === 'undefined') {
     const recon = reconstructVisibilityBearing(csr, viewHexes);
     visibilityData = recon.visibilityData.data;
     bearingMap = recon.bearingMap;
@@ -295,12 +301,20 @@ export async function computeDesirePaths(state, mapInstance) {
 
   // J (review11 §J, option 1): the visibility/bearing CSR is the dominant
   // steady-state memory cost at city scale (~2 GB at N=5e5, visionDepth=15).
-  // It is released at the end of this function; if a subsequent run needs it
-  // again we rebuild it lazily here (the same worker pipeline buildMapping
-  // uses) rather than holding it in memory forever. The rebuild is skipped
-  // unless the inputs needed to reproduce it are present, and any failure
-  // degrades gracefully to the (correct, slower) path-cell visibility path.
-  if (!state._visibilityBearingCSR && state.cellFrictionMap && state._viewHexes) {
+  // It is rebuilt lazily here when needed. review12 #6: cache it ACROSS runs and
+  // only rebuild when the inputs that determine it change — `mappingGeneration`
+  // (the friction topology / AOI) or `visionDepth` (the BFS radius). This avoids
+  // the full mapping-graph + visibility BFS rebuild on every run when neither
+  // input changed. The cached CSR carries its `gen` + `visionDepth` so the check
+  // is exact; a remap bumps `mappingGeneration`, and a visionDepth change is
+  // detected directly. Any failure degrades gracefully to the (correct, slower)
+  // path-cell visibility path.
+  const wantVisionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+  const csrGen = state._mappingGeneration ?? 0;
+  const cachedCsr = state._visibilityBearingCSR;
+  const csrValid =
+    cachedCsr && cachedCsr.gen === csrGen && cachedCsr.visionDepth === wantVisionDepth;
+  if (!csrValid && state.cellFrictionMap && state._viewHexes) {
     try {
       const mappingGraph = await runBuildMappingGraph(
         state.cellFrictionMap,
@@ -310,9 +324,9 @@ export async function computeDesirePaths(state, mapInstance) {
       const csr = await runVisibilityBearingTask(
         mappingGraph,
         state._viewHexes,
-        state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth
+        wantVisionDepth
       );
-      state._visibilityBearingCSR = { gen: state._mappingGeneration ?? 0, ...csr };
+      state._visibilityBearingCSR = { gen: csrGen, visionDepth: wantVisionDepth, ...csr };
     } catch (err) {
       try {
         logger.warn('computeDesirePaths: lazy visibility CSR rebuild failed', err);
@@ -646,12 +660,14 @@ export async function computeDesirePaths(state, mapInstance) {
   mapInstance?.updateLayers?.();
   state.flowsReady = true;
 
-  // J (review11 §J, option 1): release the visibility/bearing CSR now that the
-  // simulation has consumed it. It is the dominant steady-state memory cost at
-  // city scale and is no longer needed until the next run, where it is rebuilt
-  // lazily if required (see the top of this function). This trades the rebuild
-  // cost for a large steady-state memory win.
-  state._visibilityBearingCSR = null;
+  // J (review11 §J) + review12 #6: the visibility/bearing CSR is now CACHED
+  // across runs (see the top of this function) and only rebuilt when
+  // `mappingGeneration` or `visionDepth` changes, so we no longer release it
+  // here. It is the dominant steady-state memory cost at city scale, but the
+  // rebuild (mapping-graph + visibility BFS) is the dominant CPU cost too, so
+  // holding it trades memory for a large per-run CPU win. It is still dropped on
+  // remap via the `gen` mismatch check above, and `clearComputeCaches`/remap
+  // invalidate the dependent gradient graph as before.
 }
 
 

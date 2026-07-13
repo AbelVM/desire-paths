@@ -456,9 +456,13 @@ export function applySurfaceEdits(state) {
   }
 
   // Friction changed outside a remap — drop the cached gradient graph/topology
-  // so the next run reflects the new barriers (mirrors mapCells, C5).
+  // so the next run reflects the new barriers (mirrors mapCells, C5). Also drop
+  // the cached visibility/bearing CSR (review12 #6): a surface edit can flip a
+  // cell's impassability, which changes that origin's visibility row, so the
+  // cached CSR must be rebuilt on the next run.
   invalidateGradientGraph();
   clearGradientCache(state);
+  state._visibilityBearingCSR = null;
   state._layerDataVersion = (state._layerDataVersion || 0) + 1;
 }
 
@@ -492,10 +496,37 @@ export function removeSurfaceOverride(state, id) {
 
 /** Wipe every painted surface and reset the friction field to the base map. */
 export function clearSurfaceEditions(state) {
+  const base = state._baseFrictionArr;
+  const baseAff = state._baseAffArr;
+  const cellFrictionMap = state.cellFrictionMap;
+  const affordanceMap = state.affordanceMap;
+  const cellToIdx = state.cellToIdx;
+  if (base && cellFrictionMap && cellToIdx) {
+    // Restore every painted cell to its base value BEFORE dropping the base
+    // arrays. If we nulled the base first, applySurfaceEdits would early-return
+    // on the missing base and the painted friction would remain on the mesh.
+    const dirty = new Set();
+    for (const edit of state.surfaceEdits.values()) {
+      for (const c of edit.cells) dirty.add(c);
+    }
+    for (const cell of dirty) {
+      const i = cellToIdx.get(cell);
+      if (i !== undefined) {
+        cellFrictionMap.set(cell, base[i]);
+        if (affordanceMap) affordanceMap.set(cell, baseAff[i]);
+      }
+    }
+  }
   state.surfaceEdits = new Map();
   state._baseFrictionArr = undefined;
   state._baseAffArr = undefined;
-  applySurfaceEdits(state);
+  invalidateGradientGraph();
+  clearGradientCache(state);
+  // Surface edits change friction (and can flip a cell's impassability, which
+  // changes its visibility row), so drop the cached visibility/bearing CSR
+  // (review12 #6) — it is rebuilt on the next run if still needed.
+  state._visibilityBearingCSR = null;
+  state._layerDataVersion = (state._layerDataVersion || 0) + 1;
 }
 
 // CSR-backed visibility + bearing index reconstruction lives in `bearingIndex.js`
