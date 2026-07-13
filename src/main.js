@@ -15,8 +15,21 @@ import {
   exportSimulationGeoJSON,
 } from './helpers/map.js';
 import { setupUI, findNodeAtScreenPoint } from './helpers/ui.js';
-import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
+import {
+  computeDesirePaths,
+  initializeAffordanceMap,
+  getGradientCacheStats,
+} from './helpers/compute.js';
 import { logger } from './helpers/logger.js';
+
+// Network-resilience helpers for the Nominatim geocoder (review 3.1). Imported as
+// individual subpaths so Vite treeshakes each one independently. None of these
+// touch the worker/SharedArrayBuffer payload path, so the SAB zero-copy pattern
+// used by the simulation workers is unaffected.
+import { PowerCache } from 'performance-helpers/powerCache';
+import { PowerSlidingWindow } from 'performance-helpers/powerSlidingWindow';
+import { PowerCircuit } from 'performance-helpers/powerCircuit';
+import { PowerDeadline } from 'performance-helpers/powerDeadline';
 
 /**
  * DesireMap — wraps a maplibregl.Map with domain methods.
@@ -73,7 +86,8 @@ class DesireMap {
       '_computeDiskCacheOrder',
       '_visibilityCacheObj',
       '_visibilityCacheOrder',
-      '_gradientCacheObj',
+      '_gradientCache',
+      '_protectedGradientDests',
       '_perTargetContribs',
       '_assignedCounts',
       '_targetWeights',
@@ -309,10 +323,109 @@ const init = () => {
   desireMap.dragOccurred = false;
   desireMap.simulationParams = { ...SIMULATION_PARAMS };
 
-  // Add geocoder control with Nominatim service
-  // Geocoder query cache + debounce for Nominatim rate limiting
-  const geocoderCache = new Map();
-  const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+  // Add geocoder control with Nominatim service.
+  //
+  // Geocoder network resilience (review 3.1): the old code cached raw results in
+  // a hand-rolled Map with a 5-minute TTL and a 200-entry cap, and fired a bare
+  // `fetch` with no timeout, retry, rate limiting, or failure isolation. That
+  // meant a single slow/hanging Nominatim response could stall the geocoder
+  // indefinitely, and a Nominatim outage would hammer the service on every
+  // keystroke. The helpers below add: bounded TTL+LRU cache (PowerCache),
+  // Nominatim's 1 req/s policy (PowerSlidingWindow), fast-fail on outage
+  // (PowerCircuit), and per-call timeout+retry (PowerDeadline). None of this
+  // touches the worker/SAB simulation path.
+  const geocoderCache = new PowerCache({
+    maxEntries: 1000,
+    defaultTTL: 30 * 24 * 60 * 60 * 1000, // 30 days — geocoding is stable
+  });
+  // Dev-only observability hooks for the PowerCache-backed caches (review 3.1/3.2).
+  // `geocoderCache.stats()` / `getGradientCacheStats(desireMap)` surface hit rates
+  // so we can confirm the caches are actually being used.
+  if (typeof window !== 'undefined') {
+    try {
+      window.__dp_getGeocoderCacheStats = () => geocoderCache.stats();
+      window.__dp_getGradientCacheStats = () => getGradientCacheStats(desireMap);
+    } catch (_e) {}
+  }
+  // Nominatim usage policy: max 1 request/second. A sliding window of capacity 1
+  // over 1000ms enforces that across all geocoder calls.
+  const geocoderRateLimit = new PowerSlidingWindow({ capacity: 1, windowMs: 1000 });
+  // Trip open after 5 consecutive failures; half-open trial after 10s. While open,
+  // calls fail fast (returning cached/empty results) instead of hitting the network.
+  const geocoderCircuit = new PowerCircuit({ threshold: 5, timeout: 10000 });
+  // Per-call: 4s total budget, up to 2 attempts with exponential backoff+jitter.
+  const geocoderDeadline = new PowerDeadline({
+    maxAttempts: 2,
+    totalTimeout: 4000,
+    retryDelay: 250,
+    backoff: 'exponential',
+    jitter: true,
+  });
+
+  // Wait (poll) until the rate limiter admits one request, or give up after ~1s.
+  // The geocoder is already debounced at 300ms, so this almost never blocks; it
+  // only serializes the rare case of multiple in-flight queries in the same second.
+  async function acquireRateLimitSlot(maxWaitMs = 1000) {
+    const step = 200;
+    let waited = 0;
+    while (!geocoderRateLimit.tryConsume(1)) {
+      if (waited >= maxWaitMs) return false;
+      await new Promise((r) => setTimeout(r, step));
+      waited += step;
+    }
+    return true;
+  }
+
+  async function fetchNominatim(query) {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+      query
+    )}&format=geojson&polygon_geojson=1&addressdetails=1`;
+    // PowerCircuit.call wraps the work and trips open on repeated failure.
+    return geocoderCircuit.call(() =>
+      geocoderDeadline.run(
+        async (signal) => {
+          const response = await fetch(url, { signal });
+          if (!response.ok) {
+            const err = new Error(`Nominatim ${response.status}`);
+            err.status = response.status;
+            throw err;
+          }
+          return response.json();
+        },
+        { retryIf: (err) => !err || (err.status >= 500 && err.status < 600) }
+      )
+    );
+  }
+
+  async function geocodeQuery(query) {
+    const cached = geocoderCache.get(query);
+    if (cached) return cached;
+
+    // If the circuit is open, skip the network entirely and fall back to cache
+    // (already handled above) or an empty result — don't pile onto a down service.
+    if (geocoderCircuit.state === 'open') return [];
+
+    await acquireRateLimitSlot();
+    const geojson = await fetchNominatim(query);
+    const features = [];
+    for (const feature of geojson.features || []) {
+      const bbox = feature.bbox;
+      const center = bbox
+        ? [bbox[0] + (bbox[2] - bbox[0]) / 2, bbox[1] + (bbox[3] - bbox[1]) / 2]
+        : feature.geometry?.coordinates || [0, 0];
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: center },
+        place_name: feature.properties.display_name,
+        properties: feature.properties,
+        text: feature.properties.display_name,
+        place_type: ['place'],
+        center,
+      });
+    }
+    geocoderCache.set(query, features);
+    return features;
+  }
 
   let geocoderDebounceTimer = null;
 
@@ -320,51 +433,11 @@ const init = () => {
     forwardGeocode: async (config) => {
       const features = [];
       try {
-        // Prune expired entries before checking cache
-        const now = Date.now();
-        for (const [key, val] of geocoderCache) {
-          if (now - val.timestamp >= CACHE_MAX_AGE_MS) geocoderCache.delete(key);
-        }
-
-        // Return cached result if available and not expired
-        const cached = geocoderCache.get(config.query);
-        if (cached && now - cached.timestamp < CACHE_MAX_AGE_MS) {
-          return { features: cached.features };
-        }
-
-        const request = `https://nominatim.openstreetmap.org/search?q=${config.query}&format=geojson&polygon_geojson=1&addressdetails=1`;
-        const response = await fetch(request);
-        const geojson = await response.json();
-        for (const feature of geojson.features) {
-          const center = [
-            feature.bbox[0] + (feature.bbox[2] - feature.bbox[0]) / 2,
-            feature.bbox[1] + (feature.bbox[3] - feature.bbox[1]) / 2,
-          ];
-          const point = {
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: center,
-            },
-            place_name: feature.properties.display_name,
-            properties: feature.properties,
-            text: feature.properties.display_name,
-            place_type: ['place'],
-            center,
-          };
-          features.push(point);
-        }
-
-        // Cache the result
-        geocoderCache.set(config.query, { features, timestamp: Date.now() });
-
-        // Prune cache if it grows beyond 200 entries (LRU by eviction order)
-        if (geocoderCache.size > 200) {
-          const oldestKey = geocoderCache.keys().next().value;
-          geocoderCache.delete(oldestKey);
-        }
+        features.push(...(await geocodeQuery(config.query)));
       } catch (e) {
-        console.error(`Failed to forwardGeocode with error: ${e}`);
+        // Circuit-open / timeout / network errors degrade to an empty result set
+        // rather than throwing into the MaplibreGeocoder control.
+        logger.warn(`forwardGeocode failed for "${config.query}"`, e);
       }
       return { features };
     },

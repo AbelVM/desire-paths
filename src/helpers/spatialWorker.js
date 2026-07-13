@@ -15,6 +15,8 @@ import {
 import { computeAgentBatch } from './agentTasks.js';
 import { SIMULATION_PARAMS } from './constants.js';
 import { gradientGet, getGradientGraph } from './dijkstra.js';
+import { PowerRetry } from 'performance-helpers/powerRetry';
+import { PowerHistogram } from 'performance-helpers/powerHistogram';
 
 const detectedHC =
   typeof navigator !== 'undefined' && navigator.hardwareConcurrency
@@ -69,6 +71,36 @@ const WORKER_IDLE_TIMEOUT = 300_000; // 5m — retire workers idle longer than t
 const workerPoolByKind = new Map();
 const idleWorkersByKind = new Map();
 const waitingAcquiresByKind = new Map();
+
+// Per-kind lock-free latency histograms (PowerHistogram) for worker-task
+// duration telemetry. Range covers up to WORKER_TASK_TIMEOUT so long tasks are
+// not clamped away. Read via getWorkerPoolStats(); reset on drain/terminate.
+const workerLatencyHistograms = new Map();
+function _getLatencyHistogram(kind) {
+  let h = workerLatencyHistograms.get(kind);
+  if (!h) {
+    h = new PowerHistogram({ minValue: 1, maxValue: WORKER_TASK_TIMEOUT, bucketCount: 128 });
+    workerLatencyHistograms.set(kind, h);
+  }
+  return h;
+}
+function _recordWorkerLatency(kind, ms) {
+  if (!(ms >= 0)) return; // skip NaN/negative (e.g. no high-res clock)
+  try {
+    _getLatencyHistogram(kind).record(ms);
+  } catch (_e) {}
+}
+function _latencySnapshot(kind) {
+  const h = workerLatencyHistograms.get(kind);
+  if (!h || h.count === 0) return { count: 0, p50: 0, p95: 0, p99: 0, max: 0 };
+  return {
+    count: h.count,
+    p50: Math.round(h.percentile(0.5)),
+    p95: Math.round(h.percentile(0.95)),
+    p99: Math.round(h.percentile(0.99)),
+    max: Math.round(h.max),
+  };
+}
 
 // Optional progress handler: receives {progress:true, phase, processed, total}
 let _progressHandler = null;
@@ -353,7 +385,8 @@ function runWorker(kind, payload) {
     return Promise.resolve(runLocally(kind, payload));
   }
 
-  return slotPromise.then(
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const task = slotPromise.then(
     (slot) =>
       new Promise((resolve, reject) => {
         const { worker } = slot;
@@ -423,6 +456,16 @@ function runWorker(kind, payload) {
           reject(error);
         }
       })
+  );
+  return task.then(
+    (r) => {
+      _recordWorkerLatency(kind, (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+      return r;
+    },
+    (e) => {
+      _recordWorkerLatency(kind, (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+      throw e;
+    }
   );
 }
 
@@ -802,34 +845,47 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
       `spatialWorker: fast-scan-chunk dispatch workerCount=${chunks.length} featureCount=${featureCount}`
     );
 
-  // Launch all chunk tasks in parallel
+  // Launch all chunk tasks in parallel. Each chunk retries with exponential
+  // backoff+jitter (PowerRetry) and falls back to a local main-thread compute if
+  // every worker attempt fails, so a single flaky/hung chunk worker can no longer
+  // stall the whole Promise.all (the old code only retried once, with no backoff).
+  // `runWorker` enforces its own per-task timeout (WORKER_TASK_TIMEOUT), so we do
+  // not pass an attemptTimeout here.
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
-    runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err) => {
-      try {
-        logger.warn('spatialWorker: fast-scan-chunk failed, retrying', { chunkIndex, err });
-      } catch (_e) {}
-      return runWorker('fast-scan-chunk', { viewHexes, features: chunk }).catch((err2) => {
-        try {
-          console.error &&
-            console.error(
-              'spatialWorker: fast-scan-chunk retry failed, falling back to local compute',
-              { chunkIndex, err2 }
-            );
-        } catch (_e) {}
-        try {
-          // Fallback: compute the chunk locally on main thread to avoid incomplete results
-          return runLocally('fast-scan-chunk', { viewHexes, features: chunk });
-        } catch (localErr) {
+    PowerRetry.run(
+      () => runWorker('fast-scan-chunk', { viewHexes, features: chunk }),
+      {
+        maxAttempts: 3,
+        baseDelay: 200,
+        backoff: 'exponential',
+        jitter: true,
+        retryIf: () => true,
+        onRetry: (attempt, err) => {
           try {
-            console.error &&
-              console.error('spatialWorker: fast-scan-chunk local fallback failed', {
-                chunkIndex,
-                localErr,
-              });
+            logger.warn('spatialWorker: fast-scan-chunk retry', { chunkIndex, attempt, err });
           } catch (_e) {}
-          return {};
-        }
-      });
+        },
+      }
+    ).catch((err) => {
+      try {
+        logger.warn(
+          'spatialWorker: fast-scan-chunk retries exhausted, falling back to local compute',
+          { chunkIndex, err }
+        );
+      } catch (_e) {}
+      try {
+        // Fallback: compute the chunk locally on the main thread to avoid
+        // incomplete results when all worker attempts fail.
+        return runLocally('fast-scan-chunk', { viewHexes, features: chunk });
+      } catch (localErr) {
+        try {
+          logger.error('spatialWorker: fast-scan-chunk local fallback failed', {
+            chunkIndex,
+            localErr,
+          });
+        } catch (_e) {}
+        return {};
+      }
     })
   );
 
@@ -883,6 +939,8 @@ try {
     window.__dp_getMaxAgentWorkers = getMaxAgentWorkers;
     window.__dp_setParallelAgentBatches = setParallelAgentBatches;
     window.__dp_getParallelAgentBatches = getParallelAgentBatches;
+    window.__dp_getWorkerPoolStats = getWorkerPoolStats;
+    window.__dp_drainWorkerPool = drainWorkerPool;
   }
 } catch (_e) {}
 
@@ -1158,6 +1216,49 @@ export function terminateAllWorkers() {
   workerPoolByKind.clear();
   idleWorkersByKind.clear();
   waitingAcquiresByKind.clear();
+  workerLatencyHistograms.clear();
+}
+
+// Per-kind pool statistics for operability/debugging. Borrowed from PowerPool's
+// getStats() idea without adopting PowerPool — the SAB zero-copy worker path must
+// stay untouched. Returns { [kind]: { poolSize, idle, waiting, max }, _total }.
+export function getWorkerPoolStats() {
+  const stats = {};
+  let totalPool = 0;
+  let totalIdle = 0;
+  let totalWaiting = 0;
+  for (const [kind, pool] of workerPoolByKind) {
+    const idle = idleWorkersByKind.get(kind) || [];
+    const waiting = waitingAcquiresByKind.get(kind) || [];
+    const maxForKind =
+      kind === 'agent-batch'
+        ? MAX_AGENT_WORKERS
+        : kind === 'fast-scan' || kind === 'fast-scan-chunk'
+          ? MAX_FASTSCAN_WORKERS
+          : MAX_WORKERS;
+    stats[kind] = {
+      poolSize: pool.length,
+      idle: idle.length,
+      waiting: waiting.length,
+      max: maxForKind,
+      latencyMs: _latencySnapshot(kind),
+    };
+    totalPool += pool.length;
+    totalIdle += idle.length;
+    totalWaiting += waiting.length;
+  }
+  stats._total = { poolSize: totalPool, idle: totalIdle, waiting: totalWaiting };
+  return stats;
+}
+
+// Graceful teardown: terminate all workers, clear pool state, and stop the
+// idle-reaper interval. `terminateAllWorkers` is the public alias used on unload.
+export function drainWorkerPool() {
+  terminateAllWorkers();
+  if (_idleCleanupInterval) {
+    clearInterval(_idleCleanupInterval);
+    _idleCleanupInterval = null;
+  }
 }
 
 // Auto-terminate workers on page unload to prevent memory leaks

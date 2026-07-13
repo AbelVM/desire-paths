@@ -1,4 +1,5 @@
 import { logger } from './logger.js';
+import { PowerCache } from 'performance-helpers/powerCache';
 import { gridDistance } from 'h3-js';
 import {
   FRICTION_COSTS,
@@ -112,7 +113,8 @@ export function clearComputeCaches(ctx) {
   }
 
   // Drop per-compute data structures
-  ctx._gradientCacheObj = null;
+  ctx._gradientCache = null;
+  ctx._protectedGradientDests = undefined;
   ctx._frictionObj = null;
   ctx._affordanceObj = null;
   ctx._perTargetContribs = null;
@@ -133,36 +135,25 @@ function ensureGradientCacheFresh(ctx) {
   }
 }
 
-// LRU bookkeeping for the per-target gradient cache. `_gradientCacheOrder` holds
-// cached target-cell keys in ascending recency (least-recent first). Marks a key
-// as most-recently-used.
-function _touchGradientKey(ctx, d) {
-  let order = ctx._gradientCacheOrder;
-  if (!order) order = ctx._gradientCacheOrder = [];
-  const at = order.indexOf(d);
-  if (at !== -1) order.splice(at, 1);
-  order.push(d);
-}
-
-// Evict least-recently-used gradient entries once the cache exceeds
-// GRADIENT_CACHE_MAX_ENTRIES. Never evicts a key in `protectedSet` (the targets
-// the current run still needs), so a run whose destination count exceeds the cap
-// simply keeps all of them — the cap is a soft bound on carried-over entries.
-function _pruneGradientCache(ctx, protectedSet) {
-  const order = ctx._gradientCacheOrder;
-  const cache = ctx._gradientCacheObj;
-  if (!order || !cache) return;
-  const cap = GRADIENT_CACHE_MAX_ENTRIES;
-  let i = 0;
-  while (order.length > cap && i < order.length) {
-    const key = order[i];
-    if (protectedSet && protectedSet.has(key)) {
-      i++;
-      continue;
-    }
-    order.splice(i, 1);
-    delete cache[key];
+// Per-target gradient cache, backed by PowerCache (review 3.2). Replaces the old
+// hand-rolled Map + recency-order array + manual eviction. PowerCache gives us a
+// bounded LRU with O(1) get/set and automatic eviction at GRADIENT_CACHE_MAX_ENTRIES.
+// The cached values are plain-object distance maps (NOT typed arrays / SABs), so
+// storing them here does not interfere with the worker SharedArrayBuffer zero-copy
+// payload path used by runGradientBatches.
+//
+// `weightFn` marks the current run's destinations with infinite weight so they are
+// never evicted mid-run (the old code protected them via `_pruneGradientCache`'s
+// protectedSet). `ctx._protectedGradientDests` is reset each run in
+// clearGradientCache and repopulated with the active destinations.
+function getGradientCache(ctx) {
+  if (!ctx._gradientCache) {
+    ctx._gradientCache = new PowerCache({
+      maxEntries: GRADIENT_CACHE_MAX_ENTRIES,
+      weightFn: (key) => (ctx._protectedGradientDests && ctx._protectedGradientDests.has(key) ? Infinity : 1),
+    });
   }
+  return ctx._gradientCache;
 }
 
 function getReachableDestinations(ctx, originCell, destinations, goalGradients) {
@@ -361,14 +352,18 @@ export async function computeDesirePaths(state, mapInstance) {
   // Reuse cached per-target gradients when possible to avoid recomputing
   // the full Dijkstra result for every run. Cache is keyed by target cell id
   // and stores the plain-object distances returned by computeDijkstraGradient.
-  if (!state._gradientCacheObj) state._gradientCacheObj = Object.create(null);
+  // Backed by PowerCache (review 3.2): bounded LRU, O(1) get/set, automatic
+  // eviction. The current run's destinations are protected from eviction via the
+  // cache's weightFn (see getGradientCache).
+  const gradientCache = getGradientCache(state);
+  state._protectedGradientDests = new Set(destinations);
   if (!state._pendingGradientPromises) state._pendingGradientPromises = Object.create(null);
 
   const missingDestinations = [];
   const pendingDestinations = [];
   for (const d of destinations) {
-    if (state._gradientCacheObj[d]) continue;
-    if (state._pendingGradientPromises[d]) {
+    if (gradientCache.get(d)) continue;
+    if (state._pendingGradientPromises && state._pendingGradientPromises[d]) {
       pendingDestinations.push(d);
     } else {
       missingDestinations.push(d);
@@ -401,8 +396,7 @@ export async function computeDesirePaths(state, mapInstance) {
           { r1Adjacency: state._r1Adjacency || null, viewHexes: state._viewHexes || null }
         );
         for (const d of missingDestinations) {
-          state._gradientCacheObj[d] = gradients[d] || Object.create(null);
-          _touchGradientKey(state, d);
+          gradientCache.set(d, gradients[d] || Object.create(null));
         }
       } finally {
         for (const d of missingDestinations) {
@@ -441,22 +435,18 @@ export async function computeDesirePaths(state, mapInstance) {
 
   const goalGradients = new Map();
   for (const d of destinations) {
-    goalGradients.set(d, state._gradientCacheObj[d]);
+    goalGradients.set(d, gradientCache.get(d));
   }
 
-  // Mark this run's targets as most-recently-used, then evict least-recently-used
-  // carried-over entries so the cache stays bounded (it was previously cleared
-  // only on remap and could grow unbounded across incremental runs). The current
-  // targets are protected from eviction.
-  const _protectedDests = new Set(destinations);
-  for (const d of destinations) _touchGradientKey(state, d);
-  _pruneGradientCache(state, _protectedDests);
+  // Cache is now bounded by PowerCache (GRADIENT_CACHE_MAX_ENTRIES) with LRU
+  // eviction; current-run destinations are protected via weightFn. No manual
+  // pruning needed.
 
   // Check for unreachable destinations (surrounded by impassable terrain)
   // A gradient with only the destination cell itself means no other cells can reach it
   const unreachableDests = [];
   for (const d of destinations) {
-    const grad = state._gradientCacheObj[d];
+    const grad = gradientCache.get(d);
     // If the gradient reaches only the destination itself (or is empty), it's unreachable
     if (gradientReachableCount(grad) <= 1) {
       unreachableDests.push(d);
@@ -736,9 +726,33 @@ export {
 };
 
 // Gradient cache helpers: compute, inspect, and clear per-target gradients.
+export function getGradientCacheStats(ctx) {
+  const cache = ctx && ctx._gradientCache;
+  return cache ? cache.stats() : null;
+}
+
 export function clearGradientCache(ctx) {
-  ctx._gradientCacheObj = Object.create(null);
-  ctx._gradientCacheOrder = undefined;
+  // Report cache effectiveness before dropping the instance (dev-only; logger.debug
+  // is a no-op in production builds). Validates the PowerCache LRU from review 3.2
+  // and confirms the gradient cache is actually being used.
+  try {
+    const cache = ctx && ctx._gradientCache;
+    if (cache) {
+      const stats = cache.stats();
+      logger.debug('clearGradientCache: gradient cache stats', {
+        size: stats.size,
+        hits: stats.hits,
+        misses: stats.misses,
+        hitRate: cache.hitRate,
+        evictions: stats.evictions,
+      });
+    }
+  } catch (_e) {}
+  // PowerCache instance is dropped and lazily recreated on next use (see
+  // getGradientCache). This also clears the protected-dests set and the
+  // per-run pending-promise map.
+  ctx._gradientCache = null;
+  ctx._protectedGradientDests = undefined;
   ctx._gradientCacheGen = undefined;
   ctx._pendingGradientPromises = Object.create(null);
 }

@@ -12,6 +12,7 @@ import { getBestNextStep, getGradientDirection } from '../src/helpers/agentTasks
 import { SIMULATION_PARAMS } from '../src/helpers/constants.js';
 import { angleDiff } from '../src/helpers/bearing.js';
 import { latLngToCell, gridDisk } from 'h3-js';
+import { PowerCache } from 'performance-helpers/powerCache';
 import { buildSimulationGeoJSON } from '../src/helpers/map.js';
 import { gradientGet, getGradientGraph, computeDijkstra } from '../src/helpers/dijkstra.js';
 
@@ -125,21 +126,18 @@ describe('initializeAffordanceMap', () => {
 describe('gradient cache helpers', () => {
   it('clearGradientCache should clear the cache', () => {
     const map = {
-      _gradientCacheObj: {
-        a: { a: 0 },
-        b: { b: 0 },
-      },
+      _gradientCache: new PowerCache({ maxEntries: 16 }),
     };
+    map._gradientCache.set('a', { a: 0 });
+    map._gradientCache.set('b', { b: 0 });
     clearGradientCache(map);
-    expect(map._gradientCacheObj).toBeDefined();
-    expect(Object.keys(map._gradientCacheObj).length).toBe(0);
+    expect(map._gradientCache).toBeNull();
   });
 
   it('clearGradientCache should handle missing cache', () => {
     const map = {};
     clearGradientCache(map);
-    expect(map._gradientCacheObj).toBeDefined();
-    expect(Object.keys(map._gradientCacheObj).length).toBe(0);
+    expect(map._gradientCache).toBeNull();
   });
 
 });
@@ -324,14 +322,14 @@ describe('clearComputeCaches', () => {
   it('should clear gradient cache and per-compute structures', () => {
     const map = {
       pathDesireScores: { a: 1 },
-      _gradientCacheObj: { f: { f: 0 } },
+      _gradientCache: new PowerCache({ maxEntries: 16 }),
       _gradientCacheGen: 1,
       _frictionObj: { a: 1 },
       _affordanceObj: { a: 0.1 },
     };
     clearComputeCaches(map);
     expect(map.pathDesireScores).toEqual({});
-    expect(Object.keys(map._gradientCacheObj)).toHaveLength(0);
+    expect(map._gradientCache).toBeNull();
     expect(map._gradientCacheGen).toBeUndefined();
     expect(map._frictionObj).toBeNull();
     expect(map._affordanceObj).toBeNull();
@@ -413,9 +411,11 @@ describe('unreachable destination warning', () => {
       simulationNodes: {
         [h3]: { type: 'destination', weight: 1 },
       },
-      _gradientCacheObj: {
-        [h3]: Object.create(null), // Empty gradient = unreachable
-      },
+      _gradientCache: (() => {
+        const c = new PowerCache({ maxEntries: 16 });
+        c.set(h3, Object.create(null)); // Empty gradient = unreachable
+        return c;
+      })(),
       _frictionObj: { [h3]: 1 },
       _affordanceObj: { [h3]: 0.1 },
       _cellState: Object.create(null),
@@ -446,9 +446,11 @@ describe('unreachable destination warning', () => {
       simulationNodes: {
         [h3]: { type: 'destination', weight: 1 },
       },
-      _gradientCacheObj: {
-        [h3]: { [h3]: 0 }, // Only self = unreachable
-      },
+      _gradientCache: (() => {
+        const c = new PowerCache({ maxEntries: 16 });
+        c.set(h3, { [h3]: 0 }); // Only self = unreachable
+        return c;
+      })(),
       _frictionObj: { [h3]: 1 },
       _affordanceObj: { [h3]: 0.1 },
       _cellState: Object.create(null),
@@ -485,9 +487,11 @@ describe('unreachable destination warning', () => {
         [h3]: { type: 'destination', weight: 1 },
         [neighborCell]: { type: 'origin', weight: 1 },
       },
-      _gradientCacheObj: {
-        [h3]: { [h3]: 0, [neighborCell]: 1 }, // Reachable
-      },
+      _gradientCache: (() => {
+        const c = new PowerCache({ maxEntries: 16 });
+        c.set(h3, { [h3]: 0, [neighborCell]: 1 }); // Reachable
+        return c;
+      })(),
       _frictionObj: { [h3]: 1, [neighborCell]: 1 },
       _affordanceObj: { [h3]: 0.1, [neighborCell]: 0.1 },
       _cellState: Object.create(null),

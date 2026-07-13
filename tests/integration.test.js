@@ -255,7 +255,7 @@ function createMockMap(extra = {}) {
     _computeDiskCacheOrder: undefined,
     _visibilityCacheObj: undefined,
     _visibilityCacheOrder: undefined,
-    _gradientCacheObj: undefined,
+    _gradientCache: undefined,
     _perTargetContribs: undefined,
     _assignedCounts: undefined,
     _targetWeights: undefined,
@@ -1352,7 +1352,7 @@ describe('ui.js', () => {
     map._computeDiskCacheOrder = undefined;
     map._visibilityCacheObj = undefined;
     map._visibilityCacheOrder = undefined;
-    map._gradientCacheObj = undefined;
+    map._gradientCache = undefined;
     map._perTargetContribs = undefined;
     map._assignedCounts = undefined;
     map._targetWeights = undefined;
@@ -1622,7 +1622,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,
@@ -1691,7 +1691,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,
@@ -1739,7 +1739,7 @@ describe('main.js', () => {
       dm._computeDiskCacheOrder = [];
       dm._visibilityCacheObj = {};
       dm._visibilityCacheOrder = [];
-      dm._gradientCacheObj = {};
+      dm._gradientCache = {};
       dm._perTargetContribs = {};
       dm._assignedCounts = {};
       dm._targetWeights = {};
@@ -1792,7 +1792,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,
@@ -1860,7 +1860,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,
@@ -1936,8 +1936,8 @@ describe('main.js', () => {
       dm._visibilityCacheOrder = ['a'];
       expect(dm._visibilityCacheOrder).toEqual(['a']);
 
-      dm._gradientCacheObj = { hex1: { hex1: 0 } };
-      expect(dm._gradientCacheObj).toEqual({ hex1: { hex1: 0 } });
+      dm._gradientCacheProbe = { hex1: { hex1: 0 } };
+      expect(dm._gradientCacheProbe).toEqual({ hex1: { hex1: 0 } });
 
       dm._perTargetContribs = { hex1: { hex2: 5 } };
       expect(dm._perTargetContribs).toEqual({ hex1: { hex2: 5 } });
@@ -2000,7 +2000,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,
@@ -2088,7 +2088,7 @@ describe('main.js', () => {
         _computeDiskCacheOrder: undefined,
         _visibilityCacheObj: undefined,
         _visibilityCacheOrder: undefined,
-        _gradientCacheObj: undefined,
+        _gradientCache: undefined,
         _perTargetContribs: undefined,
         _assignedCounts: undefined,
         _targetWeights: undefined,

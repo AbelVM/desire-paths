@@ -20,7 +20,7 @@ function createMockMap() {
     multiFrictionMap: new Map(),
     cellFrictionMap: new Map(),
     _frictionObj: undefined,
-    _gradientCacheObj: undefined,
+    _gradientCache: undefined,
     _gradientCacheGen: 5,
     _polyCache: undefined,
     _pathCache: undefined,
@@ -42,7 +42,7 @@ describe('drawing obstacles updates the gradient friction source (C5)', () => {
     // The drawn barrier must be visible to the gradient (which reads cellFrictionMap).
     expect(map.cellFrictionMap.get(DRAWN)).toBe(FRICTION_COSTS.IMPASSABLE);
     // The cached gradient graph topology + per-target gradient cache must be dropped.
-    expect(map._gradientCacheObj).toEqual({});
+    expect(map._gradientCache).toBeNull();
     expect(map._gradientCacheGen).toBeUndefined();
   });
 
@@ -55,7 +55,7 @@ describe('drawing obstacles updates the gradient friction source (C5)', () => {
     mapLineCells(map, map, [[0, 0], [1, 1]], { layer: '0', cost: 'IMPASSABLE' });
 
     expect(map.cellFrictionMap.get(DRAWN)).toBe(FRICTION_COSTS.IMPASSABLE);
-    expect(map._gradientCacheObj).toEqual({});
+    expect(map._gradientCache).toBeNull();
     expect(map._gradientCacheGen).toBeUndefined();
   });
 
