@@ -126,9 +126,7 @@ function createWorkerSlot(kind = 'spatial') {
     kind === 'agent-batch' ? '../workers/agent.worker.js' : '../workers/spatial.worker.js';
   try {
     const worker = new Worker(new URL(script, import.meta.url), { type: 'module' });
-    try {
-      logger.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
-    } catch (_e) {}
+    logger.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
     const slot = { worker, kind };
     _touchWorker(slot);
     _startIdleCleanup();
@@ -150,9 +148,7 @@ function releaseWorkerSlot(slot) {
   const waiting = waitingAcquiresByKind.get(kind) || [];
   const next = waiting.shift();
   if (next) {
-    try {
-      logger.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
-    } catch (_e) {}
+    logger.debug(`spatialWorker: releasing slot to waiting acquirer for kind=${kind}`);
     _touchWorker(slot);
     next(slot);
   } else {
@@ -160,24 +156,18 @@ function releaseWorkerSlot(slot) {
     idle.push(slot);
     idleWorkersByKind.set(kind, idle);
     _touchWorker(slot);
-    try {
-      logger.debug(
-          `spatialWorker: released slot to idle pool for kind=${kind} idleCount=${idle.length}`
-        );
-    } catch (_e) {}
+    logger.debug(
+        `spatialWorker: released slot to idle pool for kind=${kind} idleCount=${idle.length}`
+      );
   }
   waitingAcquiresByKind.set(kind, waiting);
 }
 
 function acquireWorkerSlot(kind = 'spatial') {
-  try {
-    logger.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`);
-  } catch (_e) {}
+  logger.debug(`spatialWorker: acquireWorkerSlot requested kind=${kind}`);
   const idle = (idleWorkersByKind.get(kind) || []).pop();
   if (idle) {
-    try {
-      logger.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
-    } catch (_e) {}
+    logger.debug(`spatialWorker: reusing idle worker for kind=${kind}`);
     _touchWorker(idle);
     return Promise.resolve(idle);
   }
@@ -193,19 +183,15 @@ function acquireWorkerSlot(kind = 'spatial') {
     const slot = createWorkerSlot(kind);
     pool.push(slot);
     workerPoolByKind.set(kind, pool);
-    try {
-      logger.debug(
-          `spatialWorker: created new worker slot kind=${kind} poolSize=${pool.length}/${maxForKind}`
-        );
-    } catch (_e) {}
+    logger.debug(
+        `spatialWorker: created new worker slot kind=${kind} poolSize=${pool.length}/${maxForKind}`
+      );
     return Promise.resolve(slot);
   }
 
-  try {
-    logger.debug(
-        `spatialWorker: no slots available, enqueuing acquirer for kind=${kind} poolSize=${pool.length}/${maxForKind}`
-      );
-  } catch (_e) {}
+  logger.debug(
+      `spatialWorker: no slots available, enqueuing acquirer for kind=${kind} poolSize=${pool.length}/${maxForKind}`
+    );
   return new Promise((resolve) => {
     const waiting = waitingAcquiresByKind.get(kind) || [];
     waiting.push(resolve);
@@ -226,9 +212,7 @@ function retireWorkerSlot(slot) {
   idleWorkersByKind.set(kind, idle);
 
   try {
-    try {
-      logger.debug(`spatialWorker: retiring worker slot kind=${kind}`);
-    } catch (_e) {}
+    logger.debug(`spatialWorker: retiring worker slot kind=${kind}`);
     slot.worker.terminate();
   } catch {
     // ignore termination errors
@@ -394,11 +378,9 @@ function runWorker(kind, payload) {
           settled = true;
           cleanup();
           releaseWorkerSlot(slot);
-          try {
-            logger.debug(
-                `spatialWorker: worker slot returned result kind=${slot.kind} ok=${Boolean(data.ok)}`
-              );
-          } catch (_e) {}
+          logger.debug(
+              `spatialWorker: worker slot returned result kind=${slot.kind} ok=${Boolean(data.ok)}`
+            );
           if (data.ok) resolve(data.result);
           else {
             const errMsg = data.error ?? 'Spatial worker task failed';
@@ -428,11 +410,9 @@ function runWorker(kind, payload) {
 
         try {
           const { payload: sendPayload, transfer } = flattenPayloadAndTransfers(payload);
-          try {
-            logger.debug(
-                `spatialWorker: posting task to worker kind=${kind} transferCount=${transfer?.length || 0}`
-              );
-          } catch (_e) {}
+          logger.debug(
+              `spatialWorker: posting task to worker kind=${kind} transferCount=${transfer?.length || 0}`
+            );
           if (transfer && transfer.length)
             worker.postMessage({ kind, payload: sendPayload }, transfer);
           else worker.postMessage({ kind, payload: sendPayload });
@@ -681,12 +661,10 @@ export async function runAgentBatches(
     }
 
     if (missingTargets.size > 0) {
-      try {
-        logger.debug(
-            'runAgentBatches: missing gradients for targets',
-            Array.from(missingTargets)
-          );
-      } catch (_e) {}
+      logger.debug(
+          'runAgentBatches: missing gradients for targets',
+          Array.from(missingTargets)
+        );
       // Compute missing gradients (uses same worker pool / normalization as callers)
       const newGrads = await runGradientBatches(Array.from(missingTargets), frictionSource, {
         r1Adjacency: options?.r1Adjacency || null,
@@ -729,11 +707,9 @@ export async function runAgentBatches(
   // to running computeAgentBatch synchronously on the main thread — behavior is
   // identical. The worker kernel is allocation-free (S3) so the hot path stays fast.
   const useWorker = typeof Worker !== 'undefined';
-  try {
-    logger.debug(
-        `runAgentBatches: dispatching agent-batches useWorker=${useWorker} planLength=${plan.length}`
-      );
-  } catch (_e) {}
+  logger.debug(
+      `runAgentBatches: dispatching agent-batches useWorker=${useWorker} planLength=${plan.length}`
+    );
 
   const agentPayload = {
     plan,
@@ -822,11 +798,9 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features });
 
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-  try {
-    logger.debug(
-        `spatialWorker: fast-scan-chunk dispatch workerCount=${chunks.length} featureCount=${featureCount}`
-      );
-  } catch (_e) {}
+  logger.debug(
+      `spatialWorker: fast-scan-chunk dispatch workerCount=${chunks.length} featureCount=${featureCount}`
+    );
 
   // Launch all chunk tasks in parallel
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
@@ -865,11 +839,9 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   const results = await Promise.all(chunkTasks);
 
   if (t0) {
-    try {
-      logger.debug(
-          `spatialWorker: fast-scan-chunk done in ${(performance.now() - t0).toFixed(1)}ms`
-        );
-    } catch (_e) {}
+    logger.debug(
+        `spatialWorker: fast-scan-chunk done in ${(performance.now() - t0).toFixed(1)}ms`
+      );
   }
 
   // Merge all chunk results. The per-layer map merges with MAX per (cell, layer),

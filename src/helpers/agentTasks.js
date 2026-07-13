@@ -18,6 +18,8 @@ import {
   MAX_SIM_TICKS,
   SIM_TICK_BUFFER,
   CELL_LATLNG_CACHE_MAX,
+  COMPUTE_PATH_CACHE_MAX,
+  COMPUTE_DISK_CACHE_MAX,
   SIMULATION_PARAMS,
 } from './constants.js';
 import { createLCG, strHash } from './rng.js';
@@ -135,7 +137,6 @@ function getBearingFast(a, b, bearingMap) {
 // Simple path/disk caches
 const _pathCache = Object.create(null);
 const _pathCacheOrder = [];
-const PATH_CACHE_MAX = 256;
 
 function _getCachedPathCells(a, b) {
   // Normalize the key so bidirectional pairs (a,b) and (b,a) share one entry,
@@ -155,7 +156,7 @@ function _getCachedPathCells(a, b) {
     _pathCacheOrder.push(ka);
   }
   inner[kb] = arr;
-  if (_pathCacheOrder.length > PATH_CACHE_MAX) {
+  if (_pathCacheOrder.length > COMPUTE_PATH_CACHE_MAX) {
     const old = _pathCacheOrder.shift();
     delete _pathCache[old];
   }
@@ -164,7 +165,6 @@ function _getCachedPathCells(a, b) {
 
 const _diskCache = Object.create(null);
 const _diskCacheOrder = [];
-const DISK_CACHE_MAX = 256;
 
 function _getCachedDisk(center, r) {
   // LRU cache of gridDisk(center, r). This is the fast path that avoids
@@ -182,7 +182,7 @@ function _getCachedDisk(center, r) {
     _diskCacheOrder.push(center);
   }
   inner[r] = arr;
-  if (_diskCacheOrder.length > DISK_CACHE_MAX) {
+  if (_diskCacheOrder.length > COMPUTE_DISK_CACHE_MAX) {
     const old = _diskCacheOrder.shift();
     delete _diskCache[old];
   }

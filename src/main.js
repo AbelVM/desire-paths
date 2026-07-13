@@ -16,6 +16,7 @@ import {
 } from './helpers/map.js';
 import { setupUI, findNodeAtScreenPoint } from './helpers/ui.js';
 import { computeDesirePaths, initializeAffordanceMap } from './helpers/compute.js';
+import { logger } from './helpers/logger.js';
 
 /**
  * DesireMap — wraps a maplibregl.Map with domain methods.
@@ -134,11 +135,16 @@ class DesireMap {
         if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
           target._state[prop] = value;
           const mp = target.#map;
-          // Write-through to underlying map when it already has the property
+          // Write-through to underlying map when it already has the property.
+          // The canonical value lives in `_state` (already set above), so a
+          // failed write-through must not be swallowed silently — surface it in
+          // dev (logger.warn is a no-op in prod).
           if (mp && prop in mp) {
             try {
               mp[prop] = value;
-            } catch (_e) {}
+            } catch (e) {
+              logger.warn(`DesireMap: write-through to map.${prop} failed`, e);
+            }
           }
           return true;
         }
@@ -148,7 +154,9 @@ class DesireMap {
           try {
             mp[prop] = value;
             return true;
-          } catch (_e) {}
+          } catch (e) {
+            logger.warn(`DesireMap: write to map.${prop} failed`, e);
+          }
         }
         // As a last resort, store private-like props in state bag
         if (typeof prop === 'string' && prop.startsWith('_')) {

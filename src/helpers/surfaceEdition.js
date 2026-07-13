@@ -9,6 +9,7 @@ import {
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import maplibregl from 'maplibre-gl';
 import { createIcons, icons } from 'lucide';
+import { logger } from './logger.js';
 import { SURFACE_CLASSES, SURFACE_CLASS_BY_KEY } from './constants.js';
 import { applySurfaceOverride, removeSurfaceOverride, clearSurfaceEditions } from './grid.js';
 
@@ -17,7 +18,16 @@ import { applySurfaceOverride, removeSurfaceOverride, clearSurfaceEditions } fro
 // class so it renders with a real color instead of blank.
 function classOf(feature) {
   const key = feature?.properties?.surfaceClass;
-  return SURFACE_CLASS_BY_KEY[key] || SURFACE_CLASSES[0];
+  const cls = typeof key === 'string' ? SURFACE_CLASS_BY_KEY[key] : undefined;
+  if (typeof key === 'string' && key !== '' && !cls) {
+    // An explicit but unrecognized class (typo, or a class removed in a newer
+    // version) would otherwise be silently treated as pavement (friction 1.0,
+    // affordance 1.0) and mislabel the surface. Warn so the bad data is visible.
+    logger.warn(
+      `surfaceEdition: unrecognized surfaceClass "${key}"; defaulting to "${SURFACE_CLASSES[0].key}"`
+    );
+  }
+  return cls || SURFACE_CLASSES[0];
 }
 
 // terra-draw keeps each feature's `id` at the top level. We resolve the clicked
