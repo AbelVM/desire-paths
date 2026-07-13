@@ -48,12 +48,8 @@ export const SURFACE_CLASS_BY_KEY = Object.fromEntries(SURFACE_CLASSES.map((c) =
  * Single canonical friction → terrain-tier classifier.
  *
  * Returns one of 'impassable' | 'pavement' | 'light_park' | 'heavy_grass'.
- * Thresholds are derived from FRICTION_COSTS so there is exactly ONE source of
- * truth (previously three divergent copies existed: here, `getCellType` in
- * map.js, and the inline classification in spatialTasks.mergeCellsChunk —
- * and map.js used hardcoded 1.5/3.25 cutoffs that disagreed with the canonical
- * (p+l)/2 = 1.75 pavement cutoff, silently mislabeling cells in the
- * 1.5–1.75 friction band).
+ * Thresholds are derived from FRICTION_COSTS so there is exactly one source of
+ * truth; callers must use this instead of hardcoding cutoffs.
  */
 export function classifyFrictionTier(friction) {
   if (friction >= FRICTION_COSTS.IMPASSABLE) return 'impassable';
@@ -77,10 +73,15 @@ export const WEIGHTS = {
   w_d: 4.0, // Distance penalty weight (favours shorter detours)
   w_theta: 0.6, // Angular penalty: discourages large steering deviations
 };
-// Calibration Summary for your testing:
-// Too many paths, everywhere: If the entire park is turning into a "web" of worn trails, increase w_f (to 1.1) or decrease w_a (to 1.5).
-// No paths at all (agents stick to concrete): Your agents are too "robotic." Increase w_a (to 2.0) or decrease w_f (to 0.7).
-// Paths look "jagged" or "zig-zagged": Your agents are too distance-focused. Increase w_d (to 1.0).
+// Calibration hints for tuning emergent paths (weights are WEIGHTS.w_a /
+// w_d / w_theta — there is no w_f):
+// Too many worn trails (park turns into a "web"): raise w_d (distance penalty,
+//   e.g. 5.0) or lower w_a (affordance weight, e.g. 0.8) so agents favour fewer,
+//   shorter routes.
+// Too few paths (agents stick to pavement): raise w_a (e.g. 2.0) or lower w_d
+//   (e.g. 3.0) so worn trails attract more agents.
+// Paths look "jagged"/"zig-zagged": raise w_theta (angular penalty) or lower w_d
+//   so agents steer more smoothly.
 
 export const VISUAL_DEPTH = 15; // How far ahead agents can "see" to evaluate paths (in H3 cells)
 

@@ -966,6 +966,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
+    // Tear down Surface Edition listeners/DOM before wiping its features so a
+    // reset (or HMR re-init) does not stack global/maplibre listeners (review12 #11).
+    map._surfaceEdition?.destroy?.();
+    map._surfaceEdition = undefined;
     // Wipe painted surfaces (terra-draw features + friction overrides).
     map._clearSurfaceEditions?.();
     syncFlowReadout();
@@ -1608,7 +1612,7 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   // underlying friction field. Initialised last so the toast/state helpers above
   // are all in scope.
   try {
-    initSurfaceEdition(map, { showToast: showToastNotification, setMapCursor });
+    map._surfaceEdition = initSurfaceEdition(map, { showToast: showToastNotification, setMapCursor });
   } catch (err) {
     console.error('[ui] Surface Edition failed to start:', err);
   }

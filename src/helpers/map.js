@@ -2,11 +2,6 @@ import { cellToBoundary, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, BUFFER_PX, classifyFrictionTier } from './constants.js';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 
-// Classify cell type from friction value (single canonical classifier)
-function getCellType(friction) {
-  return classifyFrictionTier(friction);
-}
-
 // Flow hover handler — updates tooltip with hex data.
 // Uses info.dataIndex to look up from source array instead of relying on info.object,
 // which may be stale when updateTriggers cause re-renders that change object identity.
@@ -20,7 +15,7 @@ export function handleFlowHover(info, flowData) {
     const score = Math.round(entry.s);
     const friction = entry.f;
     const affordance = entry.a;
-    const cellType = getCellType(friction);
+    const cellType = classifyFrictionTier(friction);
     const typeLabel =
       cellType === 'pavement'
         ? 'Pavement'
@@ -284,6 +279,11 @@ export function updateLayers(state, mapInstance) {
 
     state._flatData = state._flatPool.slice(0, flatCount);
     state._flowData = state._flowPool.slice(0, flowCount);
+    // Shrink the reusable pools when the AOI contracts so they don't retain
+    // entries from the largest area ever seen (review12 #11). The slice above
+    // already copies only the live entries, so truncating is safe.
+    state._flatPool.length = flatCount;
+    state._flowPool.length = flowCount;
     state._lastLayerDataVersion = dataVersion;
     state._lastViewHexes = viewRef;
 

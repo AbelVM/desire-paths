@@ -53,6 +53,9 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   const toast = typeof showToast === 'function' ? showToast : () => { };
   const state = map.state;
   const rawMap = typeof map.getRawMap === 'function' ? map.getRawMap() : map;
+  // Declared up-front (not const) so the teardown below can reference it even on
+  // the early-return path, before it is assigned from the map canvas.
+  let canvasEl = null;
 
   if (!state.surfaceEdits) state.surfaceEdits = new Map();
 
@@ -248,11 +251,10 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   // mode (returns to "none"). The Surface Edition toolbar lives on <body>,
   // outside the panel, so interacting with it never triggers this.
   const panelEl = document.querySelector('.panel');
-  if (panelEl) {
-    panelEl.addEventListener('click', () => {
-      if (currentMode) setMode(null);
-    });
+  function onPanelClick() {
+    if (currentMode) setMode(null);
   }
+  if (panelEl) panelEl.addEventListener('click', onPanelClick);
   try {
     createIcons({ icons, attrs: { 'stroke-width': 1.8, color: 'currentColor' } });
   } catch {
@@ -419,6 +421,7 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     for (const b of modeButtons.values()) b.disabled = true;
     deleteBtn.disabled = true;
     clearBtn.disabled = true;
+    destroy();
     return null;
   }
 
@@ -515,12 +518,12 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     return null;
   }
 
-  const canvasEl = rawMap.getCanvas();
+  canvasEl = rawMap.getCanvas();
   let pointerDownAt = null;
-  canvasEl.addEventListener('pointerdown', (e) => {
+  function onPointerDown(e) {
     pointerDownAt = { x: e.clientX, y: e.clientY };
-  });
-  canvasEl.addEventListener('pointerup', (e) => {
+  }
+  function onPointerUp(e) {
     if (currentMode !== 'select' || !draw) return;
     // Only treat a near-stationary press as a click; ignore map pans/drags so
     // we don't select/deselect while the user is moving the map.
@@ -533,7 +536,9 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     const hit = pickPolygon(ll.lng, ll.lat);
     if (hit) draw.selectFeature(hit.id);
     else if (selectedId) draw.deselectFeature(selectedId);
-  });
+  }
+  canvasEl.addEventListener('pointerdown', onPointerDown);
+  canvasEl.addEventListener('pointerup', onPointerUp);
 
   // ── Select-mode cursor ───────────────────────────────────────
   // In Select mode the cursor reflects what sits under the pointer so the user
@@ -587,7 +592,7 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   }
   let selectCursorPending = false;
   let lastSelectPoint = null;
-  rawMap.on('mousemove', (e) => {
+  function onMouseMove(e) {
     if (currentMode !== 'select') return;
     lastSelectPoint = e.point;
     if (selectCursorPending) return;
@@ -596,7 +601,8 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
       selectCursorPending = false;
       if (lastSelectPoint) updateSelectCursor(lastSelectPoint);
     });
-  });
+  }
+  rawMap.on('mousemove', onMouseMove);
 
   // ── Clear hook for the main "Clear map" button ───────────────
   map._clearSurfaceEditions = () => {
@@ -614,7 +620,7 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   };
 
   // ── Start terra-draw once the map is ready ───────────────────
-  const startDraw = () => {
+  function startDraw() {
     if (!draw) return;
     try {
       draw.start();
@@ -627,8 +633,32 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   if (typeof rawMap.loaded === 'function' && rawMap.loaded()) startDraw();
   else rawMap.on('load', startDraw);
 
-  // TEMP DEBUG: expose for e2e drag test
-  if (typeof window !== 'undefined') window.__td = { draw, setMode, setSurfaceClass, getSelected: () => selectedId };
+  // ── Teardown ─────────────────────────────────────────────────
+  // Removes every listener and DOM node this initialiser added so that calling
+  // initSurfaceEdition again (reset, HMR) does not stack them (review12 #11).
+  function destroy() {
+    window.removeEventListener('resize', positionModeBadge);
+    if (panelEl) panelEl.removeEventListener('click', onPanelClick);
+    if (canvasEl) {
+      canvasEl.removeEventListener('pointerdown', onPointerDown);
+      canvasEl.removeEventListener('pointerup', onPointerUp);
+    }
+    if (rawMap) {
+      rawMap.off('mousemove', onMouseMove);
+      rawMap.off('load', startDraw);
+    }
+    if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+    if (modeBadge && modeBadge.parentNode) modeBadge.parentNode.removeChild(modeBadge);
+    try {
+      draw?.stop();
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== 'undefined') delete window.__td;
+  }
 
-  return { draw, setMode, setSurfaceClass };
+  // TEMP DEBUG: expose for e2e drag test
+  if (typeof window !== 'undefined') window.__td = { draw, setMode, setSurfaceClass, destroy, getSelected: () => selectedId };
+
+  return { draw, setMode, setSurfaceClass, destroy };
 }
