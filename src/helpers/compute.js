@@ -407,7 +407,14 @@ export async function computeDesirePaths(state, mapInstance) {
         const gradients = await runGradientBatches(
           missingDestinations,
           state._frictionObj || state.cellFrictionMap,
-          { r1Adjacency: state._r1Adjacency || null, viewHexes: state._viewHexes || null }
+          {
+            r1Adjacency: state._r1Adjacency || null,
+            viewHexes: state._viewHexes || null,
+            // review12 #7: ship the SAB-backed friction array (aligned to
+            // viewHexes) so the gradient worker builds the graph from the typed
+            // array with a stable cache key across batches.
+            frictionArr: state.frictionArr || null,
+          }
         );
         for (const d of missingDestinations) {
           gradientCache.set(d, gradients[d] || Object.create(null));
@@ -599,6 +606,10 @@ export async function computeDesirePaths(state, mapInstance) {
         // M3: ship the shared r=1 CSR so the agent worker's getGradientGraph
         // filters it instead of running a per-cell gridDisk pass.
         r1Adjacency: state._r1Adjacency || null,
+        // review12 #7: ship the SAB-backed friction array (aligned to viewHexes)
+        // so the worker builds the gradient graph from the typed array with a
+        // stable cache key across batches (built once per worker, not per batch).
+        frictionArr: state.frictionArr || null,
         // P1 (review10 §4/§1.1): dynamics-safe agent parallelism. When the
         // environment supports it (Worker + cross-origin isolation + parallelizable
         // plan) the plan is sharded across workers sharing one SAB footprint

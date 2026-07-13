@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { gridPathCells, gridDisk, cellToLatLng, gridDistance } from 'h3-js';
 import { normalizeFrictionEntries } from './spatialTasks.js';
-import { getGradientGraph, getGraphNeighborIndicesR1, gradientGet, graphFriction } from './dijkstra.js';
+import { getGradientGraph, getGradientGraphFromArray, getGraphNeighborIndicesR1, gradientGet, graphFriction } from './dijkstra.js';
 import { _bearingFromLatLngs, angleDiff } from './bearing.js';
 import { reconstructVisibilityBearing } from './bearingIndex.js';
 import {
@@ -750,9 +750,44 @@ function runAgentPath(
 
 
 
+// review12 #7: zero-copy friction lookup over the SAB-backed `frictionArr`
+// (aligned to `viewHexes`). Used as the kernel's `frictionLookup` fallback when
+// the gradient graph is unavailable; in production the graph is always present
+// so this is never read, but it must be a valid lookup object. Cached per
+// `frictionArr` so the kernel's frictionLookup-identity cache stays valid across
+// batches (the SAB is shared, so the same Proxy is reused).
+let _arrFrictionLookupArr = null;
+let _arrFrictionLookup = null;
+function getArrayFrictionLookup(frictionArr, viewHexes) {
+  // review12 #7: key on the underlying buffer identity so the SAB-backed array
+  // (shared across batches) reuses the same Proxy instead of rebuilding the
+  // cell->index Map every batch.
+  const key = frictionArr && frictionArr.buffer;
+  if (key === _arrFrictionLookupArr && _arrFrictionLookup) return _arrFrictionLookup;
+  const cellToIdx = new Map();
+  for (let i = 0; i < viewHexes.length; i++) cellToIdx.set(viewHexes[i], i);
+  const lookup = new Proxy(
+    {},
+    {
+      get(_t, c) {
+        if (typeof c !== 'string') return undefined;
+        const i = cellToIdx.get(c);
+        return i === undefined ? undefined : frictionArr[i];
+      },
+      has(_t, c) {
+        return typeof c === 'string' && cellToIdx.has(c);
+      },
+    }
+  );
+  _arrFrictionLookupArr = key;
+  _arrFrictionLookup = lookup;
+  return lookup;
+}
+
 export function computeAgentBatch({
   plan = [],
   frictionEntries = null,
+  frictionArr = null,
   gradients = {},
   affordanceEntries = null,
   hexCount = 0,
@@ -775,7 +810,6 @@ export function computeAgentBatch({
     ...(options?.simulationParams || {}),
   };
 
-  const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const affordanceLookup = normalizeFrictionEntries(affordanceEntries);
   let visibilityMap = visibilityEntries || null;
   // Rebuild the CSR-backed visibility + bearing indices in-worker when the packed
@@ -788,14 +822,28 @@ export function computeAgentBatch({
     bearingMap = recon.bearingMap;
   }
 
-  // Build the canonical gradient graph (CSR r=1 adjacency) once per batch from
-  // the friction source. spatialTasks.js already builds the same graph keyed by
-  // this exact object, so this is a cache hit when the module instance is shared
-  // and at most one gridDisk pass otherwise. The sim path reuses it for every
-  // distance-1 neighbor lookup instead of calling gridDisk(cell, 1) repeatedly.
-  // M3: when the shared r=1 CSR (+ AOI cell order) is supplied, filter it instead
-  // of running a per-cell gridDisk pass.
-  const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
+  // Build the canonical gradient graph (CSR r=1 adjacency) from the friction
+  // source. review12 #7: when the SAB-backed `frictionArr` (aligned to
+  // viewHexes) is shipped AND cross-origin isolated, build the graph directly
+  // from the typed array and key the cache on the (stable SAB) buffer identity —
+  // so the worker builds the graph ONCE per run and reuses it for every agent
+  // batch instead of re-normalizing a plain-object copy (and rebuilding) every
+  // batch. Otherwise fall back to the normalized plain-object path (local /
+  // no-SAB fallback), which preserves the prior per-batch behavior exactly.
+  let frictionLookup;
+  let graph;
+  const useArrayFriction =
+    frictionArr &&
+    Array.isArray(viewHexes) &&
+    viewHexes.length > 0 &&
+    frictionArr.buffer instanceof SharedArrayBuffer;
+  if (useArrayFriction) {
+    graph = getGradientGraphFromArray(frictionArr, r1Adjacency, viewHexes);
+    frictionLookup = getArrayFrictionLookup(frictionArr, viewHexes);
+  } else {
+    frictionLookup = normalizeFrictionEntries(frictionEntries);
+    graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
+  }
 
   // Snapshot affordance into a typed array indexed by `graph.cellToIdx` so the
   // hot-path `getAffordance` reads are O(1) typed-array accesses (no N-entry

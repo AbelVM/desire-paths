@@ -12,6 +12,23 @@ import { clearComputeCaches, clearGradientCache } from './compute.js';
 import { invalidateGradientGraph } from './dijkstra.js';
 import { buildCellToIdx, FrictionArrayMap } from './frictionStore.js';
 
+// review12 #7: allocate the canonical friction typed array. When the page is
+// cross-origin isolated we back it with a SharedArrayBuffer so the spatial
+// worker receives the SAME buffer (shared by reference, zero-copy) across every
+// batch — this stable identity is what lets the worker's gradient-graph cache
+// be hit once per run instead of rebuilt per batch. Otherwise a plain
+// Float32Array (cloned per postMessage, so the cache cannot be shared).
+function allocFrictionArray(n) {
+  if (
+    typeof SharedArrayBuffer !== 'undefined' &&
+    typeof globalThis !== 'undefined' &&
+    globalThis.crossOriginIsolated === true
+  ) {
+    return new Float32Array(new SharedArrayBuffer(n * 4));
+  }
+  return new Float32Array(n);
+}
+
 // Low-allocation AOI key: bounding-box string with limited precision
 function _aoiKey(poly) {
   if (!poly || !poly.length) return '';
@@ -205,7 +222,14 @@ export async function triggerFastScan(state, mapInstance) {
   // arrays (~2x steady-state memory win). The merge loop below writes through
   // the views into the typed arrays.
   const cellToIdx = buildCellToIdx(viewHexes);
-  const frictionArr = new Float32Array(viewHexes.length);
+  // review12 #7: back `frictionArr` with a SharedArrayBuffer when the page is
+  // cross-origin isolated, so the worker receives the SAME buffer (zero-copy,
+  // shared by reference) instead of a fresh clone per batch. The stable SAB
+  // identity is what lets the worker's gradient-graph cache be hit across every
+  // agent/gradient batch (built once per run). `affArr` stays a plain
+  // Float32Array: it is only read on the main thread (affordance wear is applied
+  // there), never shipped to the worker.
+  const frictionArr = allocFrictionArray(viewHexes.length);
   const affArr = new Float32Array(viewHexes.length);
   state.cellToIdx = cellToIdx;
   state.frictionArr = frictionArr;

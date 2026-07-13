@@ -20,7 +20,7 @@ import {
   POLY_CELLS_CACHE_MAX,
   classifyFrictionTier,
 } from './constants.js';
-import { computeDijkstra, getGradientGraph } from './dijkstra.js';
+import { computeDijkstra, getGradientGraph, getGradientGraphFromArray } from './dijkstra.js';
 
 const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
 
@@ -195,17 +195,23 @@ export function normalizeFrictionEntries(source) {
   return lookup;
 }
 
-function computeDijkstraGradientForLookup(targetCell, frictionLookup, r1Adjacency, viewHexes) {
-  // Build the gradient graph (CSR adjacency) once per friction source and cache
-  // it, so every gradient Dijkstra reuses the mapping-stage neighbor topology
-  // instead of recomputing gridDisk(cell, 1) per visited cell. M3: when the
-  // shared r=1 CSR (+ AOI cell order) is supplied, filter it instead of running a
-  // per-cell gridDisk pass.
-  const graph = getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
+function computeDijkstraGradientForLookup(targetCell, frictionLookup, r1Adjacency, viewHexes, frictionArr) {
+  // review12 #7: when the SAB-backed `frictionArr` is shipped AND cross-origin
+  // isolated, build the graph from the typed array (stable cache key across
+  // batches) instead of re-normalizing a plain-object copy every batch.
+  // Otherwise use the normalized plain-object path (preserves prior behavior).
+  const useArrayFriction =
+    frictionArr &&
+    Array.isArray(viewHexes) &&
+    viewHexes.length > 0 &&
+    frictionArr.buffer instanceof SharedArrayBuffer;
+  const graph = useArrayFriction
+    ? getGradientGraphFromArray(frictionArr, r1Adjacency, viewHexes)
+    : getGradientGraph(frictionLookup, r1Adjacency, viewHexes);
   return computeDijkstra(targetCell, frictionLookup, graph);
 }
 
-export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, viewHexes }) {
+export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, viewHexes, frictionArr = null } = {}) {
   const frictionLookup = normalizeFrictionEntries(frictionEntries);
   const gradients = Object.create(null);
 
@@ -217,7 +223,8 @@ export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, vi
       targetCell,
       frictionLookup,
       r1Adjacency,
-      viewHexes
+      viewHexes,
+      frictionArr
     );
     if (i % emitEvery === 0) emitProgress('gradient-batch', i + 1, total);
   }

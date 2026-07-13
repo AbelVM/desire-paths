@@ -78,10 +78,64 @@ export function invalidateGradientGraph() {
  */
 export function getGradientGraph(cellSource, r1Adjacency, viewHexes) {
   if (_graphCache && _graphCacheKey === cellSource) return _graphCache;
-
   const isMap = typeof cellSource !== 'undefined' && typeof cellSource.entries === 'function';
   const cellKeys = isMap ? Array.from(cellSource.keys()) : Object.keys(cellSource || {});
   const getF = (c) => (isMap ? cellSource.get(c) : cellSource[c]);
+  return buildGradientGraph(getF, r1Adjacency, viewHexes, cellKeys, cellSource);
+}
+
+/**
+ * Build (or return the cached) gradient graph from a typed-array friction
+ * source (review12 #7).
+ *
+ * The main thread ships the SAB-backed `frictionArr` (aligned to `viewHexes`
+ * order) instead of a normalized plain-object copy of `cellFrictionMap`. The
+ * worker builds the graph directly from the typed array — no O(N) plain-object
+ * materialization — and keys the cache on the `frictionArr` identity. Because
+ * the array is a SharedArrayBuffer shared (not cloned) across batches when the
+ * page is cross-origin isolated, the key is STABLE, so the worker builds the
+ * graph ONCE per run and reuses it for every agent/gradient batch instead of
+ * rebuilding it every batch (the old identity-keyed cache was defeated by the
+ * fresh plain-object copy each batch produced).
+ *
+ * @param {Float32Array} frictionArr - per-cell friction, indexed by `viewHexes` order.
+ * @param {Object} [r1Adjacency]
+ * @param {string[]} [viewHexes]
+ */
+export function getGradientGraphFromArray(frictionArr, r1Adjacency, viewHexes) {
+  // review12 #7: key the cache on the underlying buffer identity. When the array
+  // is SAB-backed (cross-origin isolated) the SAME SharedArrayBuffer is shared
+  // across every batch, so this key is STABLE and the graph is built once per
+  // run. For a plain (cloned) array the buffer differs per call, so the cache
+  // correctly misses and the caller's fallback path is used.
+  const cacheKey = frictionArr && frictionArr.buffer;
+  if (_graphCache && _graphCacheKey === cacheKey) return _graphCache;
+  if (!frictionArr || !Array.isArray(viewHexes) || viewHexes.length === 0) return null;
+  // `frictionArr` is aligned to `viewHexes` order (state.frictionArr is built
+  // over viewHexes in grid.js), so cell c at viewHexes[i] has friction
+  // frictionArr[i]. Build the cell->index map once; the graph is cached, so this
+  // runs once per worker, not per batch.
+  const cellToIdx = new Map();
+  for (let i = 0; i < viewHexes.length; i++) cellToIdx.set(viewHexes[i], i);
+  const getF = (c) => {
+    const i = cellToIdx.get(c);
+    return i === undefined ? undefined : frictionArr[i];
+  };
+  return buildGradientGraph(getF, r1Adjacency, viewHexes, viewHexes, cacheKey);
+}
+
+/**
+ * Shared gradient-graph builder. `getF(cell)` returns the friction number for
+ * `cell` (or undefined). `cellKeys` is the full cell set (used only when
+ * `viewHexes` is absent, for deterministic legacy unit tests). `cacheKey` is the
+ * stable token the module cache is keyed by (the source object identity for the
+ * Map/object path, the `frictionArr` for the typed-array path). The graph is
+ * built once per `cacheKey` and reused across every Dijkstra (this is what
+ * eliminates the per-cell gridDisk calls that used to dominate gradient cost).
+ */
+function buildGradientGraph(getF, r1Adjacency, viewHexes, cellKeys, cacheKey) {
+  if (_graphCache && _graphCacheKey === cacheKey) return _graphCache;
+
   const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
 
   // Only PASSABLE cells participate in routing. Impassable cells are static
@@ -229,7 +283,7 @@ export function getGradientGraph(cellSource, r1Adjacency, viewHexes) {
     frictionArr,
     frictionMaxC,
   };
-  _graphCacheKey = cellSource;
+  _graphCacheKey = cacheKey;
   return _graphCache;
 }
 

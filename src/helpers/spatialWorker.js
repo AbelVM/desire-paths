@@ -526,14 +526,36 @@ export async function runGradientBatches(targets, frictionSource, options = {}) 
   // getGradientGraph filter it instead of running a per-cell gridDisk pass.
   const r1Adjacency = options?.r1Adjacency || null;
   const viewHexes = options?.viewHexes || null;
+  // review12 #7: ship the SAB-backed friction array (aligned to viewHexes) so the
+  // gradient worker builds the graph from the typed array with a stable cache key
+  // across batches. Cloned per batch when not cross-origin isolated (no change).
+  let shipFrictionArr = options?.frictionArr || null;
+  if (shipFrictionArr && viewHexes && viewHexes.length === shipFrictionArr.length) {
+    // review12 #7: the typed-array graph path only activates when the array is
+    // SAB-backed (cross-origin isolated) — see computeAgentBatch /
+    // computeDijkstraGradientForLookup. When that holds, ship the array directly
+    // so the worker shares the SAME buffer (stable cache key across batches,
+    // zero-copy). Otherwise drop it: the worker falls back to the normalized
+    // plain-object path and a non-SAB array would only be a wasted O(N) copy.
+    if (
+      shipFrictionArr.buffer instanceof SharedArrayBuffer &&
+      globalThis.crossOriginIsolated === true
+    ) {
+      // pass through unchanged (shared, zero-copy)
+    } else {
+      shipFrictionArr = null;
+    }
+  } else {
+    shipFrictionArr = null;
+  }
   const workerCount = Math.min(MAX_WORKERS, targets.length);
   if (workerCount <= 1)
-    return runLocally('gradient-batch', { targets, frictionEntries, r1Adjacency, viewHexes });
+    return runLocally('gradient-batch', { targets, frictionEntries, r1Adjacency, viewHexes, frictionArr: shipFrictionArr });
 
   const chunks = splitIntoChunks(targets, workerCount);
   const results = await Promise.all(
     chunks.map((chunk) =>
-      runWorkerWithRetry('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes })
+      runWorkerWithRetry('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes, frictionArr: shipFrictionArr })
     )
   );
 
@@ -792,6 +814,30 @@ export async function runAgentBatches(
       ? affordanceSource
       : normalizeFrictionEntries(affordanceSource);
 
+  // review12 #7: ship the SAB-backed friction array (aligned to viewHexes order)
+  // instead of a normalized plain-object copy. The worker builds the gradient
+  // graph directly from the typed array and keys its cache on the (stable SAB)
+  // buffer identity, so the graph is built ONCE per worker instead of once per
+  // batch. The typed-array graph path only activates when the array is
+  // SAB-backed (cross-origin isolated) — see computeAgentBatch. When that holds,
+  // ship the array directly so the worker shares the SAME buffer (zero-copy).
+  // Otherwise drop it: the worker falls back to the normalized plain-object path
+  // and a non-SAB array would only be a wasted O(N) copy.
+  const viewHexesForArr = options?.viewHexes || null;
+  let shipFrictionArr = options?.frictionArr || null;
+  if (shipFrictionArr && viewHexesForArr && viewHexesForArr.length === shipFrictionArr.length) {
+    if (
+      shipFrictionArr.buffer instanceof SharedArrayBuffer &&
+      globalThis.crossOriginIsolated === true
+    ) {
+      // pass through unchanged (shared, zero-copy)
+    } else {
+      shipFrictionArr = null;
+    }
+  } else {
+    shipFrictionArr = null;
+  }
+
   const visibilityEntries = options?.visibilityEntries || null;
   // Precomputed origin-destination grid distances — eliminates per-tick H3 calls
   const originDestDistances = options?.originDestDistances || null;
@@ -901,6 +947,7 @@ export async function runAgentBatches(
   const agentPayload = {
     plan,
     frictionEntries,
+    frictionArr: shipFrictionArr,
     gradients: gradientsObj,
     affordanceEntries,
     hexCount,

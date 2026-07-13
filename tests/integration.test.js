@@ -1824,6 +1824,86 @@ describe('main.js', () => {
       expect(dm.isComputing).toBe(true);
     });
 
+    it('should expose domain state as enumerable own properties (review12 #8)', async () => {
+      const { DesireMap } = await import('../src/main.js');
+      const mockMap = {
+        simulationNodes: {},
+        multiFrictionMap: new Map(),
+        cellFrictionMap: new Map(),
+        pathDesireScores: new Map(),
+        affordanceMap: new Map(),
+        globalPeakFlow: 1,
+        showFrictionMesh: true,
+        mappingReady: false,
+        flowsReady: false,
+        deckOverlayInstance: { setProps: vi.fn() },
+        targetLabelLayerId: 'label',
+        placementMode: 'origin',
+        placementWeight: 1,
+        aoi: undefined,
+        readyToCompute: false,
+        isComputing: false,
+        baseLayer: null,
+        flowLayer: null,
+        aoi_px: undefined,
+        aoi_polygon: undefined,
+        _cachedViewHexes: undefined,
+        _cachedAoiKey: undefined,
+        _lastViewHexesKey: undefined,
+        _frictionObj: undefined,
+        _affordanceObj: undefined,
+        _multiFrictionObj: undefined,
+        _cellState: undefined,
+        _computePathCacheObj: undefined,
+        _computePathCacheOrder: undefined,
+        _computeDiskCacheObj: undefined,
+        _computeDiskCacheOrder: undefined,
+        _visibilityCacheObj: undefined,
+        _visibilityCacheOrder: undefined,
+        _gradientCache: undefined,
+        _perTargetContribs: undefined,
+        _assignedCounts: undefined,
+        _targetWeights: undefined,
+        getContainer: () => ({}),
+        getLayer: () => null,
+        getStyle: () => ({ layers: [] }),
+        getBounds: () => ({}),
+        project: () => ({ x: 0, y: 0 }),
+        unproject: () => ({ lng: 0, lat: 0 }),
+        queryRenderedFeatures: () => [],
+        getSource: () => null,
+        addSource: () => {},
+        addLayer: () => {},
+        addControl: () => {},
+        fitBounds: vi.fn(),
+        getCanvas: () => null,
+        on: () => {},
+      };
+      const dm = new DesireMap(mockMap);
+      dm.simulationNodes = { hex1: { type: 'origin', weight: 1 } };
+      dm.globalPeakFlow = 42;
+
+      // Domain state must be visible to standard enumeration (the old Proxy
+      // hid it via custom ownKeys/getOwnPropertyDescriptor traps).
+      const keys = Object.keys(dm);
+      expect(keys).toContain('simulationNodes');
+      expect(keys).toContain('globalPeakFlow');
+
+      const forInKeys = [];
+      for (const k in dm) forInKeys.push(k);
+      expect(forInKeys).toContain('simulationNodes');
+
+      expect('simulationNodes' in dm).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(dm, 'simulationNodes')).toBe(true);
+
+      // JSON.stringify must include the domain key (no throw, key present).
+      const serialized = JSON.stringify(dm);
+      expect(serialized).toContain('simulationNodes');
+
+      // The value read back must match what was set.
+      expect(dm.simulationNodes).toEqual({ hex1: { type: 'origin', weight: 1 } });
+    });
+
     it('should delegate all remaining property getters/setters', async () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {

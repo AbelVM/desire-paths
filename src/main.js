@@ -35,6 +35,62 @@ import { PowerDeadline } from 'performance-helpers/powerDeadline';
  * DesireMap — wraps a maplibregl.Map with domain methods.
  * Avoids monkey-patching third-party prototypes.
  */
+// Domain state keys exposed on the DesireMap instance. They are real,
+// enumerable accessor properties (delegating to the `_state` bag) so they are
+// visible to Object.keys / for…in / JSON.stringify / hasOwnProperty — removing
+// the Proxy ownKeys/getOwnPropertyDescriptor footgun from review12 #8.
+const KNOWN_STATE_KEYS = [
+  'simulationNodes',
+  'multiFrictionMap',
+  'cellFrictionMap',
+  'pathDesireScores',
+  'affordanceMap',
+  'cellToIdx',
+  'frictionArr',
+  'affArr',
+  'globalPeakFlow',
+  'showFrictionMesh',
+  'mappingReady',
+  'flowsReady',
+  'deckOverlayInstance',
+  'targetLabelLayerId',
+  'placementMode',
+  'placementWeight',
+  'dragOccurred',
+  'aoi',
+  'readyToCompute',
+  'isComputing',
+  'baseLayer',
+  'flowLayer',
+  'aoi_px',
+  'aoi_polygon',
+  '_cachedViewHexes',
+  '_cachedAoiKey',
+  '_lastViewHexesKey',
+  '_frictionObj',
+  '_affordanceObj',
+  '_multiFrictionObj',
+  '_computePathCacheObj',
+  '_computePathCacheOrder',
+  '_computeDiskCacheObj',
+  '_computeDiskCacheOrder',
+  '_visibilityCacheObj',
+  '_visibilityCacheOrder',
+  '_gradientCache',
+  '_protectedGradientDests',
+  '_perTargetContribs',
+  '_assignedCounts',
+  '_targetWeights',
+  '_mappingGeneration',
+  '_frictionSnapshotGen',
+  '_affordanceSnapshotGen',
+  '_multiFrictionSnapshotGen',
+  '_visibilityBearingCSR',
+  '_precomputedNeighborDisks',
+  'simulationParams',
+];
+const KNOWN_STATE_KEYS_SET = new Set(KNOWN_STATE_KEYS);
+
 class DesireMap {
   #map;
 
@@ -45,80 +101,46 @@ class DesireMap {
     // binds methods to the receiver (the Proxy), breaking private-field access
     // — can still reach the real map (e.g. terra-draw's adapter).
     this.rawMap = map;
-    // Single consolidated state bag (replace many delegated properties)
+    // Single consolidated state bag (replace many delegated properties). Domain
+    // keys are exposed as real accessor properties (see below) that delegate
+    // here, so the bag stays the single source of truth the domain methods read.
     this._state = Object.create(null);
 
-    // Known state keys previously delegated — reads/writes are routed here.
-    this._knownStateKeys = new Set([
-      'simulationNodes',
-      'multiFrictionMap',
-      'cellFrictionMap',
-      'pathDesireScores',
-      'affordanceMap',
-      'cellToIdx',
-      'frictionArr',
-      'affArr',
-      'globalPeakFlow',
-      'showFrictionMesh',
-      'mappingReady',
-      'flowsReady',
-      'deckOverlayInstance',
-      'targetLabelLayerId',
-      'placementMode',
-      'placementWeight',
-      'dragOccurred',
-      'aoi',
-      'readyToCompute',
-      'isComputing',
-      'baseLayer',
-      'flowLayer',
-      'aoi_px',
-      'aoi_polygon',
-      '_cachedViewHexes',
-      '_cachedAoiKey',
-      '_lastViewHexesKey',
-      '_frictionObj',
-      '_affordanceObj',
-      '_multiFrictionObj',
-      '_computePathCacheObj',
-      '_computePathCacheOrder',
-      '_computeDiskCacheObj',
-      '_computeDiskCacheOrder',
-      '_visibilityCacheObj',
-      '_visibilityCacheOrder',
-      '_gradientCache',
-      '_protectedGradientDests',
-      '_perTargetContribs',
-      '_assignedCounts',
-      '_targetWeights',
-      '_mappingGeneration',
-      '_frictionSnapshotGen',
-      '_affordanceSnapshotGen',
-      '_multiFrictionSnapshotGen',
-      '_visibilityBearingCSR',
-      '_precomputedNeighborDisks',
-      'simulationParams',
-    ]);
+    const self = this;
+    // Expose each known state key as a REAL, enumerable accessor property that
+    // delegates to `_state`. This makes domain state proper own properties:
+    // Object.keys / for…in / JSON.stringify / hasOwnProperty now see them, and
+    // the Proxy no longer needs custom ownKeys/getOwnPropertyDescriptor traps
+    // (which previously hid them and created a has/descriptor invariant smell).
+    for (const k of KNOWN_STATE_KEYS) {
+      Object.defineProperty(self, k, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          return self._state[k];
+        },
+        set(v) {
+          self._state[k] = v;
+        },
+      });
+    }
 
     // Initialize state bag from provided map instance (snapshot at construction)
     // Copy values for known keys from the map into `_state` to avoid runtime fallbacks.
-    const mpInit = map;
-    for (const k of this._knownStateKeys) {
-      if (mpInit && Object.prototype.hasOwnProperty.call(mpInit, k)) {
-        this._state[k] = mpInit[k];
+    for (const k of KNOWN_STATE_KEYS) {
+      if (map && Object.prototype.hasOwnProperty.call(map, k)) {
+        this._state[k] = map[k];
       }
     }
 
     // Return a Proxy so existing property accessors (map.foo) continue to work
-    // but are backed by this single `_state` bag instead of mutating the map instance.
+    // but are backed by this single `_state` bag instead of mutating the map
+    // instance. Domain keys are now real own properties, so the default
+    // ownKeys/getOwnPropertyDescriptor behavior is correct and consistent.
     return new Proxy(this, {
       get(target, prop, receiver) {
         if (prop === 'state') return target._state;
-        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
-          // Return the value from the consolidated state bag only — no runtime fallbacks.
-          return target._state[prop];
-        }
-        // Prefer methods/props on the DesireMap instance
+        // Prefer the DesireMap instance (domain state accessors + methods)
         if (prop in target) {
           const v = Reflect.get(target, prop, receiver);
           if (typeof v === 'function') return v.bind(receiver);
@@ -131,11 +153,10 @@ class DesireMap {
           if (typeof mv === 'function') return mv.bind(mp);
           return mv;
         }
-        // Last-resort fallback to the state bag for properties stored there
-        // directly (e.g. private `_`-prefixed flags like `_surfaceEditActive`
-        // that the set trap writes into `_state` when they can't be set on the
-        // underlying map instance). Without this, such flags read back as
-        // `undefined` and guards that depend on them never fire.
+        // Last-resort fallback to the state bag for private-like props stored
+        // there directly (e.g. `_surfaceEditActive`) that aren't declared as
+        // known state keys. Without this such flags read back as `undefined`
+        // and guards that depend on them never fire.
         if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target._state, prop)) {
           return target._state[prop];
         }
@@ -146,13 +167,13 @@ class DesireMap {
           target._state = value;
           return true;
         }
-        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
-          target._state[prop] = value;
+        // Known state keys are real accessor properties delegating to `_state`.
+        // Set the accessor (canonical value) and write through to the underlying
+        // map when it already has the property (preserves prior behavior tested
+        // by "should delegate property setters").
+        if (typeof prop === 'string' && KNOWN_STATE_KEYS_SET.has(prop)) {
+          target[prop] = value;
           const mp = target.#map;
-          // Write-through to underlying map when it already has the property.
-          // The canonical value lives in `_state` (already set above), so a
-          // failed write-through must not be swallowed silently — surface it in
-          // dev (logger.warn is a no-op in prod).
           if (mp && prop in mp) {
             try {
               mp[prop] = value;
@@ -162,6 +183,7 @@ class DesireMap {
           }
           return true;
         }
+        // Domain state keys (and methods) are real own properties → set directly.
         if (prop in target) return Reflect.set(target, prop, value);
         const mp = target.#map;
         if (mp) {
@@ -172,7 +194,7 @@ class DesireMap {
             logger.warn(`DesireMap: write to map.${prop} failed`, e);
           }
         }
-        // As a last resort, store private-like props in state bag
+        // As a last resort, store private-like props in the state bag.
         if (typeof prop === 'string' && prop.startsWith('_')) {
           target._state[prop] = value;
           return true;
@@ -180,33 +202,16 @@ class DesireMap {
         return Reflect.set(target, prop, value);
       },
       has(target, prop) {
-        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) return true;
         if (prop in target) return true;
         if (prop in target.#map) return true;
+        if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target._state, prop)) {
+          return true;
+        }
         return false;
       },
-      ownKeys(target) {
-        // Expose only the DesireMap instance's real own keys. The consolidated
-        // state keys are intentionally omitted here so libraries that enumerate
-        // the map object (deck.gl/maplibre internals, serialization, spread,
-        // JSON.stringify, for...in) never see the large synthetic property set.
-        // They remain fully accessible via get/set/has.
-        return Reflect.ownKeys(target);
-      },
-      getOwnPropertyDescriptor(target, prop) {
-        if (typeof prop === 'string' && target._knownStateKeys.has(prop)) {
-          // Not an own property of the proxy: hidden from Object.keys/for...in/
-          // spread/JSON.stringify and from Object.getOwnPropertyNames. Still
-          // fully accessible via get/set/has. Returning undefined (rather than a
-          // descriptor) preserves the Proxy invariant because these keys are not
-          // listed in ownKeys.
-          return undefined;
-        }
-        return (
-          Reflect.getOwnPropertyDescriptor(target, prop) ||
-          Object.getOwnPropertyDescriptor(target.#map, prop)
-        );
-      },
+      // No custom ownKeys / getOwnPropertyDescriptor: the default behavior now
+      // correctly reports the real accessor properties (review12 #8), so
+      // enumeration and the has/descriptor contract are consistent.
     });
   }
 
