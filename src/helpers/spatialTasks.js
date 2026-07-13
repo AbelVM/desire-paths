@@ -400,41 +400,55 @@ export function computeImpassableBlurSnapshot({
   const impassableLimit = FRICTION_COSTS.IMPASSABLE - 1;
   const updates = [];
 
-  // Index-space multi-source BFS over the shared r=1 CSR. No `gridDisk` in the
-  // loop and no string-keyed nbrCache/visited/frontier — each cell is expanded
-  // at most once and distances are integer indices. `visited` uses 0 = unvisited
-  // and -1 = impassable source so the two never collide.
+  // Accumulate the gaussian blur weight from EVERY impassable source within
+  // `radius` (not just the nearest). A cell bordered by several barriers — a
+  // concave corner or alcove — therefore receives the SUM of their contributions
+  // and is penalized more than a cell next to a single barrier, matching real
+  // life where building edges and tight corners are rougher / less walkable.
   const { offsets, neighbors, N } = adj;
-  const visited = new Int32Array(N);
-  const frontier = new Int32Array(N);
-  let fHead = 0;
-  let fTail = 0;
-  for (let i = 0; i < impassables.length; i++) {
-    visited[impassables[i]] = -1; // impassable source
-    frontier[fTail++] = impassables[i];
-  }
-
-  let currentDist = 1;
-  while (currentDist <= radius && fHead < fTail) {
-    // Ring-buffer BFS: process exactly the current frontier (fHead..levelEnd),
-    // appending next-level cells after levelEnd. Each cell is enqueued at most
-    // once (visited check), so fTail grows monotonically and never overwrites
-    // unprocessed cells — no per-level `nextFrontier` array allocation.
-    const levelEnd = fTail;
-    for (let i = fHead; i < levelEnd; i++) {
-      const cell = frontier[i];
-      const s = offsets[cell];
-      const e = offsets[cell + 1];
-      for (let x = s; x < e; x++) {
-        const nc = neighbors[x];
-        if (visited[nc] === 0) {
-          visited[nc] = currentDist;
-          frontier[fTail++] = nc;
+  const accum = new Float32Array(N);
+  if (impassables.length && radius >= 1) {
+    // Per-source BFS over the shared r=1 CSR. `seen` is a generation marker so we
+    // avoid zeroing the whole array per source; `genQ` is reused across sources.
+    const seen = new Int32Array(N);
+    const genQ = new Int32Array(N);
+    let gen = 0;
+    for (let si = 0; si < impassables.length; si++) {
+      const src = impassables[si];
+      gen++;
+      let qh = 0;
+      let qt = 0;
+      seen[src] = gen;
+      genQ[qt++] = src;
+      let d = 0;
+      while (d < radius && qh < qt) {
+        // Ring-buffer BFS: process exactly the current frontier, appending the
+        // next level after it. Each cell is enqueued at most once per source
+        // (seen check), so there is no per-level allocation.
+        const levelEnd = qt;
+        d++;
+        const w = gaussianWeights[d];
+        for (let i = qh; i < levelEnd; i++) {
+          const cell = genQ[i];
+          const s = offsets[cell];
+          const e = offsets[cell + 1];
+          for (let x = s; x < e; x++) {
+            const nc = neighbors[x];
+            if (seen[nc] !== gen) {
+              seen[nc] = gen;
+              // Propagate through barriers (prior behavior) but only accumulate
+              // weight for walkable cells. `nc` is a viewHexes index, so resolve
+              // the cell string via `vh[nc]` before the friction lookup.
+              if (frictionLookup[vh[nc]] < FRICTION_COSTS.IMPASSABLE) {
+                accum[nc] += w;
+              }
+              genQ[qt++] = nc;
+            }
+          }
         }
+        qh = levelEnd;
       }
     }
-    fHead = levelEnd;
-    currentDist++;
   }
 
   // Build updates in a single pass over all cells. `blurUpdateMap` is the
@@ -443,12 +457,10 @@ export function computeImpassableBlurSnapshot({
   // + allocation) on every mapping build.
   const blurUpdateMap = Object.create(null);
   for (let idx = 0; idx < N; idx++) {
-    const dist = visited[idx];
-    if (dist <= 0) continue; // unvisited (0) or impassable source (-1)
+    const weight = accum[idx];
+    if (weight <= 0) continue;
     const cell = vh[idx];
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
-    const weight = gaussianWeights[dist];
-    if (weight === undefined) continue;
     blurWeights[cell] = weight;
     const fr = Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor);
     blurUpdateMap[cell] = fr;

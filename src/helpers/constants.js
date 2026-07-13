@@ -187,10 +187,20 @@ export const MAX_SIM_TICKS = 5000;
 export const SIM_TICK_BUFFER = 8; // multiplier on H3 grid distance between origin and destination
 
 // IMPASSABLE blur configuration
-// Radius (in H3 rings) to blur impassable influence (1 = immediate neighbors)
-export const IMPASSABLE_BLUR_RADIUS = 1;
+// Radius (in H3 rings) to blur impassable influence. 2 rings reaches the
+// walkable cells immediately outside a barrier (d=1) and one ring beyond
+// (d=2). At H3 res-15 (~0.58 m/edge, ~1.01 m center-to-center) this maps to
+// the pedestrian "personal space" bands used for the blur halo:
+//   d=1  (0–0.58 m from wall) -> HEAVY_GRASS ("hard park")
+//   d=2  (0.58–1.16 m)        -> LIGHT_PARK ("light park")
+//   d=3+ (>1.2 m)             -> PAVEMENT   (no penalty; never reached)
+// SIGMA=1.5 makes the d=2 weight ~0.41 (vs d=1 ~0.80), so the outer ring lands
+// in LIGHT_PARK while the inner ring crosses into HEAVY_GRASS — matching the
+// desired falloff. SIGMA=1.0 instead left d=2 at ~0.14 (still PAVEMENT),
+// missing the "light park" band entirely.
+export const IMPASSABLE_BLUR_RADIUS = 2;
 // Standard deviation for gaussian falloff (in rings)
-export const IMPASSABLE_BLUR_SIGMA = 1.0;
+export const IMPASSABLE_BLUR_SIGMA = 1.5;
 // Maximum friction amount to add (scaled by gaussian weight)
 export const IMPASSABLE_BLUR_FRICTION_ADD = 3.0;
 // Maximum affordance penalty (absolute amount) applied proportionally to gaussian weight
