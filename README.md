@@ -4,6 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-341_passing-brightgreen?style=flat-square)](#)
 
+![img](public/favicon.png)
+
 An interactive **agent-based simulation** that models how pedestrians naturally carve **desire paths** across terrain. Place origin and destination nodes on real-world maps, then watch friction fields form and emergent foot traffic patterns emerge from the interaction of agents navigating through walkable surfaces.
 
 Based on the research by [Bossowski et al. (CEUS 2025)](docs/paper.pdf), this tool visualizes how **agent-based modeling** can predict pedestrian routing behavior for urban planning, landscape architecture, and GIS analysis.
