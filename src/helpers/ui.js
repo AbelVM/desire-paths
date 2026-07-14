@@ -882,7 +882,17 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
 
     if (iconEl) {
-      iconEl.textContent = enabled ? '−' : '+';
+      iconEl.innerHTML = `<i data-lucide="${enabled ? 'eye-off' : 'eye'}" aria-hidden="true"></i>`;
+      try {
+        createIcons({
+          icons,
+          nameAttr: 'data-lucide',
+          root: iconEl,
+          attrs: { 'stroke-width': 1.8, color: 'currentColor' },
+        });
+      } catch {
+        // Safe fallback for environments without the full icon runtime.
+      }
       iconEl.style.transform = 'rotate(360deg)';
       setTimeout(() => (iconEl.style.transform = ''), 140);
     }
