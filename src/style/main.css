@@ -2973,11 +2973,13 @@ html {
 }
 
 @media (max-width: 599px) {
-  /* Core-loop stack, bottom → up: sheet peek (0) · action bar (84px) ·
-     placement badge (132px) · Surface Edition strip (180px, when active).
-     Lift the badge above the persistent action bar so the two never overlap. */
+  /* Core-loop stack, bottom → up: sheet peek (0) · action bar (84px, ~60px
+     tall → top ≈144px) · placement badge (152px) · Surface Edition strip
+     (180px, when active). The badge is pinned above the action bar by JS
+     (positionPlacementBadge) so the two never overlap; this static value is
+     only a pre-JS fallback. */
   .placement-badge {
-    bottom: 132px;
+    bottom: 152px;
   }
 
   .mobile-action-bar {

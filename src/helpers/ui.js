@@ -838,7 +838,15 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
       const onboardingVisible =
         uiState.onboardingOverlay && !uiState.onboardingOverlay.hidden;
-      const badgeVisible = map.mappingReady !== false && !onboardingVisible;
+      // While a Surface Edition tool is active, node placement is disabled and
+      // the se-mode-badge already occupies the slot above the toolbar — hide
+      // this badge so the two never stack.
+      const surfaceEditing = map._surfaceEditActive === true;
+      // Visible during placement (pre- and post-build): the badge's job is to
+      // guide taps, so it must show while nodes are being placed — not only
+      // after the first mapping build. Hidden only during onboarding and while
+      // a Surface Edition tool owns the slot (se-mode-badge takes over then).
+      const badgeVisible = !onboardingVisible && !surfaceEditing;
 
       uiState.placementBadge.className = `placement-badge mode-${
         map.placementMode === 'origin'
@@ -848,6 +856,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
             : 'dual'
       }${badgeVisible ? ' is-visible' : ''}`;
       uiState.placementBadge.innerHTML = `<span class="placement-badge-mode">Placing: ${badgeMode}</span><span class="placement-badge-sep">·</span><span class="placement-badge-status">${badgeStatus}</span>`;
+
+      // Pin the badge above the Surface Edition toolbar / mobile action bar so
+      // it never overlaps or hides behind them (review15 position/z-index fix).
+      positionPlacementBadge();
 
       // One-time hint that points are editable (review15 A3)
       const totalNodes = Object.keys(map.simulationNodes ?? {}).length;
@@ -949,6 +961,33 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         }
       }
     }
+  };
+
+  // Keep the placement badge clear of the floating controls directly beneath it:
+  // the Surface Edition toolbar (desktop: always; mobile: when the toolbox is
+  // open) and the persistent mobile action bar. Mirror the se-mode-badge, which
+  // is pinned a fixed gap above the toolbar via JS (its height varies between
+  // breakpoints, so a static CSS bottom would overlap). The badge takes the
+  // highest required offset so it never sits behind or on top of those controls.
+  const positionPlacementBadge = () => {
+    const badge = uiState.placementBadge;
+    if (!badge) return;
+    let minBottom = 0;
+    const bar = map._surfaceEdition?.bar;
+    if (bar) {
+      const r = bar.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        minBottom = Math.max(minBottom, window.innerHeight - r.top + 8);
+      }
+    }
+    const actionBar = document.getElementById('mobile-action-bar');
+    if (actionBar) {
+      const r = actionBar.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        minBottom = Math.max(minBottom, window.innerHeight - r.top + 8);
+      }
+    }
+    badge.style.bottom = minBottom > 0 ? `${minBottom}px` : '';
   };
 
   const syncSimulationUI = () => {
@@ -1831,6 +1870,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       );
       renderEditIcon(open);
       if (!open) map._surfaceEdition?.setMode?.(null);
+      // The Surface Edition toolbar just appeared/disappeared — re-pin the
+      // placement badge so it clears (or returns to) the toolbar slot.
+      positionPlacementBadge();
     });
     renderEditIcon(false);
   }
@@ -1843,6 +1885,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (window.innerWidth >= 600 && panelCollapsed) {
         setPanelCollapsed(false);
       }
+      // Floating control heights change across breakpoints — keep the placement
+      // badge pinned clear of the Surface Edition toolbar / mobile action bar.
+      positionPlacementBadge();
     }, 150);
   });
 

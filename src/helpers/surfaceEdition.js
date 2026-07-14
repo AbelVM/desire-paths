@@ -287,6 +287,10 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     // the user can tell drawing/editing apart from free node placement. Cleared
     // when the mode is deactivated (mode === null).
     updateModeBadge(mode);
+    // Surface mode changes also affect the map-level placement badge (it must
+    // hide while a Surface Edition tool is active and re-position above this
+    // toolbar). Refresh it through the shared UI sync hook.
+    map._syncSimulationUI?.();
     for (const [m, b] of modeButtons) {
       const on = m === mode;
       b.classList.toggle('is-active', on);
@@ -660,5 +664,5 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
   // TEMP DEBUG: expose for e2e drag test (dev only)
   if (import.meta.env.DEV && typeof window !== 'undefined') window.__td = { draw, setMode, setSurfaceClass, destroy, getSelected: () => selectedId };
 
-  return { draw, setMode, setSurfaceClass, destroy };
+  return { draw, setMode, setSurfaceClass, destroy, bar };
 }
