@@ -123,7 +123,7 @@ This simulator implements the model described in:
 
 > Bossowski, et al. "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning." *Computer Environment and Urban Systems (CEUS)*, 2025.
 
-Full paper available at [`docs/paper.md`](docs/paper.pdf).
+Full paper available at [`docs/paper.pdf`](docs/paper.pdf).
 
 ## Getting Started
 
@@ -153,6 +153,10 @@ index.html
 ├── src/workers/         — Web Workers for parallel gradient computation
 └── tests/               — Vitest test suite (341 tests)
 ```
+
+## AI / LLM Briefing
+
+This repo includes a plain-text briefing for AI systems and LLM crawlers at [`public/llm.txt`](public/llm.txt). It summarizes the project purpose, key pages, core topics, and citation guidance to improve extractability and citation accuracy.
 
 ## License
 
