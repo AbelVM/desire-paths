@@ -100,6 +100,10 @@ function getMainThreadVisibilityBearing(state) {
   // fallback (Node/SSR, where `Worker` is undefined). Skipping the O(N)
   // cellToIndex Map + two Proxies here when a Worker is available avoids the
   // dominant per-run allocation the indexed kernel (S1, the default) never reads.
+  // P4: the main-thread indices are intentionally omitted in the browser — if a
+  // future feature adds a main-thread preview that needs these indices, it will
+  // silently degrade to the slow path-cell visibility unless this guard is
+  // revisited.
   if (csr && viewHexes && typeof Worker === 'undefined') {
     const recon = reconstructVisibilityBearing(csr, viewHexes);
     visibilityData = recon.visibilityData.data;
@@ -268,71 +272,98 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
 /**
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
-export async function computeDesirePaths(state, mapInstance) {
-  const simParams = state.simulationParams ?? SIMULATION_PARAMS;
-
-  // Reset flow map before every simulation so results don't accumulate across runs.
-  // Always use a plain object for pathDesireScores — inner loops index it directly.
-  state.pathDesireScores = Object.create(null);
-
-  // Guard: ensure the friction map has been built before simulating
-  if (!state.cellFrictionMap || state.cellFrictionMap.size === 0) {
-    state.flowsReady = false;
-    if (mapInstance.showAlertCard) {
-      mapInstance.showAlertCard(
-        'Build the mapping first by clicking "Build Mapping". ' +
-          'The simulation requires a friction map generated from the map tiles.',
-        { title: 'Mapping not built', tone: 'warning' }
-      );
-    }
-    return;
+export async function computeDesirePaths(state, mapInstance, signal) {
+  if (signal && signal.aborted) {
+    throw new Error('computeDesirePaths aborted before start');
   }
 
-  const destinations = Object.keys(state.simulationNodes).filter((k) =>
-    ['destination', 'dual'].includes(state.simulationNodes[k].type)
-  );
-  const agents = Object.keys(state.simulationNodes).filter((k) =>
-    ['origin', 'dual'].includes(state.simulationNodes[k].type)
-  );
-
-  const hexes = state.cellFrictionMap.size;
-  ensureGradientCacheFresh(state);
-
-  // J (review11 §J, option 1): the visibility/bearing CSR is the dominant
-  // steady-state memory cost at city scale (~2 GB at N=5e5, visionDepth=15).
-  // It is rebuilt lazily here when needed. review12 #6: cache it ACROSS runs and
-  // only rebuild when the inputs that determine it change — `mappingGeneration`
-  // (the friction topology / AOI) or `visionDepth` (the BFS radius). This avoids
-  // the full mapping-graph + visibility BFS rebuild on every run when neither
-  // input changed. The cached CSR carries its `gen` + `visionDepth` so the check
-  // is exact; a remap bumps `mappingGeneration`, and a visionDepth change is
-  // detected directly. Any failure degrades gracefully to the (correct, slower)
-  // path-cell visibility path.
-  const wantVisionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
-  const csrGen = state._mappingGeneration ?? 0;
-  const cachedCsr = state._visibilityBearingCSR;
-  const csrValid =
-    cachedCsr && cachedCsr.gen === csrGen && cachedCsr.visionDepth === wantVisionDepth;
-  if (!csrValid && state.cellFrictionMap && state._viewHexes) {
+  const onAbort = () => {
     try {
-      const mappingGraph = await runBuildMappingGraph(
-        state.cellFrictionMap,
-        state._viewHexes,
-        state._r1Adjacency || null
-      );
-      const csr = await runVisibilityBearingTask(
-        mappingGraph,
-        state._viewHexes,
-        wantVisionDepth
-      );
-      state._visibilityBearingCSR = { gen: csrGen, visionDepth: wantVisionDepth, ...csr };
-    } catch (err) {
-      try {
-        logger.warn('computeDesirePaths: lazy visibility CSR rebuild failed', err);
-      } catch (_e) {}
-      state._visibilityBearingCSR = null;
-    }
+      terminateAllWorkers?.();
+    } catch (_e) {}
+    throw new Error('computeDesirePaths aborted');
+  };
+  if (signal) {
+    signal.addEventListener('abort', onAbort, { once: true });
   }
+
+  try {
+    const simParams = state.simulationParams ?? SIMULATION_PARAMS;
+
+    // Reset flow map before every simulation so results don't accumulate across runs.
+    // Always use a plain object for pathDesireScores — inner loops index it directly.
+    state.pathDesireScores = Object.create(null);
+
+    // Guard: ensure the friction map has been built before simulating
+    if (!state.cellFrictionMap || state.cellFrictionMap.size === 0) {
+      state.flowsReady = false;
+      if (mapInstance.showAlertCard) {
+        mapInstance.showAlertCard(
+          'Build the mapping first by clicking "Build Mapping". ' +
+            'The simulation requires a friction map generated from the map tiles.',
+          { title: 'Mapping not built', tone: 'warning' }
+        );
+      }
+      return;
+    }
+
+    if (signal && signal.aborted) throw new Error('computeDesirePaths aborted');
+
+    const destinations = Object.keys(state.simulationNodes).filter((k) =>
+      ['destination', 'dual'].includes(state.simulationNodes[k].type)
+    );
+    const agents = Object.keys(state.simulationNodes).filter((k) =>
+      ['origin', 'dual'].includes(state.simulationNodes[k].type)
+    );
+
+    const hexes = state.cellFrictionMap.size;
+    ensureGradientCacheFresh(state);
+
+    // J (review11 §J, option 1): the visibility/bearing CSR is the dominant
+    // steady-state memory cost at city scale (~2 GB at N=5e5, visionDepth=15).
+    // It is rebuilt lazily here when needed. review12 #6: cache it ACROSS runs and
+    // only rebuild when the inputs that determine it change — `mappingGeneration`
+    // (the friction topology / AOI) or `visionDepth` (the BFS radius). This avoids
+    // the full mapping-graph + visibility BFS rebuild on every run when neither
+    // input changed. The cached CSR carries its `gen` + `visionDepth` so the check
+    // is exact; a remap bumps `mappingGeneration`, and a visionDepth change is
+    // detected directly. Any failure degrades gracefully to the (correct, slower)
+    // path-cell visibility path.
+    const wantVisionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
+    const csrGen = state._mappingGeneration ?? 0;
+    const cachedCsr = state._visibilityBearingCSR;
+    const csrValid =
+      cachedCsr && cachedCsr.gen === csrGen && cachedCsr.visionDepth === wantVisionDepth;
+    if (!csrValid && state.cellFrictionMap && state._viewHexes) {
+      try {
+        const mappingGraph = await runBuildMappingGraph(
+          state.cellFrictionMap,
+          state._viewHexes,
+          state._r1Adjacency || null
+        );
+        const csr = await runVisibilityBearingTask(
+          mappingGraph,
+          state._viewHexes,
+          wantVisionDepth
+        );
+        state._visibilityBearingCSR = { gen: csrGen, visionDepth: wantVisionDepth, ...csr };
+      } catch (err) {
+        try {
+          logger.warn('computeDesirePaths: lazy visibility CSR rebuild failed', err);
+        } catch (_e) {}
+        state._visibilityBearingCSR = null;
+        if (mapInstance?.showAlertCard) {
+          try {
+            mapInstance.showAlertCard(
+              'Visibility data could not be computed — simulation may be slower than usual.',
+              { title: 'Visibility warning', tone: 'warning' }
+            );
+          } catch (_e) {}
+        }
+      }
+    }
+
+    if (signal && signal.aborted) throw new Error('computeDesirePaths aborted');
 
   // I (review11 §I): `_frictionObj`/`_affordanceObj` are no longer separate
   // N-entry plain-object copies of the canonical maps — they ARE the canonical
@@ -413,6 +444,7 @@ export async function computeDesirePaths(state, mapInstance) {
             // viewHexes) so the gradient worker builds the graph from the typed
             // array with a stable cache key across batches.
             frictionArr: state.frictionArr || null,
+            signal,
           }
         );
         for (const d of missingDestinations) {
@@ -617,8 +649,11 @@ export async function computeDesirePaths(state, mapInstance) {
         // Persistent cross-wave footprint buffer (see above).
         footprintBuffer: state._footprintBuffer,
         simulationParams: simParams,
+        signal,
       }
     );
+
+    if (signal && signal.aborted) throw new Error('computeDesirePaths aborted');
 
     // Merge returned path desire into plain object
     const mergedPath = agentResults.pathDesire || Object.create(null);
@@ -641,6 +676,8 @@ export async function computeDesirePaths(state, mapInstance) {
       clearSpatialWorkerProgressHandler();
     } catch (_e) {}
   }
+
+  if (signal && signal.aborted) throw new Error('computeDesirePaths aborted');
 
   applyPathDesireDeltas(state, pathDesireDeltas);
 
@@ -678,7 +715,15 @@ export async function computeDesirePaths(state, mapInstance) {
   // holding it trades memory for a large per-run CPU win. It is still dropped on
   // remap via the `gen` mismatch check above, and `clearComputeCaches`/remap
   // invalidate the dependent gradient graph as before.
+  } finally {
+    if (signal) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
 }
+
+
+/**
 
 
 /**

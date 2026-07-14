@@ -156,8 +156,10 @@ describe('review12 #6 — visibility/bearing CSR cached across runs', () => {
     // cache so the next run rebuilds (review12 #6 correctness guard).
     const { clearSurfaceEditions } = await import('../src/helpers/grid.js');
     // Give the state a base snapshot so clearSurfaceEditions restores cleanly.
-    state._baseFrictionArr = new Float32Array(mockHexes.map(() => 1));
-    state._baseAffArr = new Float32Array(mockHexes.map(() => 0.1));
+    state._baseDirty = new Map();
+    for (let i = 0; i < mockHexes.length; i++) {
+      state._baseDirty.set(mockHexes[i], { friction: 1, affordance: 0.1 });
+    }
     state.cellToIdx = new Map(mockHexes.map((h, i) => [h, i]));
     clearSurfaceEditions(state);
     expect(state._visibilityBearingCSR).toBeNull();

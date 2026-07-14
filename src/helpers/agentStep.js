@@ -16,17 +16,11 @@ import { angleDiff } from './bearing.js';
 export function cornersImpassable({ a, b, frictionLookup, getDisk, impassableVal }) {
   const neighborsA = getDisk(a, 1);
   const neighborsB = getDisk(b, 1);
+  const neighborsBSet = new Set(neighborsB);
   for (let i = 0; i < neighborsA.length; i++) {
     const c = neighborsA[i];
     if (c === a || c === b) continue;
-    let isNeighbor = false;
-    for (let j = 0; j < neighborsB.length; j++) {
-      if (neighborsB[j] === c) {
-        isNeighbor = true;
-        break;
-      }
-    }
-    if (!isNeighbor) continue;
+    if (!neighborsBSet.has(c)) continue;
     const f = frictionLookup[c];
     if (typeof f !== 'undefined' && f >= impassableVal) return true;
   }
@@ -102,7 +96,7 @@ export function resolveStepLine({
       queue.push(m);
     }
   }
-  if (!found) return straight; // fall back; movement loop will stop safely
+  if (!found) return [curr]; // no detour found; agent stays in place
 
   // Reconstruct path curr -> ... -> nextStep
   const path = [];

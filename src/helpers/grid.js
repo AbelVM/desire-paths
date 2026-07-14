@@ -258,8 +258,19 @@ export async function triggerFastScan(state, mapInstance) {
   // overrides can be reverted/restored without a full remap. `surfaceEdits`
   // (painted polygons) persists across remaps because it is keyed by feature id
   // with cached H3 cells; re-applying here keeps edits valid on the new AOI.
-  state._baseFrictionArr = frictionArr.slice();
-  state._baseAffArr = affArr.slice();
+  // P3: replace full array slices with a dirty-cell map that only stores cells
+  // touched by surface edits, saving ~4 MB at city scale.
+  state._baseDirty = new Map();
+  if (state.surfaceEdits) {
+    for (const edit of state.surfaceEdits.values()) {
+      for (const cell of edit.cells) {
+        const i = cellToIdx.get(cell);
+        if (i !== undefined) {
+          state._baseDirty.set(cell, { friction: frictionArr[i], affordance: affArr[i] });
+        }
+      }
+    }
+  }
   if (!state.surfaceEdits) state.surfaceEdits = new Map();
   applySurfaceEdits(state);
   // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
@@ -402,15 +413,27 @@ function mapCells(state, cells, surface) {
       val = Object.create(null);
       frictionMap.set(cell, val);
     }
-    if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) val[layerKey] = layerVal;
+    if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) {
+      val[layerKey] = layerVal;
+      // Track min friction incrementally (P3): we only increase layer values,
+      // so the min can only decrease. Update _min when the new value is lower.
+      if (val._min === undefined || layerVal < val._min) {
+        val._min = layerVal;
+      }
+    }
     // Recompute the per-cell min friction (cellFrictionMap) from the updated
     // layer map. The gradient graph / Dijkstra read cellFrictionMap (and its
     // snapshot _frictionObj), so without this the drawn barrier is invisible to
     // routing until a full remap (C5).
-    let min = Infinity;
-    for (const k in val) {
-      const v = val[k];
-      if (typeof v === 'number' && v < min) min = v;
+    let min = val._min;
+    if (min === undefined) {
+      // Legacy layer map without _min: compute from scratch and cache.
+      min = Infinity;
+      for (const k in val) {
+        const v = val[k];
+        if (typeof v === 'number' && v < min) min = v;
+      }
+      val._min = min;
     }
     const fr = isFinite(min) ? min : 0;
     if (cellFrictionMap) cellFrictionMap.set(cell, fr);
@@ -433,8 +456,8 @@ function mapCells(state, cells, surface) {
 // temporary path through a building). This is the core requirement: the drawn
 // polygon's surface class wins outright.
 //
-// Implementation: we keep a snapshot of the base friction/affordance taken right
-// after the fast-scan (`_baseFrictionArr` / `_baseAffArr`) plus an ordered list
+// Implementation: we keep a dirty-cell map of base friction/affordance taken right
+// after the fast-scan (`_baseDirty`) plus an ordered list
 // of painted edits (`surfaceEdits: Map<featureId, { surfaceClass, cells }>`).
 // Re-applying is O(edited cells), not O(all cells): we restore only the cells
 // ever touched by an edit back to base, then stamp each edit in draw order (so
@@ -446,12 +469,11 @@ function mapCells(state, cells, surface) {
  * painted edits. No-op until a mapping has built the base arrays.
  */
 export function applySurfaceEdits(state) {
-  const base = state._baseFrictionArr;
-  const baseAff = state._baseAffArr;
+  const baseDirty = state._baseDirty;
   const cellFrictionMap = state.cellFrictionMap;
   const affordanceMap = state.affordanceMap;
   const cellToIdx = state.cellToIdx;
-  if (!base || !cellFrictionMap || !cellToIdx) return;
+  if (!baseDirty || !cellFrictionMap || !cellToIdx) return;
 
   // Union of every cell touched by any edit = the only cells we ever mutate.
   const dirty = new Set();
@@ -460,10 +482,10 @@ export function applySurfaceEdits(state) {
   }
   // Restore previously-edited cells to their base values.
   for (const cell of dirty) {
-    const i = cellToIdx.get(cell);
-    if (i !== undefined) {
-      cellFrictionMap.set(cell, base[i]);
-      if (affordanceMap) affordanceMap.set(cell, baseAff[i]);
+    const base = baseDirty.get(cell);
+    if (base) {
+      cellFrictionMap.set(cell, base.friction);
+      if (affordanceMap) affordanceMap.set(cell, base.affordance);
     }
   }
   // Stamp each edit in draw order (later paints override earlier ones).
@@ -520,12 +542,10 @@ export function removeSurfaceOverride(state, id) {
 
 /** Wipe every painted surface and reset the friction field to the base map. */
 export function clearSurfaceEditions(state) {
-  const base = state._baseFrictionArr;
-  const baseAff = state._baseAffArr;
+  const baseDirty = state._baseDirty;
   const cellFrictionMap = state.cellFrictionMap;
   const affordanceMap = state.affordanceMap;
-  const cellToIdx = state.cellToIdx;
-  if (base && cellFrictionMap && cellToIdx) {
+  if (baseDirty && cellFrictionMap) {
     // Restore every painted cell to its base value BEFORE dropping the base
     // arrays. If we nulled the base first, applySurfaceEdits would early-return
     // on the missing base and the painted friction would remain on the mesh.
@@ -534,16 +554,15 @@ export function clearSurfaceEditions(state) {
       for (const c of edit.cells) dirty.add(c);
     }
     for (const cell of dirty) {
-      const i = cellToIdx.get(cell);
-      if (i !== undefined) {
-        cellFrictionMap.set(cell, base[i]);
-        if (affordanceMap) affordanceMap.set(cell, baseAff[i]);
+      const base = baseDirty.get(cell);
+      if (base) {
+        cellFrictionMap.set(cell, base.friction);
+        if (affordanceMap) affordanceMap.set(cell, base.affordance);
       }
     }
   }
   state.surfaceEdits = new Map();
-  state._baseFrictionArr = undefined;
-  state._baseAffArr = undefined;
+  state._baseDirty = undefined;
   invalidateGradientGraph();
   clearGradientCache(state);
   // Surface edits change friction (and can flip a cell's impassability, which

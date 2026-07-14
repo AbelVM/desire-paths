@@ -18,6 +18,14 @@ import { gradientGet, getGradientGraph } from './dijkstra.js';
 import { PowerRetry } from 'performance-helpers/powerRetry';
 import { PowerHistogram } from 'performance-helpers/powerHistogram';
 
+// AbortError for cancellation propagation
+class AbortError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AbortError';
+  }
+}
+
 const detectedHC =
   typeof navigator !== 'undefined' && navigator.hardwareConcurrency
     ? navigator.hardwareConcurrency
@@ -64,7 +72,7 @@ export function getParallelAgentBatches() {
   return PARALLEL_AGENT_BATCHES;
 }
 
-const WORKER_TASK_TIMEOUT = 600_000; // 10m timeout per worker task
+const WORKER_TASK_TIMEOUT = 45_000; // 45s timeout per worker task
 const WORKER_IDLE_TIMEOUT = 300_000; // 5m — retire workers idle longer than this
 
 // Pools keyed by task kind (e.g. 'agent-batch' -> agent workers)
@@ -369,7 +377,7 @@ function runLocally(kind, payload) {
   throw new Error(`Unknown spatial task: ${kind}`);
 }
 
-function runWorker(kind, payload) {
+function runWorker(kind, payload, signal) {
   if (typeof Worker === 'undefined') return Promise.resolve(runLocally(kind, payload));
 
   let slotPromise;
@@ -396,6 +404,15 @@ function runWorker(kind, payload) {
           worker.removeEventListener('message', handleMessage);
           worker.removeEventListener('error', handleError);
           if (timerId) clearTimeout(timerId);
+          if (signal) signal.removeEventListener('abort', handleAbort);
+        };
+
+        const handleAbort = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          retireWorkerSlot(slot);
+          reject(new AbortError(`Spatial worker task aborted for kind=${kind}`));
         };
 
         const handleMessage = (event) => {
@@ -440,6 +457,10 @@ function runWorker(kind, payload) {
 
         worker.addEventListener('message', handleMessage);
         worker.addEventListener('error', handleError);
+        if (signal) {
+          signal.addEventListener('abort', handleAbort, { once: true });
+          if (signal.aborted) handleAbort();
+        }
 
         try {
           const { payload: sendPayload, transfer } = flattenPayloadAndTransfers(payload);
@@ -481,15 +502,15 @@ function runWorker(kind, payload) {
  * existing error handling degrades gracefully — these tasks are monolithic, so a
  * failed result is not safely mergeable like fast-scan's partial chunks.
  */
-function runWorkerWithRetry(kind, payload) {
+function runWorkerWithRetry(kind, payload, signal) {
   return PowerRetry.run(
-    () => runWorker(kind, payload),
+    () => runWorker(kind, payload, signal),
     {
       maxAttempts: 3,
       baseDelay: 200,
       backoff: 'exponential',
       jitter: true,
-      retryIf: () => true,
+      retryIf: (err) => !(err instanceof AbortError),
       onRetry: (attempt, err) => {
         try {
           logger.warn(`spatialWorker: ${kind} retry`, { attempt, err });
@@ -553,9 +574,10 @@ export async function runGradientBatches(targets, frictionSource, options = {}) 
     return runLocally('gradient-batch', { targets, frictionEntries, r1Adjacency, viewHexes, frictionArr: shipFrictionArr });
 
   const chunks = splitIntoChunks(targets, workerCount);
+  const signal = options?.signal || null;
   const results = await Promise.all(
     chunks.map((chunk) =>
-      runWorkerWithRetry('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes, frictionArr: shipFrictionArr })
+      runWorkerWithRetry('gradient-batch', { targets: chunk, frictionEntries, r1Adjacency, viewHexes, frictionArr: shipFrictionArr }, signal)
     )
   );
 
@@ -680,7 +702,7 @@ async function runParallelAgentBatches(plan, agentPayload, gradientGraph, option
         ...agentPayload,
         plan: chunk,
         options: Object.assign({}, options, { footprintBuffer: sharedFootprints }),
-      })
+      }, options?.signal || null)
     )
   );
   return mergeAgentResults(results.map(normalizeAgentResult));
@@ -1002,7 +1024,7 @@ export async function runAgentBatches(
   }
 
   try {
-    const ret = await runWorker('agent-batch', agentPayload);
+    const ret = await runWorker('agent-batch', agentPayload, options?.signal || null);
     return normalizeAgentResult(ret);
   } catch (err) {
     try {
@@ -1410,6 +1432,10 @@ export function terminateAllWorkers() {
   idleWorkersByKind.clear();
   waitingAcquiresByKind.clear();
   workerLatencyHistograms.clear();
+  if (_idleCleanupInterval) {
+    clearInterval(_idleCleanupInterval);
+    _idleCleanupInterval = null;
+  }
 }
 
 // Per-kind pool statistics for operability/debugging. Borrowed from PowerPool's
