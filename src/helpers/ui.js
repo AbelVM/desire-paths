@@ -1122,11 +1122,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     terminateAllWorkers();
     map.getSource?.('pins')?.setData({ type: 'FeatureCollection', features: [] });
     map.clearLayers();
-    // Tear down Surface Edition listeners/DOM before wiping its features so a
-    // reset (or HMR re-init) does not stack global/maplibre listeners (review12 #11).
-    map._surfaceEdition?.destroy?.();
-    map._surfaceEdition = undefined;
-    // Wipe painted surfaces (terra-draw features + friction overrides).
+    // Keep the Surface Edition panel/toolbar alive across a clear — only wipe
+    // its painted surfaces (terra-draw features + friction overrides) so the
+    // editor stays usable. Full teardown is handled by destroy() (unload/HMR).
     map._clearSurfaceEditions?.();
     syncFlowReadout();
     syncSimulationUI();
