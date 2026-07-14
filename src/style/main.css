@@ -240,7 +240,7 @@ html {
   position: absolute;
   top: 0;
   left: 0;
-  width: min(340px, calc(100vw - 40px));
+  width: min(420px, calc(100vw - 40px));
   padding: 20px 20px 18px;
   border-radius: 28px;
   border: 1px solid var(--border);
@@ -253,6 +253,9 @@ html {
     var(--shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(18px) saturate(1.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .panel::before {
@@ -271,12 +274,6 @@ html {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
-}
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .panel-tabs {
@@ -361,9 +358,13 @@ html {
   flex: 0 0 auto;
   margin-top: auto;
   margin-bottom: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  /* background: var(--panel); */
   border-top: 1px solid var(--border);
   padding-top: 10px;
-  padding-bottom: 24px;
+  /* padding-bottom: 24px; */
 }
 
 #simulation-params-disclosure {
@@ -392,37 +393,6 @@ html {
 
 #panel-simulation > *:not(#simulation-params-disclosure) {
   flex: 0 0 auto;
-}
-
-#panel-simulation > .panel-section--run {
-  margin-top: auto;
-  margin-bottom: 0;
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  /* background: var(--panel); */
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-  padding-bottom: 24px;
-}
-
-#simulation-params-disclosure {
-  display: flex;
-  flex-direction: column;
-}
-
-#simulation-params-disclosure[open] {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-#simulation-params-disclosure[open] > .panel-disclosure-summary {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  flex: 0 0 auto;
-  background: var(--panel);
 }
 
 .panel-kicker {
@@ -561,7 +531,7 @@ html {
 
 /* Inner wrapper — animated on collapse (width + opacity, not transform) */
 .panel-inner {
-  width: 340px;
+  width: 420px;
   overflow: hidden;
   transition:
     width 300ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -1280,9 +1250,9 @@ html {
 
 .legend {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  right: auto;
+  bottom: 48px;
+  right: 20px;
+  left: auto;
   background: linear-gradient(
     180deg,
     rgba(var(--card-bg-start-rgb), 0.88),
@@ -1397,6 +1367,27 @@ html {
   transform: scale(1.05);
 }
 
+.legend-note {
+  margin: 8px 0 2px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--muted, #9aa4b2);
+}
+
+/* Visually hidden but available to screen readers and crawlers */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Legend gradient — colors kept as-is (no legend style changes) */
 .legend-gradient {
   height: 12px;
@@ -1498,10 +1489,6 @@ html {
 
 .count-chip-dests {
   color: var(--dest-text);
-}
-
-.count-chip-label {
-  color: var(--text-dim);
 }
 
 .count-chip-sep {

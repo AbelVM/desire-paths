@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <title>Desire Paths — read where people choose to walk</title>
+  <title>Desire Paths — see where people naturally walk</title>
   <meta name="description"
     content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
   <meta name="keywords"
@@ -163,6 +163,38 @@
         },
         {
           "@type": "Question",
+          "name": "How does the Dijkstra gradient algorithm work in this simulator?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator uses Dijkstra's shortest-path algorithm to compute distance gradients from each destination node across all accessible cells. During simulation, agents don't navigate directly toward their goal — instead, they rotate toward the neighboring cell with the lowest gradient value (i.e., closest to the destination). This strategic obstacle-aware navigation allows agents to plan routes around buildings and barriers while still considering local affordance preferences when choosing among equally viable forward steps."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What simulation parameters can be adjusted?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator offers several adjustable parameters: Affordance Weight (1–8) controls how strongly agents prefer worn or comfortable surfaces; Distance Penalty (1–8) determines the trade-off between route length and surface quality; Vision Depth (5–30) sets how far ahead each agent evaluates candidate cells; Field of View (30°–360°) defines the agent's angular perception cone; Crowd size / Agents per Weight Unit (25–500) scales sample size; Temperature (0–2) controls stochastic randomness in route choice; Grid resolution (0–15) sets H3 cell detail; and Emergent Wear toggles positive feedback reinforcement on traversed cells. (In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution.)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What are the limitations of this desire path simulation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Current limitations include: (1) The model operates at a neighborhood scale rather than city-wide; (2) Weather conditions, time of day, and seasonal variations are not modeled; (3) Social influences like group behavior or cultural norms are not captured; (4) Obstacle avoidance uses strategic (pre-planned) navigation rather than dynamic real-time reaction; (5) The friction cost model simplifies real-world terrain into discrete surface categories; (6) Validation has been limited to specific geographic contexts. Future improvements could incorporate real-time GPS tracking data, multi-agent social dynamics, and graduated footprint visibility models."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the historical origin of desire path research?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The study of desire paths traces back to early 20th-century urban planning observations. The most famous example is Ohio State University's 'The Oval' campus (1914), where student-created shortcuts were incorporated into the final landscape design — a practice now called 'desire path acceptance.' Academic research accelerated in the late 20th century with computer simulations of pedestrian movement, including Helbing et al.'s 'active walkers' model (2001) and later agent-based approaches. The CEUS 2025 paper by Bossowski et al. represents a recent advancement combining weighted preference models with Dijkstra-based obstacle avoidance."
+          }
+        },
+        {
+          "@type": "Question",
           "name": "What research is this simulator based on?",
           "acceptedAnswer": {
             "@type": "Answer",
@@ -235,8 +267,9 @@
 
   <div class="panel-container">
     <div class="panel-inner">
-      <div class="sheet-grip" id="sheet-grip" role="button" tabindex="0"
-        aria-label="Collapse or expand the panel"></div>
+      <h1 class="visually-hidden">Desire Paths — see where people naturally walk</h1>
+      <div class="sheet-grip" id="sheet-grip" role="button" tabindex="0" aria-label="Collapse or expand the panel">
+      </div>
       <div class="panel">
         <div class="panel-header">
           <div>
@@ -254,8 +287,8 @@
           </button>
           <button id="tab-simulation" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
             aria-controls="panel-simulation" data-tab-target="panel-simulation" tabindex="-1">
-            <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
-            <span>Model</span>
+            <i data-lucide="footprints" aria-hidden="true"></i>
+            <span>Simulate</span>
           </button>
           <button id="tab-more-info" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
             aria-controls="panel-more-info" data-tab-target="panel-more-info" tabindex="-1">
@@ -269,31 +302,37 @@
             tabindex="0">
             <div class="panel-text">
               <p>
-                A desire path is an unplanned trail worn by repeated walking — the city's honest feedback on
-                how people really move. Drop start and end points on the map and watch desire lines emerge,
-                shaped by how walkable the ground is.
+                Desire Paths is a pedestrian simulator for open spaces. It reveals
+                where people naturally choose to walk when the planned paths don't
+                fit — across parks, plazas, and campuses.
               </p>
               <p>
-                Open <strong>Surface Edition</strong> to draw areas that override walkability — paint a park to
-                invite walkers or a wall to block them, and the paths bend around your edits.
-                <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank"
-                  rel="noopener noreferrer">Learn more</a>.
+                A desire path is the unplanned trail worn by repeated walking: the
+                city's honest feedback on how people really move. This simulator
+                models that instinct and turns it into visible flow lines you can
+                explore and export.
+                <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank" rel="noopener noreferrer">Learn
+                  more</a>.
+              </p>
+              <p class="intro-hook">
+                Every desire line is the map arguing with the plan.
               </p>
             </div>
             <div class="onboarding-card intro-card">
               <div class="onboarding-step active" data-step="1">
                 <span class="step-number">1</span>
-                <span class="step-text">Drop start, end, or both-ends points on the map. Weight sets how strongly
-                  each pulls walkers.</span>
+                <span class="step-text">In the Simulate tab, pick start or end, then drop a start and an end (or both
+                  at once) on the map. Pull strength sets how strongly each one draws walkers.</span>
               </div>
               <div class="onboarding-step active" data-step="2">
                 <span class="step-number">2</span>
-                <span class="step-text">Use Surface Edition to draw polygons, freehand, circles, or rectangles that
-                  reshape walkability.</span>
+                <span class="step-text">Use the surface painter (bottom of the map) to draw polygons, freehand,
+                  circles, or rectangles that reshape walkability.</span>
               </div>
               <div class="onboarding-step active" data-step="3">
                 <span class="step-number">3</span>
-                <span class="step-text">Tune the sliders, reveal the desire lines, then export as GeoJSON.</span>
+                <span class="step-text">Back in the Simulate tab, tune the sliders, reveal the desire lines, then
+                  export as GeoJSON.</span>
               </div>
             </div>
           </section>
@@ -351,7 +390,7 @@
                 <label class="param-item" for="sim-param-wa">
                   <span class="param-item-head">Comfort preference
                     <span class="help-tip" tabindex="0" role="button" aria-label="Comfort preference help"
-                      data-tooltip="How much walkers favour ground that is already easy or worn-in, over a harder shortcut.">
+                      data-tooltip="How much walkers favour ground that is already easy or worn-in, over a harder shortcut. (Paper term: Affordance Weight)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -362,7 +401,7 @@
                 <label class="param-item" for="sim-param-wd">
                   <span class="param-item-head">Shortcut preference
                     <span class="help-tip" tabindex="0" role="button" aria-label="Shortcut preference help"
-                      data-tooltip="How much walkers trade a direct line for an easier surface. Low = they'll detour for comfort; high = they go straight.">
+                      data-tooltip="How much walkers trade a direct line for an easier surface. Low = they'll detour for comfort; high = they go straight. (Paper term: Distance Penalty)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -373,7 +412,7 @@
                 <label class="param-item" for="sim-param-vision-depth">
                   <span class="param-item-head">Look-ahead
                     <span class="help-tip" tabindex="0" role="button" aria-label="Look-ahead help"
-                      data-tooltip="How far a walker scans ahead for options before committing to a step.">
+                      data-tooltip="How far a walker scans ahead for options before committing to a step. (Paper term: Vision Depth)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -384,7 +423,7 @@
                 <label class="param-item" for="sim-param-fov">
                   <span class="param-item-head">Viewing arc
                     <span class="help-tip" tabindex="0" role="button" aria-label="Viewing arc help"
-                      data-tooltip="The slice of ground ahead a walker can see and consider — narrow = tunnel vision, wide = scans everywhere.">
+                      data-tooltip="The slice of ground ahead a walker can see and consider — narrow = tunnel vision, wide = scans everywhere. (Paper term: Field of View)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -395,7 +434,7 @@
                 <label class="param-item" for="sim-param-agents-per-weight">
                   <span class="param-item-head">Crowd size
                     <span class="help-tip" tabindex="0" role="button" aria-label="Crowd size help"
-                      data-tooltip="How many virtual walkers set out from each weighted place. More = smoother, more confident paths.">
+                      data-tooltip="How many virtual walkers set out from each weighted place. More = smoother, more confident paths. (Paper term: Agents per Weight Unit)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -406,7 +445,7 @@
                 <label class="param-item" for="sim-param-temperature">
                   <span class="param-item-head">Spontaneity
                     <span class="help-tip" tabindex="0" role="button" aria-label="Spontaneity help"
-                      data-tooltip="How much chance overrides habit. Zero = everyone rational; high = some wander.">
+                      data-tooltip="How much chance overrides habit. Zero = everyone rational; high = some wander. (Paper term: Temperature)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -417,7 +456,7 @@
                 <label class="param-item" for="sim-param-h3-stride">
                   <span class="param-item-head">Grid resolution
                     <span class="help-tip" tabindex="0" role="button" aria-label="Grid resolution help"
-                      data-tooltip="H3 grid detail for the simulation. Higher = finer cells and more precise paths, but heavier compute. 0 is coarsest, 15 is finest.">
+                      data-tooltip="H3 grid detail for the simulation. Higher = finer cells and more precise paths, but heavier compute. 0 is coarsest, 15 is finest. (Paper term: H3 resolution)">
                       <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
                     </span>
                   </span>
@@ -444,7 +483,7 @@
               <div class="section-label">Run</div>
               <div class="btn-group">
                 <button class="btn btn-accent" id="btn-compute" type="button">Reveal desire lines</button>
-                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export walk map</button>
+                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
                 <button class="btn btn-danger" id="btn-clear">Clear map</button>
               </div>
             </div>
@@ -453,6 +492,19 @@
           <section id="panel-more-info" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-more-info"
             tabindex="0" hidden>
             <article class="info-content">
+
+              <h3>Research &amp; citations</h3>
+              <p>Based on Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for
+                  Neighbourhood Route Planning</em>. Read the full paper and model comparison at the <a
+                  href="/docs/research.html">Research page</a>.</p>
+
+              <h3>Repository</h3>
+              <p><a href="https://github.com/abelvm/desire-paths" target="_blank"
+                  rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
+
+              <h3>Author</h3>
+              <p>Abel Vázquez Montoro · <a href="https://www.linkedin.com/in/abelvazquez/" target="_blank"
+                  rel="noopener noreferrer">LinkedIn profile</a></p>
 
               <h3>Frequently asked questions</h3>
               <div class="faq-list" aria-label="Frequently asked questions about desire paths and the simulator">
@@ -528,24 +580,14 @@
                   <p>Adjustable in the Walking behaviour tab: <strong>Comfort preference</strong> biases walkers toward
                     worn-in ground; <strong>Shortcut preference</strong> trades a direct line for an easier surface;
                     <strong>Look-ahead</strong> and <strong>Viewing arc</strong> set how far and wide a walker scans;
-                    <strong>Spontaneity</strong> adds chance to route choice; <strong>Paths wear in</strong> lets used
-                    ground grow more inviting.
+                    <strong>Crowd size</strong> sets how many virtual walkers set out from each place;
+                    <strong>Grid resolution</strong> sets the H3 cell detail; <strong>Spontaneity</strong> adds chance
+                    to route choice; <strong>Paths wear in</strong> lets used ground grow more inviting.
                   </p>
                 </details>
               </div>
 
-              <h3>Research &amp; citations</h3>
-              <p>Based on Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for
-                  Neighbourhood Route Planning</em>. Read the full paper and model comparison at the <a
-                  href="/docs/research.html">Research page</a>.</p>
 
-              <h3>Repository</h3>
-              <p><a href="https://github.com/abelvm/desire-paths" target="_blank"
-                  rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
-
-              <h3>Author</h3>
-              <p>Abel Vázquez Montoro · <a href="https://www.linkedin.com/in/abelvazquez/" target="_blank"
-                  rel="noopener noreferrer">LinkedIn profile</a></p>
 
             </article>
           </section>
@@ -569,22 +611,23 @@
       </button>
     </div>
     <div id="friction-legend-body">
-        <div class="legend-item">
-          <span class="legend-color" style="background: #e74c3c"></span>
-          Building / barrier — can't cross
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" style="background: #27ae60"></span>
-          Dense planting
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" style="background: #a6d854"></span>
-          Lawn / soft ground
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" style="background: #0096ff"></span>
-          Pavement / easy walking
-        </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #e74c3c"></span>
+        Barrier — can't cross
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #27ae60"></span>
+        Dense planting
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #a6d854"></span>
+        Lawn / soft
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #0096ff"></span>
+        Pavement / easy walking
+      </div>
+      <p class="legend-note">Walking resistance is the friction cost of each surface.</p>
     </div>
 
     <div class="legend-title legend-title-spaced">Where people choose to walk</div>
@@ -614,10 +657,11 @@
         aria-pressed="false" data-tooltip="Both ends — start and end at once"><i data-lucide="log-in"></i><i
           data-lucide="log-out"></i></button>
     </div>
-    <button class="btn btn-accent mobile-action-reveal" id="btn-compute-mobile" type="button">Reveal desire lines</button>
-    <button class="btn mobile-action-edit" id="btn-edit-surface-mobile" type="button"
-      aria-pressed="false" aria-label="Show surface edition tools"
-      data-tooltip="Show or hide the surface edition toolbox"><i data-lucide="pencil" aria-hidden="true"></i></button>
+    <button class="btn btn-accent mobile-action-reveal" id="btn-compute-mobile" type="button">Reveal desire
+      lines</button>
+    <button class="btn mobile-action-edit" id="btn-edit-surface-mobile" type="button" aria-pressed="false"
+      aria-label="Show surface edition tools" data-tooltip="Show or hide the surface edition toolbox"><i
+        data-lucide="pencil" aria-hidden="true"></i></button>
   </div>
 
   <div id="hex-tooltip" class="hex-tooltip" hidden></div>

@@ -848,7 +848,7 @@ describe('ui.js', () => {
     const weightInput = { value: '1', disabled: false, addEventListener: vi.fn() };
     const weightReadout = { value: '1' };
     const buildButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn() };
-    const computeButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn() };
+    const computeButton = { disabled: false, innerText: '', addEventListener: vi.fn(), toggleAttribute: vi.fn(), setAttribute: vi.fn(), removeAttribute: vi.fn() };
     const exportButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const clearButton = { disabled: false, addEventListener: vi.fn(), toggleAttribute: vi.fn() };
     const originsEl = { textContent: '' };
@@ -945,7 +945,7 @@ describe('ui.js', () => {
           },
         };
       },
-      body: { appendChild: vi.fn() },
+  body: { appendChild: vi.fn(), classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() } },
     };
 
     return doc;

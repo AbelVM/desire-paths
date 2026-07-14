@@ -235,6 +235,14 @@ p { margin-bottom: 1rem; }
 }
 .model-table tr:last-child td { border-bottom: none; }
 
+.table-caption {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: -0.25rem 0 1.5rem;
+  max-width: 720px;
+}
+
 /* ── Citation blockquote ─────────────────────────────── */
 
 .citation-block {

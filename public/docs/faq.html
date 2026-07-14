@@ -9,7 +9,7 @@
   <meta name="description"
     content="Frequently asked questions about desire paths, agent-based pedestrian simulation, H3 hex grids, affordance theory, and how the Desire Paths simulator predicts emergent foot traffic patterns." />
   <meta name="keywords"
-    content="desire paths FAQ, what are desire paths, agent-based modeling, pedestrian simulation, urban planning tools, H3 grid, affordance theory, Bossowski CEUS 2025, Dijkstra pathfinding, walkability analysis" />
+    content="desire paths FAQ, what are desire paths, agent-based modeling, pedestrian simulation, urban planning tools, H3 grid, affordance theory, Bossowski CEUS 2025, Dijkstra pathfinding, walkability analysis, GeoJSON export, walkability analysis tool, pedestrian flow prediction, desire path mapping" />
   <link rel="canonical" href="https://abelvm.github.io/desire-paths/docs/faq.html" />
   <link rel="icon" href="/favicon.png" type="image/png" />
 
@@ -23,6 +23,11 @@
   <meta property="og:description"
     content="Comprehensive FAQ about desire paths, agent-based pedestrian simulation methods, and the research behind the Desire Paths interactive simulator." />
   <meta property="og:site_name" content="Desire Paths" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Desire Paths simulator showing pedestrian flow heatmap on a city map" />
   <meta property="article:modified_time" content="2026-07-05T00:00:00Z" />
 
   <!-- Twitter -->
@@ -30,6 +35,7 @@
   <meta name="twitter:title" content="Desire Paths — FAQ &amp; Research Guide" />
   <meta name="twitter:description"
     content="Comprehensive FAQ about desire paths, agent-based pedestrian simulation methods, and the research behind the Desire Paths simulator." />
+  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
 
   <!-- Breadcrumbs -->
   <script type="application/ld+json">
@@ -112,7 +118,7 @@
           "name": "What simulation parameters can be adjusted?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "The simulator offers several adjustable parameters: Affordance Weight (1–8) controls how strongly agents prefer worn or comfortable surfaces; Distance Penalty (1–8) determines the trade-off between route length and surface quality; Vision Depth (5–30) sets how far ahead each agent evaluates candidate cells; Field of View (30°–360°) defines the agent's angular perception cone; Agents per Weight Unit (5–100) scales sample size; Temperature (0–2) controls stochastic randomness in route choice; and Emergent Wear toggles positive feedback reinforcement on traversed cells."
+            "text": "The simulator offers several adjustable parameters: Affordance Weight (1–8) controls how strongly agents prefer worn or comfortable surfaces; Distance Penalty (1–8) determines the trade-off between route length and surface quality; Vision Depth (5–30) sets how far ahead each agent evaluates candidate cells; Field of View (30°–360°) defines the agent's angular perception cone; Crowd size / Agents per Weight Unit (25–500) scales sample size; Temperature (0–2) controls stochastic randomness in route choice; Grid resolution (0–15) sets H3 cell detail; and Emergent Wear toggles positive feedback reinforcement on traversed cells. (In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution.)"
           }
         },
         {
@@ -192,13 +198,13 @@
           "@type": "HowToStep",
           "position": 2,
           "name": "Place origin and destination nodes",
-          "text": "Select Origin, Destination, or Dual mode from the panel, then click on walkable areas of the map to place nodes. Adjust node weight (1–10) with the slider before placing."
+          "text": "Select Origin, Destination, or Dual mode from the panel, then click on walkable areas of the map to place nodes. Adjust Pull strength (1–10) with the slider before placing."
         },
         {
           "@type": "HowToStep",
           "position": 3,
           "name": "Run the simulation",
-          "text": "Click 'Simulate Flows'. The app builds a friction map from terrain data, classifies surfaces into walkable and impassable zones, then runs hundreds of synthetic agents through the terrain."
+          "text": "Click 'Reveal desire lines'. The app builds a friction map from terrain data, classifies surfaces into walkable and impassable zones, then runs hundreds of synthetic agents through the terrain."
         },
         {
           "@type": "HowToStep",
@@ -207,6 +213,20 @@
           "text": "View the flow network as a heat map on the hex grid. Toggle the friction resistance overlay, hover cells for details, and click 'Export GeoJSON' to download results."
         }
       ]
+    }
+  </script>
+
+  <!-- WebPage + speakable for voice-search AEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "Desire Paths — FAQ & Research Guide",
+      "url": "https://abelvm.github.io/desire-paths/docs/faq.html",
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": ["h1", ".faq-list"]
+      }
     }
   </script>
 
@@ -326,19 +346,19 @@
       </thead>
       <tbody>
         <tr>
-          <td>Hard structure (buildings, water)</td>
+          <td>Barrier (buildings, water)</td>
           <td style="color: var(--danger);">&#8734; (impassable)</td>
         </tr>
         <tr>
-          <td>Dense vegetation</td>
+          <td>Dense planting</td>
           <td>4.0</td>
         </tr>
         <tr>
-          <td>Permeable greenspace</td>
+          <td>Lawn / soft</td>
           <td>2.5</td>
         </tr>
         <tr>
-          <td>Walkable baseline (pavement, paths)</td>
+          <td>Pavement / easy walking</td>
           <td>1.0</td>
         </tr>
       </tbody>
@@ -391,7 +411,7 @@
 
       <details class="faq-item">
         <summary><strong>What simulation parameters can be adjusted?</strong></summary>
-        <p>The simulator offers: Affordance Weight (1–8), Distance Penalty (1–8), Vision Depth (5–30), Field of View (30°–360°), Agents per Weight Unit (5–100), Temperature (0–2), and Emergent Wear toggle. Each parameter controls a different aspect of agent behavior.</p>
+        <p>The simulator offers: Affordance Weight (1–8), Distance Penalty (1–8), Vision Depth (5–30), Field of View (30°–360°), Crowd size / Agents per Weight Unit (25–500), Temperature (0–2), Grid resolution (0–15), and Emergent Wear toggle. In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution. Each parameter controls a different aspect of agent behavior.</p>
       </details>
 
       <details class="faq-item">

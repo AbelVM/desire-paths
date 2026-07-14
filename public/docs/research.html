@@ -23,6 +23,11 @@
   <meta property="og:description"
     content="Academic research on predicting desire paths using agent-based simulation with weighted preferences and obstacle-aware pathfinding." />
   <meta property="og:site_name" content="Desire Paths" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Desire Paths simulator showing pedestrian flow heatmap on a city map" />
   <meta property="article:modified_time" content="2026-07-05T00:00:00Z" />
 
   <!-- Twitter -->
@@ -30,6 +35,7 @@
   <meta name="twitter:title" content="Research — Predicting Desire Paths (CEUS 2025)" />
   <meta name="twitter:description"
     content="Academic research on predicting desire paths using agent-based simulation with weighted preferences and obstacle-aware pathfinding." />
+  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
 
   <!-- Breadcrumbs -->
   <script type="application/ld+json">
@@ -75,8 +81,7 @@
           "affiliation": {
             "@type": "Organization",
             "name": "Wroclaw University of Science and Technology"
-          },
-          "sameAs": null
+          }
         },
         {
           "@type": "Person",
@@ -96,6 +101,13 @@
         }
       },
       "datePublished": "2025",
+      "url": "https://abelvm.github.io/desire-paths/docs/paper.md",
+      "sameAs": "https://abelvm.github.io/desire-paths/docs/paper.md",
+      "isPartOf": {
+        "@type": "Periodical",
+        "name": "Computers, Environment and Urban Systems",
+        "issn": "0198-9715"
+      },
       "about": [
         { "@type": "Thing", "name": "Desire paths" },
         { "@type": "Thing", "name": "Agent-based modeling" },
@@ -205,19 +217,19 @@
           <td>Basic model</td>
           <td>Selects highest-affordance visible field, moves toward goal</td>
           <td>22.9 (19.6%)</td>
-          <td>—</td>
+          <td>n/a</td>
         </tr>
         <tr>
           <td>Path minimisation</td>
           <td>Ties broken by shortest total distance to goal</td>
           <td>23.2 (19.5%)</td>
-          <td>—</td>
+          <td>n/a</td>
         </tr>
         <tr>
           <td>Weighted preferences</td>
           <td>S = w<sub>a</sub> × affordance − w<sub>d</sub> × Δdistance</td>
           <td>15.8–25.5 (varies by weight)</td>
-          <td>—</td>
+          <td>n/a</td>
         </tr>
         <tr>
           <td>Obstacle avoidance</td>
@@ -227,6 +239,7 @@
         </tr>
       </tbody>
     </table>
+    <p class="table-caption">MDD = mean extra distance walked versus the shortest possible route, in grid cells (&ldquo;fields&rdquo;); lower is better. Accuracy = share of simulated steps within a few cells of the observed real-world path. The two are independent: the obstacle-avoidance model accepts a slightly longer detour (MDD 26.6) to match actual behaviour most closely (~60%). &ldquo;n/a&rdquo; = not reported for baseline models.</p>
 
     <!-- Metrics -->
     <h2><i data-lucide="activity" aria-hidden="true"></i> Evaluation metrics</h2>
@@ -234,6 +247,25 @@
       <li><strong>Mean Distance Difference (MDD)</strong> — average extra distance walked when taking a desire path vs. the shortest possible route</li>
       <li><strong>Sum of Paths (SP)</strong> — total area where footprints exceed a wear threshold, indicating path system extent</li>
       <li><strong>Accuracy (A<sub>i</sub>)</strong> — percentage of simulated steps within radius i fields from observed real-world paths</li>
+    </ul>
+
+    <!-- Beyond the paper -->
+    <h2><i data-lucide="sparkles" aria-hidden="true"></i> Beyond the paper</h2>
+    <p>The simulator builds on the Bossowski et al. (2025) model with several engineering improvements the original study did not model:</p>
+    <ul class="contributions-list">
+      <li><strong>H3 hexagonal grid</strong> — replaces the square field lattice, removing diagonal/Manhattan bias and giving uniform 6-neighbour adjacency with no corner-cutting through obstacles.</li>
+      <li><strong>Agent waves</strong> — agents are released in staggered waves so emergent wear accumulates progressively and the flow network stabilises instead of being dominated by a single run's noise.</li>
+      <li><strong>Gaussian blur on the friction field</strong> — softens hard surface boundaries so agents transition smoothly between terrain tiers.</li>
+      <li><strong>Angular penalty</strong> — adds a turn-cost term so agents prefer straight, legible routes over jittery zig-zags.</li>
+      <li><strong>Decay / update of wear</strong> — the positive-feedback loop is time-aware: older traversals decay and recent ones are weighted up, so the path system reflects current demand.</li>
+      <li><strong>Stochasticity (Temperature)</strong> — route choice is sampled, not greedy, capturing the spread of plausible human paths.</li>
+      <li><strong>Obstacle corner-cutting prevention</strong> — when a step would cut diagonally across a building corner, the agent detours around the obstacle instead of jumping it, so paths never clip impassable geometry.</li>
+      <li><strong>Terrain-aware wear &amp; recovery</strong> — dense grass is harder to wear but persists; lawns wear easily but recover fast, so each surface has its own dynamic affordance.</li>
+      <li><strong>Collective ABM wear</strong> — all agents share one footprint accumulator, so later agents are drawn to earlier trails; the desire-line network emerges from the crowd.</li>
+      <li><strong>Real-world OSM data</strong> — the friction map is built from actual map geometry (buildings, water, parks), not a synthetic lattice.</li>
+      <li><strong>Adjustable H3 resolution (0–15)</strong> — the same model scales from a single block to a whole district.</li>
+      <li><strong>Walled-off detection</strong> — destinations enclosed by impassable terrain are reported rather than silently failing.</li>
+      <li><strong>City-scale parallelism</strong> — the agent loop shards across workers sharing one atomic footprint, keeping ABM dynamics at city size.</li>
     </ul>
 
     <!-- Action Links -->
