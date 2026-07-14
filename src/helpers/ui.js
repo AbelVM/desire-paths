@@ -229,6 +229,8 @@ function createUIState(_map) {
     weightInput: 'node-weight',
     weightReadout: 'node-weight-readout',
     computeButton: 'btn-compute',
+    computeButtonMobile: 'btn-compute-mobile',
+    surfaceEditToggleMobile: 'btn-edit-surface-mobile',
     exportButton: 'btn-export-geojson',
     clearButton: 'btn-clear',
     modeLabel: 'mode-status',
@@ -246,6 +248,7 @@ function createUIState(_map) {
     onboardingDismissBtn: 'onboarding-dismiss',
     mapContainer: 'map',
     panelToggleBtn: 'btn-panel-toggle',
+    placementBadge: 'placement-badge',
 
     simParamWa: 'sim-param-wa',
     simParamWaValue: 'sim-param-wa-value',
@@ -341,6 +344,9 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     `;
 
     uiState.toastContainer.appendChild(toast);
+    // Flag the body so mobile CSS can suppress the competing placement-badge
+    // while a toast is visible (both are transient status cues).
+    document.body.classList.add('has-toast');
 
     // Render Lucide icon inside the toast
     try {
@@ -370,6 +376,28 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
         hideToastNotification(toast);
       };
     }
+
+    // review15 follow-up: swipe a toast left/right to dismiss it on mobile
+    // (mirrors the × button). Horizontal travel distinguishes the swipe from a
+    // tap; the close button remains the pointer/keyboard path. Optional chaining
+    // keeps the createElement mock in tests (no addEventListener) safe.
+    let toastSwipeStartX = null;
+    const TOAST_SWIPE_THRESHOLD = 50;
+    toast.addEventListener?.('touchstart', (e) => {
+      if (window.innerWidth >= 600) return;
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      toastSwipeStartX = t.clientX;
+    }, { passive: true });
+    toast.addEventListener?.('touchend', (e) => {
+      if (toastSwipeStartX == null) return;
+      const t = e.changedTouches?.[0];
+      const dx = t ? t.clientX - toastSwipeStartX : 0;
+      toastSwipeStartX = null;
+      if (Math.abs(dx) < TOAST_SWIPE_THRESHOLD) return;
+      clearTimeout(timeoutId);
+      hideToastNotification(toast);
+    }, { passive: true });
   };
 
   const hideToastNotification = (toast) => {
@@ -377,6 +405,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     setTimeout(() => {
       if (toast.parentNode === uiState.toastContainer) {
         uiState.toastContainer.removeChild(toast);
+      }
+      // Clear the flag only once the last toast is gone.
+      if (!uiState.toastContainer.firstChild) {
+        document.body.classList.remove('has-toast');
       }
     }, 300);
   };
@@ -787,6 +819,47 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       if (destsEl) destsEl.textContent = String(destCount);
     }
 
+    // Map-level placement/status badge (review15 A1 + A2): mirrors the
+    // Surface Edition mode badge so the user always knows what a tap will do
+    // and what to do next, without opening the panel.
+    if (uiState.placementBadge) {
+      const badgeMode =
+        map.placementMode === 'origin'
+          ? 'Start'
+          : map.placementMode === 'destination'
+            ? 'End'
+            : 'Both ends';
+      let badgeStatus;
+      if (readyToCompute) badgeStatus = 'Ready to reveal';
+      else if (!hasOrigins && !hasDestinations) badgeStatus = 'Add a point';
+      else if (!hasOrigins) badgeStatus = 'Add a start';
+      else if (!hasDestinations) badgeStatus = 'Add an end';
+      else badgeStatus = 'Add a point';
+
+      const onboardingVisible =
+        uiState.onboardingOverlay && !uiState.onboardingOverlay.hidden;
+      const badgeVisible = map.mappingReady !== false && !onboardingVisible;
+
+      uiState.placementBadge.className = `placement-badge mode-${
+        map.placementMode === 'origin'
+          ? 'origin'
+          : map.placementMode === 'destination'
+            ? 'destination'
+            : 'dual'
+      }${badgeVisible ? ' is-visible' : ''}`;
+      uiState.placementBadge.innerHTML = `<span class="placement-badge-mode">Placing: ${badgeMode}</span><span class="placement-badge-sep">·</span><span class="placement-badge-status">${badgeStatus}</span>`;
+
+      // One-time hint that points are editable (review15 A3)
+      const totalNodes = Object.keys(map.simulationNodes ?? {}).length;
+      if (totalNodes > 0 && !uiState.contextHintShown) {
+        uiState.contextHintShown = true;
+        showAlertCard(
+          'Tip: long-press or right-click a point to change its role or pull strength.',
+          { tone: 'info', timeout: 6000 }
+        );
+      }
+    }
+
     if (uiState.onboardingDismissed && uiState.onboardingOverlay) {
       uiState.onboardingOverlay.hidden = true;
     }
@@ -882,9 +955,41 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
     // Build Mapping button removed — simulation auto-builds on demand
     if (uiState.clearButton) uiState.clearButton.disabled = busy || !hasGrid;
-    uiState.computeButton.disabled = busy || (!canCompute && !canBuild);
     if (uiState.exportButton) uiState.exportButton.disabled = busy || !canExport;
-    uiState.computeButton.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
+    const computeDisabled = busy || (!canCompute && !canBuild);
+    const computeButtons = [uiState.computeButton, uiState.computeButtonMobile].filter(Boolean);
+    for (const btn of computeButtons) {
+      btn.disabled = computeDisabled;
+      btn.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
+    }
+
+    // review15 U1: explain *why* Reveal is disabled instead of a silent dim
+    const nodesArr = Object.values(map.simulationNodes ?? {});
+    const hasOrigins = nodesArr.some(
+      (n) => (n.type === 'origin' || n.type === 'dual') && n.weight > 0
+    );
+    const hasDestinations = nodesArr.some(
+      (n) => (n.type === 'destination' || n.type === 'dual') && n.weight > 0
+    );
+    if (computeDisabled) {
+      let reason = 'Add a start and an end point to reveal desire lines';
+      if (mappingReady && hasOrigins && !hasDestinations) {
+        reason = 'Add an end point to reveal desire lines';
+      } else if (mappingReady && !hasOrigins && hasDestinations) {
+        reason = 'Add a start point to reveal desire lines';
+      } else if (!mappingReady) {
+        reason = 'Map is still loading…';
+      }
+      for (const btn of computeButtons) {
+        btn.title = reason;
+        btn.setAttribute('aria-disabled', 'true');
+      }
+    } else {
+      for (const btn of computeButtons) {
+        btn.removeAttribute('title');
+        btn.removeAttribute('aria-disabled');
+      }
+    }
     if (uiState.loader && !busy) {
       uiState.loader.style.display = 'none';
     }
@@ -912,12 +1017,16 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     if (uiState.weightInput) uiState.weightInput.disabled = busy;
     if (uiState.exportButton) uiState.exportButton.disabled = busy;
     uiState.computeButton.disabled = busy;
+    if (uiState.computeButtonMobile) uiState.computeButtonMobile.disabled = busy;
     uiState.clearButton.disabled = busy;
     if (uiState.loader) {
       uiState.loader.innerText = message;
       uiState.loader.style.display = busy ? 'block' : 'none';
     }
     uiState.computeButton.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
+    if (uiState.computeButtonMobile) {
+      uiState.computeButtonMobile.innerText = busy ? 'Revealing...' : 'Reveal desire lines';
+    }
     // Update cursor during computation
     setMapCursorWait?.(map, busy);
     if (uiState.progressLabel) {
@@ -1018,7 +1127,11 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   for (const button of uiState.tabButtons) {
     addUIListener(button, 'click', () => {
       const target = button.dataset.tabTarget;
-      if (target) activateTab(target);
+      if (!target) return;
+      activateTab(target);
+      // On mobile the panel is a bottom sheet; selecting a tab from the
+      // peek state should expand the sheet to show that tab's content.
+      if (window.innerWidth < 600 && panelCollapsed) setPanelCollapsed(false);
     });
 
     addUIListener(button, 'keydown', (e) => {
@@ -1326,6 +1439,21 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   }
   addUIListener(window, 'touchend', handleTouchEnd, { passive: true });
 
+  // Reset drag + long-press if the OS cancels the touch (e.g. a system gesture
+  // or scroll takeover steals it). Without this the drag flag and timer would
+  // be left dangling and silently break the next interaction.
+  const handleTouchCancel = () => {
+    clearLongPress();
+    if (!touchDragState.active) return;
+    touchDragState.active = false;
+    touchDragState.startCell = null;
+    map.isDragging = false;
+    map.mappingReady = false;
+    map.flowsReady = false;
+    map.dragOccurred = touchDragState.moved;
+  };
+  addUIListener(window, 'touchcancel', handleTouchCancel, { passive: true });
+
   // ──────────────────────────────────────────────
   // Long-Press Context Menu — replaces contextmenu on touch devices
   // ──────────────────────────────────────────────
@@ -1374,6 +1502,10 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
   // Attach long-press listeners on the map container for touch events
   const handleMapTouchStart = (e) => {
     if (map.isComputing) return;
+    // Don't arm the long-press context menu while a Surface Edition draw tool
+    // is active — its touch gestures belong to terra-draw, and the preventDefault
+    // below would hijack polygon drawing. Mirrors handleTouchStart/handleDragStart.
+    if (map._surfaceEditActive) return;
 
     const containerRect = uiState.mapContainer?.getBoundingClientRect();
     if (!containerRect) return;
@@ -1527,6 +1659,12 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   addUIListener(uiState.computeButton, 'click', handleComputeClick);
 
+  // review15 M2: the persistent mobile action bar has its own Reveal button
+  // that drives the exact same simulation run as the panel button.
+  if (uiState.computeButtonMobile) {
+    addUIListener(uiState.computeButtonMobile, 'click', handleComputeClick);
+  }
+
   if (uiState.exportButton) {
     const handleExportClick = () => {
       if (map.flowsReady !== true) {
@@ -1586,6 +1724,104 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     addUIListener(uiState.panelToggleBtn, 'click', () => {
       setPanelCollapsed(!panelCollapsed);
     });
+  }
+
+  // review15 follow-up: shared swipe-to-toggle helper for the bottom sheet.
+  // Attaches touch handlers to `el`; a vertical swipe beyond the threshold
+  // expands (up) or collapses (down) the sheet on mobile. `onClickToggle`, when
+  // provided, is the tap handler — it is suppressed after a swipe so the sheet
+  // never toggles twice.
+  const attachSheetSwipe = (el, onClickToggle) => {
+    if (!el) return;
+    let swiped = false;
+    let startY = null;
+    const THRESHOLD = 40;
+    addUIListener(el, 'touchstart', (e) => {
+      if (window.innerWidth >= 600) return;
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      startY = t.clientY;
+      swiped = false;
+    }, { passive: true });
+    addUIListener(el, 'touchmove', (e) => {
+      if (startY == null) return;
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      if (Math.abs(t.clientY - startY) > 8) swiped = true;
+    }, { passive: true });
+    addUIListener(el, 'touchend', (e) => {
+      if (startY == null) return;
+      const t = e.changedTouches?.[0];
+      const dy = t ? t.clientY - startY : 0;
+      startY = null;
+      if (Math.abs(dy) < THRESHOLD) return;
+      swiped = true;
+      if (dy <= -THRESHOLD && panelCollapsed) setPanelCollapsed(false);
+      else if (dy >= THRESHOLD && !panelCollapsed) setPanelCollapsed(true);
+    }, { passive: true });
+    if (onClickToggle) {
+      addUIListener(el, 'click', (e) => {
+        if (swiped) {
+          swiped = false;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        onClickToggle();
+      });
+    }
+  };
+
+  // review15 M2 / §4: the sheet grip is a tappable handle that toggles
+  // the bottom sheet (expand from peek / collapse to peek) on mobile.
+  const sheetGrip = document.getElementById('sheet-grip');
+  if (sheetGrip) {
+    const toggleSheet = () => {
+      if (window.innerWidth < 600) setPanelCollapsed(!panelCollapsed);
+    };
+    attachSheetSwipe(sheetGrip, toggleSheet);
+    addUIListener(sheetGrip, 'keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleSheet();
+      }
+    });
+  }
+
+  // Larger swipe target when the sheet is expanded: the header strip (hidden in
+  // the peek state, so it only ever collapses an open sheet). Shares the same
+  // swipe logic but has no tap-toggle of its own.
+  attachSheetSwipe(document.querySelector('.panel-header'));
+
+  // review15 follow-up: Surface Edition is an advanced feature, hidden by
+  // default on mobile. The CTA "edit" button toggles the floating toolbox via
+  // body.se-toolbox-open. Closing it also deactivates any active surface mode
+  // so node placement returns to normal (otherwise the map cursor stays locked
+  // to surface-editing and taps no longer drop points).
+  const editToggle = uiState.surfaceEditToggleMobile;
+  if (editToggle) {
+    // Reflect the open/closed state with a pencil / pencil-off icon (distinct
+    // from the Surface Edition freehand `pen-tool` icon) and let the
+    // `[aria-pressed='true']` style carry the colour signal.
+    const renderEditIcon = (open) => {
+      editToggle.innerHTML = `<i data-lucide="${open ? 'pencil-off' : 'pencil'}" aria-hidden="true"></i>`;
+      try {
+        createIcons({ icons, attrs: { 'stroke-width': 1.8, color: 'currentColor' } });
+      } catch {
+        /* icon runtime unavailable (tests) — leave the markup as-is */
+      }
+    };
+    addUIListener(editToggle, 'click', () => {
+      const open = document.body.classList.toggle('se-toolbox-open');
+      editToggle.setAttribute('aria-pressed', String(open));
+      editToggle.setAttribute(
+        'aria-label',
+        open ? 'Hide surface edition tools' : 'Show surface edition tools'
+      );
+      renderEditIcon(open);
+      if (!open) map._surfaceEdition?.setMode?.(null);
+    });
+    renderEditIcon(false);
   }
 
   // Reset collapse state when viewport widens beyond mobile threshold

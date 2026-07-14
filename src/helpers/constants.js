@@ -2,8 +2,11 @@ export const MAP_OPTIONS = {
   container: 'map',
   style: './bright_custom.json',//'https://tiles.openfreemap.org/styles/bright',
   center: [-3.7035, 40.4169],
-  zoom: 18,
+  zoom: 17,
   maxZoom: 24,
+  // Compact attribution keeps the OSM/MapLibre credit visible in a corner that
+  // the legend no longer occupies (legend was moved to bottom-left in review15).
+  attributionControl: { compact: true },
 };
 
 export const BUFFER_PX = 128; // Buffer in pixels around AOI

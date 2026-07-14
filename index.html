@@ -235,6 +235,8 @@
 
   <div class="panel-container">
     <div class="panel-inner">
+      <div class="sheet-grip" id="sheet-grip" role="button" tabindex="0"
+        aria-label="Collapse or expand the panel"></div>
       <div class="panel">
         <div class="panel-header">
           <div>
@@ -567,22 +569,22 @@
       </button>
     </div>
     <div id="friction-legend-body">
-      <div class="legend-item">
-        <span class="legend-color" style="background: rgba(231, 76, 60, 0.75)"></span>
-        Building / barrier — can't cross
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background: rgba(39, 174, 96, 0.55)"></span>
-        Dense planting
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background: rgba(166, 216, 84, 0.45)"></span>
-        Lawn / soft ground
-      </div>
-      <div class="legend-item">
-        <span class="legend-color" style="background: rgba(0, 150, 255, 0.15)"></span>
-        Pavement / easy walking
-      </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #e74c3c"></span>
+          Building / barrier — can't cross
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #27ae60"></span>
+          Dense planting
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #a6d854"></span>
+          Lawn / soft ground
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #0096ff"></span>
+          Pavement / easy walking
+        </div>
     </div>
 
     <div class="legend-title legend-title-spaced">Where people choose to walk</div>
@@ -591,6 +593,31 @@
       <span>Quiet</span>
       <span id="legend-max-label">Busiest</span>
     </div>
+  </div>
+
+  <!-- Map-level placement/status badge (review15 A1/A2): mirrors the Surface
+       Edition mode badge so phone users always know what a tap will do and what
+       to do next, without opening the panel. -->
+  <div id="placement-badge" class="placement-badge" role="status" aria-live="polite" hidden></div>
+
+  <!-- Persistent mobile action bar (review15 M2): keeps the core loop — pick a
+       placement mode and reveal — always on screen on phones, so the user never
+       has to open the (collapsible) parameter panel to drop a point or run the
+       simulation. Hidden on desktop/tablet where the panel carries these. -->
+  <div class="mobile-action-bar" id="mobile-action-bar" role="group" aria-label="Place points and reveal desire lines">
+    <div class="mobile-action-modes">
+      <button class="btn btn-segment" id="btn-mode-origin-mobile" type="button" data-placement-mode="origin"
+        aria-pressed="false" data-tooltip="Start point — where the walk begins"><i data-lucide="log-out"></i></button>
+      <button class="btn btn-segment" id="btn-mode-destination-mobile" type="button" data-placement-mode="destination"
+        aria-pressed="false" data-tooltip="End point — where the walk ends"><i data-lucide="log-in"></i></button>
+      <button class="btn btn-segment" id="btn-mode-both-mobile" type="button" data-placement-mode="dual"
+        aria-pressed="false" data-tooltip="Both ends — start and end at once"><i data-lucide="log-in"></i><i
+          data-lucide="log-out"></i></button>
+    </div>
+    <button class="btn btn-accent mobile-action-reveal" id="btn-compute-mobile" type="button">Reveal desire lines</button>
+    <button class="btn mobile-action-edit" id="btn-edit-surface-mobile" type="button"
+      aria-pressed="false" aria-label="Show surface edition tools"
+      data-tooltip="Show or hide the surface edition toolbox"><i data-lucide="pencil" aria-hidden="true"></i></button>
   </div>
 
   <div id="hex-tooltip" class="hex-tooltip" hidden></div>

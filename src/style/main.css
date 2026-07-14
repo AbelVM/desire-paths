@@ -88,10 +88,24 @@
   --scrollbar-track: rgba(var(--white-rgb), 0.02);
   --scrollbar-thumb: var(--primary-soft);
   --scrollbar-thumb-hover: var(--primary);
+
+  /* ── Radius tokens (review15 S1) ─────────────── */
+  --r-card: 20px;
+  --r-pill: 999px;
+  --r-input: 12px;
+
+  /* ── z-index tokens (review15 S5) ───────────── */
+  --z-loading: 9999;
 }
 
 * {
   scrollbar-width: thin;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body,
@@ -308,8 +322,8 @@ html {
 
 .panel-tab-btn svg,
 .panel-tab-btn [data-lucide] {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: currentColor;
 }
 
@@ -539,6 +553,12 @@ html {
   z-index: 1000;
 }
 
+/* Sheet grip — only shown when the panel is a bottom sheet on mobile
+   (see the max-width:599px media query). Hidden on desktop. */
+.sheet-grip {
+  display: none;
+}
+
 /* Inner wrapper — animated on collapse (width + opacity, not transform) */
 .panel-inner {
   width: 340px;
@@ -624,35 +644,185 @@ html {
   transform: translateY(-5.5px) rotate(-45deg);
 }
 
-/* Responsive — collapse panel on narrow viewports */
-@media (max-width: 599px) {
-  .panel-container.collapsed {
-    pointer-events: none;
-  }
+  /* Responsive — on phones the panel docks to the bottom as a sheet
+     (review15 M2 / §4). The hamburger/X toggle is fixed to the top-left
+     of the viewport (the map's top bar, beside the geocoder) so it is
+     always reachable — this also resolves the old M1 off-screen-close
+     problem, since the sheet never covers the top bar. */
+  @media (max-width: 599px) {
+    .panel-container {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+    }
 
-  /* Re-enable pointer events on the toggle button only */
-  .panel-toggle-btn {
-    display: flex;
-    position: absolute;
-    top: 16px;
-    right: -52px;
-    pointer-events: auto !important;
-  }
+    /* The sheet grip (#sheet-grip) already toggles the bottom sheet, and the
+       burger collides with the top-left geocoder — so it is redundant on mobile.
+       Hidden here; the grip remains the single collapse/expand affordance. */
+    .panel-toggle-btn {
+      display: none;
+    }
 
-  .panel {
-    width: min(340px, calc(100vw - 72px));
-  }
+    /* Sheet shell */
+    .panel-inner {
+      width: 100% !important;
+      /* Fixed height (not just a max) so the sheet never grows/shrinks when the
+         active tab's content length changes — the tab body scrolls internally. */
+      height: min(80dvh, 620px);
+      max-height: min(80dvh, 620px);
+      display: flex;
+      flex-direction: column;
+      border-radius: 20px 20px 0 0;
+      overflow: hidden;
+      background: linear-gradient(
+        180deg,
+        rgba(var(--card-bg-start-rgb), 0.96),
+        rgba(var(--card-bg-end-rgb), 0.99)
+      );
+      box-shadow: 0 -10px 40px rgba(var(--black-rgb), 0.5);
+      backdrop-filter: blur(18px) saturate(1.08);
+      transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-  .panel-tab-content {
-    height: min(70dvh, 540px);
-    min-height: 300px;
-  }
+    /* Override the desktop collapse rule so the sheet stays full-width and
+       visible in its peek state (only the body content is hidden). Cap its
+       height so the peek strip never grows tall enough to overlap the CTA
+       action bar parked above it (review15 follow-up). */
+    .panel-container.collapsed .panel-inner {
+      width: 100% !important;
+      opacity: 1 !important;
+      max-height: 64px;
+      overflow: hidden;
+      /* Drop the expanded sheet's upward shadow in the peek state so it never
+         bleeds over the persistent action bar parked directly above it. */
+      box-shadow: none;
+    }
 
-  .btn-group .btn {
-    font-size: 11px;
-    padding: 0.45rem 0.6rem;
+    /* Compact the peek strip (grip + tab row) so it fits inside the 64px cap. */
+    .panel-container.collapsed .sheet-grip {
+      margin: 4px auto 2px;
+    }
+
+    .panel-container.collapsed .panel {
+      padding-bottom: 4px;
+    }
+
+    .panel-container.collapsed .panel-tabs {
+      padding: 0 0 2px;
+    }
+
+    .panel {
+      position: static;
+      width: 100% !important;
+      max-width: 100%;
+      padding: 0 16px 16px;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      gap: 8px;
+      overflow-x: hidden;
+      /* Fill the fixed-height sheet so the tab body (flex:1 + min-height:0)
+         scrolls internally instead of resizing the whole sheet. */
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .panel::before {
+      display: none;
+    }
+
+    /* Grip handle at the top of the sheet (real element so it is tappable
+       to toggle the sheet; hidden on desktop where the panel floats). */
+    .sheet-grip {
+      display: block;
+      flex: 0 0 auto;
+      width: 40px;
+      height: 4px;
+      margin: 8px auto 4px;
+      border-radius: 2px;
+      background: rgba(var(--white-rgb), 0.25);
+      cursor: pointer;
+      /* Drag handle: capture vertical swipes for expand/collapse instead of
+         letting the browser treat them as a scroll/zoom gesture. */
+      touch-action: none;
+    }
+
+    .sheet-grip:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .panel-header {
+      margin-bottom: 0;
+    }
+
+    .panel-tabs {
+      margin: 0;
+      padding: 2px 0 6px;
+    }
+
+    .panel-tab-content {
+      height: auto;
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      border: none;
+      background: transparent;
+    }
+
+    .panel-tab-panel {
+      height: auto;
+      overflow-y: visible;
+      padding: 12px 0;
+    }
+
+    /* Peek state: collapsed shows only the grip + tab strip; the header and
+       body content are hidden so the map stays usable. */
+    .panel-container.collapsed .panel-header,
+    .panel-container.collapsed .panel-tab-content {
+      display: none;
+    }
+
+    /* Expanded sheet owns the whole bottom region: hide the always-on floating
+       controls (action bar, placement badge, Surface Edition toolbar + its mode
+       badge) so they never sit on top of the open sheet. The sheet already
+       carries the equivalent controls (mode buttons, Reveal, Surface Edition
+       entry), so the user is never stranded. They reappear in the peek state. */
+    body.panel-open .mobile-action-bar,
+    body.panel-open .placement-badge,
+    body.panel-open .surface-edition,
+    body.panel-open .se-mode-badge {
+      display: none !important;
+    }
+
+    /* Surface Edition is an advanced feature: hidden by default on mobile. The
+       CTA "edit" button toggles body.se-toolbox-open to reveal the toolbox.
+       The panel-open rule above (display:none !important) still wins while the
+       sheet is expanded, so the two never fight.
+       NOTE: the global base `.surface-edition { display:flex }` (outside any
+       media query) sits LATER in the source than this block, so a bare
+       `.surface-edition` selector here would lose the cascade on equal
+       specificity. We raise specificity with `body` so the mobile hide wins
+       over the base show, while `body.se-toolbox-open .surface-edition`
+       (higher specificity) still reveals it. */
+    body .surface-edition {
+      display: none;
+    }
+
+    body.se-toolbox-open .surface-edition {
+      display: flex;
+    }
+
+    .btn-group .btn {
+      font-size: 11px;
+      padding: 0.45rem 0.6rem;
+    }
   }
-}
 
 /* ── Alert card (mt-router landing style) ─────────────── */
 
@@ -668,7 +838,7 @@ html {
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px;
-  border-radius: 999px;
+  border-radius: var(--r-card);
   border: 1px solid var(--border);
   background: rgba(var(--surface-rgb), 0.92);
   box-shadow:
@@ -781,7 +951,7 @@ html {
 
 .btn-group {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -1056,6 +1226,7 @@ html {
   color: var(--text);
   border: 1px solid var(--border);
   white-space: nowrap;
+  min-width: 0;
   min-height: 34px;
   padding: 0.5rem 0.85rem;
   font-size: 12px;
@@ -1110,14 +1281,15 @@ html {
 .legend {
   position: absolute;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
+  right: auto;
   background: linear-gradient(
     180deg,
     rgba(var(--card-bg-start-rgb), 0.88),
     rgba(var(--card-bg-end-rgb), 0.98)
   );
   padding: 14px 14px 12px;
-  border-radius: 28px;
+  border-radius: var(--r-card);
   border: 1px solid var(--border);
   box-shadow: 0 20px 48px rgba(var(--black-rgb), 0.35);
   z-index: 10;
@@ -1242,7 +1414,7 @@ html {
   left: 0;
   height: 100%;
   width: var(--gradient-width, 0%);
-  background: linear-gradient(to right, rgba(var(--primary-rgb), 0.3), transparent);
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.14), transparent);
   border-radius: 2px;
   transition: width 300ms ease;
 }
@@ -1507,7 +1679,7 @@ html {
   z-index: 1001;
   max-width: 240px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--r-input);
   border: 1px solid var(--border);
   background: rgba(var(--surface-rgb), 0.98);
   color: var(--text);
@@ -1591,7 +1763,7 @@ html {
 .onboarding-card {
   position: relative;
   padding: 24px 28px 20px;
-  border-radius: 28px;
+  border-radius: var(--r-card);
   border: 1px solid var(--border);
   background: rgba(var(--surface-rgb), 0.96);
   backdrop-filter: blur(24px) saturate(1.1);
@@ -1828,7 +2000,7 @@ html {
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1000;
+  z-index: 9000; /* above the bottom sheet (1000) and CTAs panel (1001); below loading (9999) */
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1854,6 +2026,9 @@ html {
   transform: translateY(-100%);
   transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
   pointer-events: auto;
+  /* Let vertical page scroll pass through, but capture horizontal swipes so
+     swipe-to-dismiss works on touch without the browser stealing the gesture. */
+  touch-action: pan-y;
 }
 
 .toast.show {
@@ -1946,7 +2121,7 @@ html {
   z-index: 2000;
   min-width: 160px;
   padding: 8px;
-  border-radius: 14px;
+  border-radius: var(--r-card);
   box-shadow: 0 8px 32px rgba(var(--black-rgb), 0.5);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border);
@@ -2048,7 +2223,7 @@ html {
   background: rgba(0, 0, 0, 0.7);
   pointer-events: all;
   user-select: none;
-  z-index: 99999999999999999;
+  z-index: var(--z-loading);
 }
 
 .spinner {
@@ -2174,12 +2349,14 @@ html {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border-radius: 22px;
+  border-radius: var(--r-card);
   border: 1px solid var(--border);
+  /* Match the bottom sheet (.panel-inner) gradient so all floating panels share
+     one surface treatment on mobile. */
   background: linear-gradient(
     180deg,
-    rgba(var(--card-bg-start-rgb), 0.9),
-    rgba(var(--card-bg-end-rgb), 0.98)
+    rgba(var(--card-bg-start-rgb), 0.96),
+    rgba(var(--card-bg-end-rgb), 0.99)
   );
   box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(18px) saturate(1.08);
@@ -2395,61 +2572,351 @@ html {
   height: 14px;
 }
 
-@media (max-width: 599px) {
-  .surface-edition {
-    bottom: 12px;
-    padding: 8px;
-    gap: 6px;
+  @media (max-width: 599px) {
+    /* Surface Edition toolbar becomes a collapsed strip parked ABOVE the
+       placement badge (review15 §4: "a second collapsible strip above the
+       action bar"). It only shows while a surface is being edited. */
+    .surface-edition {
+      bottom: 180px; /* 20px lower than the 200px default, clears the action bar */
+      padding: 8px;
+      gap: 6px;
+    }
+
+    .se-class-label {
+      display: none;
+    }
+
+    .se-class {
+      padding: 6px 8px;
+      justify-content: center;
+    }
+
+    .se-tool {
+      width: 34px;
+      height: 34px;
+    }
+
+    /* Legend parks top-left (geocoder is top-right), kept compact so the bottom
+       stays free for the sheet / action bar / badge stack. Hidden whenever the
+       sheet is expanded so it never peeks over the sheet. */
+    .legend {
+      top: 12px;
+      bottom: auto;
+      left: 12px;
+      right: auto;
+      width: min(196px, calc(100vw - 24px));
+      padding: 9px 10px 8px;
+      font-size: 10px;
+    }
+
+    .legend-title-row {
+      margin-bottom: 6px;
+    }
+
+    .legend-title {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+    }
+
+    .legend-item {
+      margin-bottom: 3px;
+    }
+
+    .legend-color {
+      width: 14px;
+      height: 10px;
+      margin-right: 6px;
+    }
+
+    .legend-gradient {
+      height: 10px;
+      margin: 5px 0 3px;
+    }
+
+    .legend-labels {
+      font-size: 9px;
+    }
+
+    .panel-container:not(.collapsed) ~ .legend,
+    body.panel-open .legend {
+      display: none;
+    }
+
+    /* Simulation panel: keep the desktop behaviour — the disclosure grows and
+       scrolls internally while the Run controls stay pinned at the bottom. This
+       stops the advanced-parameter body from overlapping the CTA buttons (which
+       happened when the whole panel scrolled with a sticky Run). The panel itself
+       can still scroll as a fallback on very short viewports. */
+    #panel-simulation {
+      overflow-y: auto;
+    }
+
+    #simulation-params-disclosure {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    #simulation-params-disclosure[open] {
+      overflow-y: auto;
+    }
+
+    /* ── Toasts: bottom snackbar (review15 follow-up) ───────────
+       On phones the top band is crowded by the legend (top-left) and the
+       geocoder (top-right), so the centered toast overlapped both. Park it
+       bottom-center, clear of the 64px sheet peek + the placement-badge.
+       Critically, the toast is restyled as a SOLID, color-coded chip (no
+       glass) so it reads as a transient overlay above the bottom sheet
+       rather than as another sheet layer. */
+    .toast-container {
+      top: auto;
+      bottom: 88px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .toast {
+      backdrop-filter: none; /* stop mirroring the sheet's glass */
+      background: #11151a; /* opaque, not translucent */
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 10px 30px rgba(var(--black-rgb), 0.55); /* harder lift */
+      transform: translateY(12px); /* rise-in so it reads as a distinct layer */
+    }
+
+    .toast.show {
+      transform: translateY(0);
+    }
+
+    .toast.success {
+      background: #157a4a;
+      color: #eafff3;
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .toast.warning {
+      background: #b9791b;
+      color: #fff7e8;
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .toast.error {
+      background: #b3263a;
+      color: #ffeef0;
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .toast.info {
+      background: #1f5fbf;
+      color: #eaf1ff;
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    /* The placement-badge (bottom:20px) and the toast are both transient
+       status cues — suppress the badge while a toast is visible so they
+       don't stack into competing pills. */
+    body.has-toast .placement-badge {
+      display: none;
+    }
   }
 
-  .se-class-label {
-    display: none;
+/* ── Tablet tier (review15 R2): 600–1024px ───────────
+   Between phones and desktop the 340px panel covers too much of the map
+   and the legend/toolbar crowd the corners. Narrow the panel and legend so
+   the canvas stays usable on landscape phones and small tablets. */
+@media (min-width: 600px) and (max-width: 1024px) {
+  .panel {
+    width: min(300px, calc(100vw - 40px));
   }
 
-  .se-class {
-    padding: 6px 8px;
-    justify-content: center;
+  .panel-inner {
+    width: 300px;
+  }
+
+  .legend {
+    width: 220px;
+  }
+}
+
+/* ── Coarse-pointer (touch) target sizing (review15 M3) ───
+   Apple HIG / WCAG 2.5.5 recommend 44×44px touch targets. Bump the
+   interactive controls that fall below that on touch devices. */
+@media (pointer: coarse) {
+  .btn,
+  .btn-segment,
+  .se-tool,
+  .context-btn,
+  .panel-tab-btn {
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .se-tool {
-    width: 34px;
-    height: 34px;
+    width: 44px;
+    height: 44px;
   }
 
-  /* The centered bottom toolbar is full-width on mobile and collides with the
-     bottom-right legend, and the panel lives at the top-left. Park the legend
-     at the top-right, just below the collapsed geocoder. Hide it whenever the
-     panel is open so it never peeks out from behind the panel. Key the hide off
-     the panel-container's own .collapsed state (a following sibling) as well as
-     body.panel-open, so it tracks the panel reliably on mobile. */
-  .legend {
-    top: 84px;
-    bottom: auto;
-    left: auto;
-    right: 16px;
-    width: min(254px, calc(100vw - 32px));
+  .context-btn {
+    min-height: 44px;
+  }
+}
+
+/* ── Placement / status badge (review15 A1 + A2) ───────────
+   Mirrors .se-mode-badge: a detached, mobile-safe pill that tells the user
+   what a map tap will do (Start/End/Both) and what to do next, without
+   opening the panel. Positioned bottom-center, clear of the corners. */
+.placement-badge {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 20px;
+  z-index: 901; /* above Surface Edition toolbar (900), below toasts (1000) */
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--card-bg-start-rgb), 0.8),
+    rgba(var(--card-bg-end-rgb), 0.9)
+  );
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px) saturate(1.08);
+  white-space: nowrap;
+}
+
+.placement-badge.is-visible {
+  display: inline-flex;
+}
+
+.placement-badge.mode-origin {
+  color: var(--origin-text);
+  border-color: var(--origin-border);
+}
+
+.placement-badge.mode-destination {
+  color: #ff7c8c;
+  border-color: rgba(255, 124, 140, 0.28);
+}
+
+.placement-badge.mode-dual {
+  color: #ffe9b4;
+  border-color: rgba(246, 200, 95, 0.3);
+}
+
+.placement-badge-sep {
+  opacity: 0.5;
+}
+
+.placement-badge-status {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* ── Persistent mobile action bar (review15 M2) ───────────
+   Keeps the core loop (placement mode + Reveal) on screen at all times on
+   phones, so the user never has to open the collapsible parameter panel to
+   drop a point or run the simulation. Hidden on desktop/tablet, where the
+   panel already carries these controls. */
+.mobile-action-bar {
+  display: none; /* shown only inside the mobile media query below */
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 84px; /* overridden to 84px in the mobile media query (below the badge) */
+  /* Above the bottom sheet (panel-container z-index:1000) so the collapsed peek
+     strip — and its drop shadow — can never cover the core-loop controls (incl.
+     the Surface Edition toggle). The sheet still hides this bar when expanded. */
+  z-index: 1001; /* above SE toolbar (900), placement badge (901), panel sheet (1000) */
+  align-items: center;
+  gap: 8px;
+  width: min(420px, calc(100vw - 24px));
+  padding: 8px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  /* Match the bottom sheet (.panel-inner) gradient so all floating panels share
+     one surface treatment on mobile. */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--card-bg-start-rgb), 0.96),
+    rgba(var(--card-bg-end-rgb), 0.99)
+  );
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.mobile-action-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mobile-action-modes .btn-segment {
+  min-height: 44px;
+  padding-inline: 8px;
+}
+
+.mobile-action-reveal {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding-inline: 16px;
+  white-space: nowrap;
+}
+
+.mobile-action-edit {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
+.mobile-action-edit[aria-pressed='true'] {
+  /* Subtle primary tint — matches .panel-tab-btn.is-active so the toggle reads
+     as "active" without the heavy solid fill used elsewhere. */
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary);
+  border-color: rgba(var(--primary-rgb), 0.32);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Keep the active tint on hover (otherwise .btn:hover wins by specificity). */
+.mobile-action-edit[aria-pressed='true']:hover:not(:disabled) {
+  background: rgba(var(--primary-rgb), 0.18);
+  color: var(--primary);
+  border-color: rgba(var(--primary-rgb), 0.4);
+}
+
+@media (max-width: 599px) {
+  /* Core-loop stack, bottom → up: sheet peek (0) · action bar (84px) ·
+     placement badge (132px) · Surface Edition strip (180px, when active).
+     Lift the badge above the persistent action bar so the two never overlap. */
+  .placement-badge {
+    bottom: 132px;
   }
 
-  .panel-container:not(.collapsed) ~ .legend,
-  body.panel-open .legend {
-    display: none;
+  .mobile-action-bar {
+    bottom: 84px; /* 20px higher than the 64px default */
+    display: flex;
   }
 
-  /* Simulation panel: keep the desktop behaviour — the disclosure grows and
-     scrolls internally while the Run controls stay pinned at the bottom. This
-     stops the advanced-parameter body from overlapping the CTA buttons (which
-     happened when the whole panel scrolled with a sticky Run). The panel itself
-     can still scroll as a fallback on very short viewports. */
-  #panel-simulation {
-    overflow-y: auto;
+  /* Intro tab: let the onboarding card grow to fill the sheet's tab body in BOTH
+     dimensions — vertically via flex, horizontally via the default cross-axis
+     stretch — while keeping its rounded, bordered, centered surface. The 16px
+     inset from `.panel` keeps it centered rather than bleeding to the edges. */
+  #panel-intro {
+    display: flex;
+    flex-direction: column;
   }
 
-  #simulation-params-disclosure {
+  #panel-intro .intro-card {
     flex: 1 1 auto;
-    min-height: 0;
-  }
-
-  #simulation-params-disclosure[open] {
-    overflow-y: auto;
+    margin: 14px 0 0;
   }
 }
