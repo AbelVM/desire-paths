@@ -662,7 +662,6 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 24,
       "filter": [
         "all",
         [
@@ -675,7 +674,6 @@
         ["==", ["get", "brunnel"], "tunnel"],
         ["==", ["get", "class"], "path"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "#cba",
         "line-dasharray": [1.5, 0.75],
@@ -687,7 +685,8 @@
           1.2,
           20,
           4
-        ]
+        ],
+        "line-opacity": 0
       }
     },
     {
@@ -729,7 +728,7 @@
         ["==", ["get", "brunnel"], "tunnel"],
         ["match", ["get", "class"], ["service", "track"], true, false]
       ],
-      "layout": {"line-join": "round", "visibility": "visible"},
+      "layout": {"line-join": "round"},
       "paint": {
         "line-color": "#fff",
         "line-width": [
@@ -893,13 +892,11 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 24,
       "filter": [
         "all",
         ["==", ["get", "brunnel"], "tunnel"],
         ["==", ["get", "class"], "rail"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "#bbb",
         "line-dasharray": [2, 2],
@@ -913,7 +910,8 @@
           0.75,
           20,
           2
-        ]
+        ],
+        "line-opacity": 0
       }
     },
     {
@@ -1353,7 +1351,6 @@
         ["match", ["get", "brunnel"], ["bridge", "tunnel"], false, true],
         ["==", ["get", "class"], "path"]
       ],
-      "layout": {"visibility": "none"},
       "paint": {
         "line-color": "#cba",
         "line-dasharray": [1.5, 0.75],
@@ -1365,7 +1362,8 @@
           1.2,
           20,
           4
-        ]
+        ],
+        "line-opacity": 0
       }
     },
     {
@@ -1373,18 +1371,14 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 24,
+      "minzoom": 12,
       "filter": [
         "all",
         ["match", ["get", "brunnel"], ["bridge", "tunnel"], false, true],
         ["==", ["get", "class"], "motorway"],
         ["==", ["get", "ramp"], 1]
       ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
-      },
+      "layout": {"line-cap": "round", "line-join": "round"},
       "paint": {
         "line-color": "#fc8",
         "line-width": [
@@ -1619,7 +1613,6 @@
         ["==", ["get", "class"], "transit"],
         ["match", ["get", "brunnel"], ["tunnel"], false, true]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "hsla(0,0%,73%,0.77)",
         "line-width": [
@@ -1650,7 +1643,6 @@
         ["==", ["get", "class"], "transit"],
         ["match", ["get", "brunnel"], ["tunnel"], false, true]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "hsla(0,0%,73%,0.68)",
         "line-dasharray": [0.2, 8],
@@ -1684,7 +1676,6 @@
         ["==", ["get", "class"], "rail"],
         ["has", "service"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "hsla(0,0%,73%,0.77)",
         "line-width": [
@@ -1715,7 +1706,6 @@
         ["==", ["get", "class"], "rail"],
         ["has", "service"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "hsla(0,0%,73%,0.68)",
         "line-dasharray": [0.2, 8],
@@ -1750,7 +1740,6 @@
         ["match", ["get", "brunnel"], ["bridge", "tunnel"], false, true],
         ["==", ["get", "class"], "rail"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "#bbb",
         "line-width": [
@@ -1784,7 +1773,6 @@
         ["match", ["get", "brunnel"], ["bridge", "tunnel"], false, true],
         ["==", ["get", "class"], "rail"]
       ],
-      "layout": {"visibility": "visible"},
       "paint": {
         "line-color": "#bbb",
         "line-dasharray": [0.2, 8],
@@ -3229,5 +3217,5 @@
       }
     }
   ],
-  "id": "dp7e05i8o"
+  "id": "d1qxvjt8w"
 }
