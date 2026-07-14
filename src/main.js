@@ -113,6 +113,22 @@ class DesireMap {
     // the Proxy no longer needs custom ownKeys/getOwnPropertyDescriptor traps
     // (which previously hid them and created a has/descriptor invariant smell).
     for (const k of KNOWN_STATE_KEYS) {
+      if (k === 'simulationParams') {
+        // `simulationParams` is the single live module object; reads return it
+        // directly and writes merge into it so `SIMULATION_PARAMS` and
+        // `state.simulationParams` can never diverge.
+        Object.defineProperty(self, k, {
+          enumerable: true,
+          configurable: true,
+          get() {
+            return SIMULATION_PARAMS;
+          },
+          set(v) {
+            Object.assign(SIMULATION_PARAMS, v);
+          },
+        });
+        continue;
+      }
       Object.defineProperty(self, k, {
         enumerable: true,
         configurable: true,
@@ -304,7 +320,7 @@ function updateCursorFromNodes(mapInstance, point) {
 const init = () => {
   const map = new maplibregl.Map(MAP_OPTIONS);
   const desireMap = new DesireMap(map);
-  if (typeof window !== 'undefined') window.__map = desireMap; // TEMP DEBUG
+  if (import.meta.env.DEV && typeof window !== 'undefined') window.__map = desireMap; // TEMP DEBUG
 
   desireMap.multiFrictionMap = new Map();
   desireMap.cellFrictionMap = new Map();
@@ -326,7 +342,6 @@ const init = () => {
   desireMap.aoi = undefined;
   desireMap.readyToCompute = false;
   desireMap.dragOccurred = false;
-  desireMap.simulationParams = { ...SIMULATION_PARAMS };
 
   // Add geocoder control with Nominatim service.
   //
@@ -346,7 +361,7 @@ const init = () => {
   // Dev-only observability hooks for the PowerCache-backed caches (review 3.1/3.2).
   // `geocoderCache.stats()` / `getGradientCacheStats(desireMap)` surface hit rates
   // so we can confirm the caches are actually being used.
-  if (typeof window !== 'undefined') {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
     try {
       window.__dp_getGeocoderCacheStats = () => geocoderCache.stats();
       window.__dp_getGradientCacheStats = () => getGradientCacheStats(desireMap);
@@ -606,55 +621,43 @@ const isAccessible = async (mapInstance, clickEvent) => {
     [clickEvent.point.x - 5, clickEvent.point.y - 5],
     [clickEvent.point.x + 5, clickEvent.point.y + 5],
   ];
-  const features = mapInstance.queryRenderedFeatures(bbox) ?? [];
-  const filtered = features.filter((f) =>
-    ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer)
-  );
-  const layerCosts = Object.create(null);
-  for (const feat of filtered) {
-    if (!feat?.geometry) continue;
-    const surface = getSurface(feat);
-    const c = FRICTION_COSTS[surface.cost];
-    const layer = surface.layer;
-    if (layerCosts[layer] === undefined || c > layerCosts[layer]) {
-      layerCosts[layer] = c;
+
+  const queryLayerCosts = (inst) => {
+    const features = inst.queryRenderedFeatures(bbox) ?? [];
+    const filtered = features.filter((f) =>
+      ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer)
+    );
+    const layerCosts = Object.create(null);
+    for (const feat of filtered) {
+      if (!feat?.geometry) continue;
+      const surface = getSurface(feat);
+      const c = FRICTION_COSTS[surface.cost];
+      const layer = surface.layer;
+      if (layerCosts[layer] === undefined || c > layerCosts[layer]) {
+        layerCosts[layer] = c;
+      }
     }
+    return layerCosts;
+  };
+
+  let layerCosts = queryLayerCosts(mapInstance);
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (Object.keys(layerCosts).length === 0 && attempts < maxAttempts && sourcesLoading(mapInstance)) {
+    attempts++;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    layerCosts = queryLayerCosts(mapInstance);
   }
+
   const costs = Object.values(layerCosts);
-  if (costs.length === 0) {
-    // No features found — defer placement if tiles are still loading.
-    // When tiles haven't loaded for a region, queryRenderedFeatures returns empty;
-    // treating that as "walkable" allows placement on water/buildings that aren't rendered yet.
-    if (sourcesLoading(mapInstance)) {
-      // Wait for tiles to load, then re-query once to avoid race condition
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const retryFeatures = mapInstance.queryRenderedFeatures(bbox) ?? [];
-      const retryFiltered = retryFeatures.filter((f) =>
-        ['transportation', 'building', 'water', 'landcover', 'landuse'].includes(f.sourceLayer)
-      );
-      const retryLayerCosts = Object.create(null);
-      for (const feat of retryFiltered) {
-        if (!feat?.geometry) continue;
-        const surface = getSurface(feat);
-        const c = FRICTION_COSTS[surface.cost];
-        const layer = surface.layer;
-        if (retryLayerCosts[layer] === undefined || c > retryLayerCosts[layer]) {
-          retryLayerCosts[layer] = c;
-        }
-      }
-      const retryCosts = Object.values(retryLayerCosts);
-      if (retryCosts.length > 0) {
-        const groundCost =
-          typeof retryLayerCosts['0'] === 'number' ? retryLayerCosts['0'] : Math.min(...retryCosts);
-        return groundCost < FRICTION_COSTS.IMPASSABLE;
-      }
-      // Still no features after retry — allow placement
-      return true;
-    }
-    return true;
+  if (costs.length > 0) {
+    const groundCost =
+      typeof layerCosts['0'] === 'number' ? layerCosts['0'] : Math.min(...costs);
+    return groundCost < FRICTION_COSTS.IMPASSABLE;
   }
-  const groundCost = typeof layerCosts['0'] === 'number' ? layerCosts['0'] : Math.min(...costs);
-  return groundCost < FRICTION_COSTS.IMPASSABLE;
+
+  return true;
 };
 
 export { DesireMap, isReadyToCompute, isAccessible };

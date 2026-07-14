@@ -269,8 +269,7 @@ function updateSimulationProgress(ctx, processed, total, phase = 'Simulating flo
  * FULL IMPLEMENTATION: BDI Agent Decision Engine
  */
 export async function computeDesirePaths(state, mapInstance) {
-  state.simulationParams = { ...SIMULATION_PARAMS };
-  const simParams = state.simulationParams;
+  const simParams = state.simulationParams ?? SIMULATION_PARAMS;
 
   // Reset flow map before every simulation so results don't accumulate across runs.
   // Always use a plain object for pathDesireScores — inner loops index it directly.

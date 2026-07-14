@@ -305,7 +305,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const uiState = createUIState(map);
 
-  map.simulationParams = { ...SIMULATION_PARAMS };
   try {
     createIcons({
       icons,
@@ -457,7 +456,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
 
   const applySimulationParamPatch = (patch, { requiresRemap = false } = {}) => {
     updateSimulationParams(patch);
-    map.simulationParams = { ...SIMULATION_PARAMS };
     map.flowsReady = false;
     if (requiresRemap) {
       map.mappingReady = false;
@@ -1517,9 +1515,13 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       console.error('Desire path computation failed:', err);
       showToastNotification('Simulation error. Please try again.', 'error');
     } finally {
-      syncFlowReadout();
       setBusyState(false);
-      syncSimulationUI();
+      try {
+        syncFlowReadout();
+        syncSimulationUI();
+      } catch (_e) {
+        // UI sync must not prevent busy-state reset
+      }
     }
   };
 

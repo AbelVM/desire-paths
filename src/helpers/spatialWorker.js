@@ -1123,17 +1123,19 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   };
 }
 
-// Expose runtime hooks for interactive debugging in the browser console
-try {
-  if (typeof window !== 'undefined' && window) {
-    window.__dp_setMaxAgentWorkers = setMaxAgentWorkers;
-    window.__dp_getMaxAgentWorkers = getMaxAgentWorkers;
-    window.__dp_setParallelAgentBatches = setParallelAgentBatches;
-    window.__dp_getParallelAgentBatches = getParallelAgentBatches;
-    window.__dp_getWorkerPoolStats = getWorkerPoolStats;
-    window.__dp_drainWorkerPool = drainWorkerPool;
-  }
-} catch (_e) {}
+// Expose runtime hooks for interactive debugging in the browser console (dev only)
+if (import.meta.env.DEV) {
+  try {
+    if (typeof window !== 'undefined' && window) {
+      window.__dp_setMaxAgentWorkers = setMaxAgentWorkers;
+      window.__dp_getMaxAgentWorkers = getMaxAgentWorkers;
+      window.__dp_setParallelAgentBatches = setParallelAgentBatches;
+      window.__dp_getParallelAgentBatches = getParallelAgentBatches;
+      window.__dp_getWorkerPoolStats = getWorkerPoolStats;
+      window.__dp_drainWorkerPool = drainWorkerPool;
+    }
+  } catch (_e) {}
+}
 
 export async function runImpassableBlurTask(frictionSource, options = {}) {
   const frictionEntries =

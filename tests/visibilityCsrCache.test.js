@@ -136,14 +136,14 @@ describe('review12 #6 — visibility/bearing CSR cached across runs', () => {
     // Change the BFS radius and re-run: the cached CSR (built for the old
     // visionDepth) must be rebuilt.
     const newDepth = SIMULATION_PARAMS.visionDepth + 1;
-    SIMULATION_PARAMS.visionDepth = newDepth;
+    state.simulationParams.visionDepth = newDepth;
     try {
       await computeDesirePaths(state, state);
       expect(runVisibilityBearingTask).toHaveBeenCalledTimes(2);
       expect(state._visibilityBearingCSR).not.toBe(csr1);
       expect(state._visibilityBearingCSR.visionDepth).toBe(newDepth);
     } finally {
-      SIMULATION_PARAMS.visionDepth = newDepth - 1; // restore default
+      state.simulationParams.visionDepth = SIMULATION_PARAMS.visionDepth; // restore
     }
   });
 

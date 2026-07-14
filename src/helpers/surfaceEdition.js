@@ -654,11 +654,11 @@ export function initSurfaceEdition(map, { showToast, setMapCursor } = {}) {
     } catch {
       /* ignore */
     }
-    if (typeof window !== 'undefined') delete window.__td;
+    if (import.meta.env.DEV && typeof window !== 'undefined') delete window.__td;
   }
 
-  // TEMP DEBUG: expose for e2e drag test
-  if (typeof window !== 'undefined') window.__td = { draw, setMode, setSurfaceClass, destroy, getSelected: () => selectedId };
+  // TEMP DEBUG: expose for e2e drag test (dev only)
+  if (import.meta.env.DEV && typeof window !== 'undefined') window.__td = { draw, setMode, setSurfaceClass, destroy, getSelected: () => selectedId };
 
   return { draw, setMode, setSurfaceClass, destroy };
 }
