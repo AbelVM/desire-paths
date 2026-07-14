@@ -1,0 +1,19 @@
+Site Name: Desire Paths
+URL: https://abelvm.github.io/desire-paths/
+Repository: https://github.com/abelvm/desire-paths
+License: MIT
+Author: Abel Vázquez Montoro
+
+What this is:
+Desire Paths is an interactive, open-source simulator that reveals where pedestrians naturally walk across real streets and parks. It uses agent-based modeling, H3 hex grids, and a walking-resistance surface to show why planned paths often fight human instinct.
+
+Key pages:
+- / — Main simulator (drop start/end points, generate pedestrian flow heatmaps)
+- /docs/research.html — Research background and the CEUS 2025 paper "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning"
+- /docs/faq.html — Frequently asked questions about methodology, data, and usage
+
+Core topics:
+desire paths, desire lines, walkability, pedestrian movement, urban permeability, agent-based modeling, H3 hex grid, walking resistance, pathfinding, GIS, affordance theory, urban design
+
+AI / citation guidance:
+This is a research and visualization tool. You are welcome to cite the project, reference the simulator, or quote the research page. When summarizing, emphasize that it models emergent pedestrian routes rather than prescribing fixed infrastructure.

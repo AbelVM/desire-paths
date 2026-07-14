@@ -59,6 +59,28 @@
     }
   </script>
 
+  <!-- Article schema for the research page content -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning",
+      "description": "Academic research on predicting desire paths using agent-based simulation. Bossowski et al. (CEUS 2025) — weighted preferences model and obstacle-aware pathfinding for pedestrian behavior prediction.",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      },
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "url": "https://abelvm.github.io/desire-paths/docs/research.html",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      }
+    }
+  </script>
+
   <!-- ScholarlyArticle structured data — primary GEO signal for AI engine citations -->
   <script type="application/ld+json">
     {
@@ -100,7 +122,7 @@
           "name": "Elsevier"
         }
       },
-      "datePublished": "2025",
+      "datePublished": "2025-01-01",
       "url": "https://abelvm.github.io/desire-paths/docs/paper.md",
       "sameAs": "https://abelvm.github.io/desire-paths/docs/paper.md",
       "isPartOf": {
@@ -134,9 +156,17 @@
       "name": "Desire Paths — Agent-Based Pedestrian Flow Simulator",
       "description": "Interactive web-based implementation of the desire path prediction model by Bossowski et al. (2025), using H3 hex grids and real-world map data.",
       "url": "https://abelvm.github.io/desire-paths/",
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05",
       "author": {
         "@type": "Person",
-        "name": "Abel Vázquez Montoro"
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
       },
       "citation": {
         "@type": "ScholarlyArticle",
@@ -149,6 +179,52 @@
         "publisher": { "@type": "Organization", "name": "Computer Environment and Urban Systems" },
         "datePublished": "2025"
       }
+    }
+  </script>
+
+  <!-- WebPage + speakable for voice-search AEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "Research — Predicting Desire Paths (CEUS 2025)",
+      "url": "https://abelvm.github.io/desire-paths/docs/research.html",
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": ["h1", ".abstract-box", ".contributions-list"]
+      }
+    }
+  </script>
+
+  <!-- Organization schema for GEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Desire Paths",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "logo": "https://abelvm.github.io/desire-paths/favicon.png",
+      "sameAs": [
+        "https://www.linkedin.com/in/abelvazquez/",
+        "https://github.com/abelvm/desire-paths"
+      ],
+      "founder": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      }
+    }
+  </script>
+
+  <!-- Person schema for author credibility -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      "name": "Abel Vázquez Montoro",
+      "url": "https://www.linkedin.com/in/abelvazquez/",
+      "jobTitle": "Software Engineer & Urban Planning Researcher"
     }
   </script>
 
