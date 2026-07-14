@@ -19,6 +19,7 @@ import {
   runVisibilityBearingTask,
   setSpatialWorkerProgressHandler,
   clearSpatialWorkerProgressHandler,
+  terminateAllWorkers,
 } from './spatialWorker.js';
 // The single canonical agent-path kernel lives in agentTasks.js. estimateMaxTicks
 // is re-exported from there to keep a single definition.
@@ -279,7 +280,7 @@ export async function computeDesirePaths(state, mapInstance, signal) {
 
   const onAbort = () => {
     try {
-      terminateAllWorkers?.();
+      terminateAllWorkers();
     } catch (_e) {}
     throw new Error('computeDesirePaths aborted');
   };
