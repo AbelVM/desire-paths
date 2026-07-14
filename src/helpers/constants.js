@@ -1,6 +1,6 @@
 export const MAP_OPTIONS = {
   container: 'map',
-  style: 'https://tiles.openfreemap.org/styles/bright',
+  style: './bright_custom.json',//'https://tiles.openfreemap.org/styles/bright',
   center: [-3.7035, 40.4169],
   zoom: 18,
   maxZoom: 24,
