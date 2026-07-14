@@ -52,12 +52,24 @@ export default defineConfig({
     },
   },
   build: {
+    // Terser was the root cause of the production "mapping failed" error
+    // (dev worked, prod failed). Its aggressive `compress` passes
+    // (`collapse_vars` / `reduce_vars` with `passes: 2`) mis-optimize the
+    // complex numeric + SharedArrayBuffer + try/finally pipeline in
+    // compute.js / spatialTasks.js, so the full mapping build threw while the
+    // simpler aoi-hexes path survived. Use a conservative terser config: keep
+    // `mangle` + dead-code elimination, but disable the inlining passes that
+    // break runtime behavior. `drop_console: false` keeps error logs visible
+    // for diagnosis. If a future mapping regression appears under minification,
+    // the safe fallback is `minify: true` (esbuild, Vite default).
     minify: "terser",
     terserOptions: {
       compress: {
-        drop_console: true,
+        drop_console: false,
         drop_debugger: true,
-        passes: 2,
+        passes: 1,
+        collapse_vars: false,
+        reduce_vars: false,
       },
       mangle: true,
       format: {

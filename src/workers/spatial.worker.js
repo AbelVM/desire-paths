@@ -10,7 +10,7 @@ import {
   buildR1Adjacency,
   mergeCellsChunk,
 } from '../helpers/spatialTasks.js';
-import { handleAgentBatch } from './agent.worker.js';
+import { computeAgentBatch } from '../helpers/agentTasks.js';
 
 self.onmessage = (event) => {
   const data = event.data || {};
@@ -31,7 +31,7 @@ self.onmessage = (event) => {
       logger.debug('spatial.worker: delegating agent-batch to handler', {
           planLength: data.payload?.plan?.length ?? null,
         });
-      const ret = handleAgentBatch(data.payload || {});
+      const ret = computeAgentBatch(data.payload || {});
       logger.debug('spatial.worker: agent-batch handler returned', {
           hasTransfers: Array.isArray(ret?.transfers),
         });

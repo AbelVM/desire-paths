@@ -161,11 +161,20 @@ function _startIdleCleanup() {
   }, 60_000);
 }
 
+// Worker entry URLs must be STATIC string literals inside `new URL(..., import.meta.url)`
+// so the bundler can statically detect and emit the worker chunks into `dist/`. A
+// runtime-variable path (e.g. `new URL(script, import.meta.url)`) is invisible to
+// Vite/Rollup, so the worker files are dropped from the production build → 404 on
+// static servers → `createWorkerSlot` throws → fallback to main thread → "no mapping"
+// toast. Keep the literal directly in `new Worker(...)` for reliable detection.
 function createWorkerSlot(kind = 'spatial') {
   const script =
     kind === 'agent-batch' ? '../workers/agent.worker.js' : '../workers/spatial.worker.js';
   try {
-    const worker = new Worker(new URL(script, import.meta.url), { type: 'module' });
+    const worker =
+      kind === 'agent-batch'
+        ? new Worker(new URL('../workers/agent.worker.js', import.meta.url), { type: 'module' })
+        : new Worker(new URL('../workers/spatial.worker.js', import.meta.url), { type: 'module' });
     logger.debug(`spatialWorker: createWorkerSlot kind=${kind} script=${script}`);
     const slot = { worker, kind };
     _touchWorker(slot);

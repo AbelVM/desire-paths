@@ -1,14 +1,6 @@
 import { logger } from '../helpers/logger.js';
 import { computeAgentBatch } from '../helpers/agentTasks.js';
 
-/**
- * Thin adapter for agent batch handling.
- * Exposes a function so the main spatial worker can delegate agent work.
- */
-export function handleAgentBatch(payload) {
-  return computeAgentBatch(payload || {});
-}
-
 // If this module is loaded as a dedicated worker script, handle messages here.
 // Only attach a top-level message handler when this module is the dedicated
 // worker entrypoint. When imported into another worker module (e.g. spatial.worker)

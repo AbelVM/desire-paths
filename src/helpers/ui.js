@@ -1631,7 +1631,8 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
       } catch (err) {
         map.flowsReady = false;
         console.error('Mapping build failed:', err);
-        showToastNotification('Mapping build failed. Please try again.', 'error');
+        const detail = err && err.message ? err.message : String(err);
+        showToastNotification(`Mapping build failed: ${detail}. Please try again.`, 'error');
         setBusyState(false);
         syncSimulationUI();
         return;
