@@ -284,6 +284,17 @@ function splitIntoChunks(items, chunkCount) {
 function featureVertexCost(feature) {
   const geom = feature && feature.geometry;
   if (!geom || !geom.coordinates) return 1;
+  // Prefer the bounding-box area as a proxy for rasterization cost: polygonToCells
+  // cost scales with output cell count ≈ area / cellArea, and a few-vertex feature
+  // covering a huge area (a large park / water body) is far more expensive than its
+  // vertex count suggests. The tile source already supplies `bbox`, so this is free
+  // and balances large simple polygons far better than vertex count (LPT scheduling).
+  const bb = feature.bbox;
+  if (bb && bb.length === 4 && isFinite(bb[0]) && isFinite(bb[2]) && bb[2] > bb[0] && bb[3] > bb[1]) {
+    const area = (bb[2] - bb[0]) * (bb[3] - bb[1]);
+    return area > 0 ? area : 1;
+  }
+  // Fallback: vertex count.
   const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
   let total = 0;
   for (let p = 0; p < polys.length; p++) {

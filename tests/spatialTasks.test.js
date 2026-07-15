@@ -5,10 +5,12 @@ import {
   computeImpassableBlurSnapshot,
   computeFastScanSnapshot,
   computeFastScanChunkSnapshot,
+  collectFastScanEntries,
   buildMappingGraph,
   mergeCellsChunk,
+  _clipPolygonToBbox,
 } from '../src/helpers/spatialTasks.js';
-import { latLngToCell, gridDisk, gridDistance } from 'h3-js';
+import { latLngToCell, gridDisk, gridDistance, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, classifyFrictionTier } from '../src/helpers/constants.js';
 import { gradientGet, getGradientGraph } from '../src/helpers/dijkstra.js';
 
@@ -346,6 +348,100 @@ describe('computeFastScanSnapshot', () => {
     const values = Object.values(result.cellFrictionEntries);
     expect(values.length).toBeGreaterThan(0);
     expect(values.some((v) => v === FRICTION_COSTS.LIGHT_PARK)).toBe(true);
+  });
+
+  it('clipping a large feature to the AOI bbox yields identical AOI cells', () => {
+    // A park polygon larger than the AOI (spilling past the AOI bbox) must
+    // classify exactly the same AOI cells whether it is clipped to the AOI bbox
+    // before rasterization or rasterized whole. This guards the Sutherland–Hodgman
+    // clipping speedup in collectFastScanEntries.
+    const viewHexes = gridDisk(h3Cell, 2);
+    // AOI bbox from the actual AOI cells.
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const cell of viewHexes) {
+      const [lat, lng] = cellToLatLng(cell);
+      if (lng < minx) minx = lng;
+      if (lng > maxx) maxx = lng;
+      if (lat < miny) miny = lat;
+      if (lat > maxy) maxy = lat;
+    }
+    const aoiBbox = [minx, miny, maxx, maxy];
+
+    // A modest square centered on the AOI, large enough to spill past the AOI
+    // bbox but small enough to rasterize quickly at res 15 (a 0.02° square would
+    // be millions of cells and time out / hit h3's cell limit).
+    const cx = (minx + maxx) / 2;
+    const cy = (miny + maxy) / 2;
+    const hw = 0.0015;
+    const big = [
+      [cx - hw, cy - hw],
+      [cx + hw, cy - hw],
+      [cx + hw, cy + hw],
+      [cx - hw, cy + hw],
+      [cx - hw, cy - hw],
+    ];
+    const feature = {
+      sourceLayer: 'park',
+      properties: { class: 'national_park' },
+      geometry: { type: 'Polygon', coordinates: [big] },
+      bbox: [cx - hw, cy - hw, cx + hw, cy + hw],
+    };
+
+    const clipped = collectFastScanEntries({ features: [feature], viewHexes, aoiBbox });
+    // No clipping: pass the feature's own (large) bbox as the AOI bbox so the
+    // "extends beyond" test is false and the full geometry is rasterized.
+    const full = collectFastScanEntries({
+      features: [feature],
+      viewHexes,
+      aoiBbox: [cx - hw, cy - hw, cx + hw, cy + hw],
+    });
+
+    // cellFrictionEntries is post-AOI-filter, so both runs contain exactly the
+    // AOI cells (clipping only reduces the raw rasterized work, never the result).
+    // Every AOI cell must be classified identically in both runs.
+    expect(Object.keys(clipped.cellFrictionEntries).sort()).toEqual(
+      Object.keys(full.cellFrictionEntries).sort(),
+    );
+    for (const cell of viewHexes) {
+      expect(clipped.cellFrictionEntries[cell]).toBe(full.cellFrictionEntries[cell]);
+    }
+  });
+});
+
+describe('_clipPolygonToBbox', () => {
+  it('clips a square that extends past the bbox to the bbox edges', () => {
+    const poly = [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]];
+    const clipped = _clipPolygonToBbox(poly, 2, 2, 8, 8);
+    expect(clipped).not.toBeNull();
+    for (const [x, y] of clipped[0]) {
+      expect(x).toBeGreaterThanOrEqual(2);
+      expect(x).toBeLessThanOrEqual(8);
+      expect(y).toBeGreaterThanOrEqual(2);
+      expect(y).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('returns the polygon unchanged when fully inside the bbox', () => {
+    const poly = [[[3, 3], [7, 3], [7, 7], [3, 7], [3, 3]]];
+    const clipped = _clipPolygonToBbox(poly, 0, 0, 10, 10);
+    expect(clipped).not.toBeNull();
+    expect(clipped[0].length).toBe(5);
+  });
+
+  it('returns null when the polygon is completely outside the bbox', () => {
+    const poly = [[[20, 20], [30, 20], [30, 30], [20, 30], [20, 20]]];
+    const clipped = _clipPolygonToBbox(poly, 0, 0, 10, 10);
+    expect(clipped).toBeNull();
+  });
+
+  it('drops holes that collapse during clipping', () => {
+    const poly = [
+      [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+      [[20, 20], [30, 20], [30, 30], [20, 30], [20, 20]], // hole outside bbox
+    ];
+    const clipped = _clipPolygonToBbox(poly, 0, 0, 10, 10);
+    expect(clipped).not.toBeNull();
+    expect(clipped.length).toBe(1); // outer kept, hole dropped
   });
 });
 

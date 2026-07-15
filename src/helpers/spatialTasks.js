@@ -195,6 +195,74 @@ function bboxesIntersect(a, b) {
   return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 
+// True when bbox `b` extends past any edge of bbox `a` (i.e. `b` is not fully
+// contained in `a`). Used to decide whether a feature must be clipped to the
+// AOI bbox before rasterization.
+function _extendsBeyond(b, a) {
+  return b[0] < a[0] || b[1] < a[1] || b[2] > a[2] || b[3] > a[3];
+}
+
+// --- Polygon clipping to the AOI bbox (fast-scan rasterization speedup) ------
+// Sutherland–Hodgman clip of a single ring (array of [lng,lat]) against an
+// axis-aligned rectangle [minx, miny, maxx, maxy]. The clip region is convex, so
+// SH preserves ring simplicity for simple input and never throws.
+function _shClip(pts, inside, intersect) {
+  const n = pts.length;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const cur = pts[i];
+    const prev = pts[(i + n - 1) % n];
+    const curIn = inside(cur);
+    const prevIn = inside(prev);
+    if (curIn) {
+      if (!prevIn) out.push(intersect(prev, cur));
+      out.push(cur);
+    } else if (prevIn) {
+      out.push(intersect(prev, cur));
+    }
+  }
+  return out;
+}
+
+function _intersectX(a, b, x) {
+  const dx = b[0] - a[0];
+  const t = dx === 0 ? 0 : (x - a[0]) / dx;
+  return [x, a[1] + t * (b[1] - a[1])];
+}
+
+function _intersectY(a, b, y) {
+  const dy = b[1] - a[1];
+  const t = dy === 0 ? 0 : (y - a[1]) / dy;
+  return [a[0] + t * (b[0] - a[0]), y];
+}
+
+function _clipRingToBbox(ring, minx, miny, maxx, maxy) {
+  if (!ring || ring.length < 3) return ring;
+  let pts = _shClip(ring, (p) => p[0] >= minx, (a, b) => _intersectX(a, b, minx));
+  if (pts.length < 3) return pts;
+  pts = _shClip(pts, (p) => p[0] <= maxx, (a, b) => _intersectX(a, b, maxx));
+  if (pts.length < 3) return pts;
+  pts = _shClip(pts, (p) => p[1] >= miny, (a, b) => _intersectY(a, b, miny));
+  if (pts.length < 3) return pts;
+  pts = _shClip(pts, (p) => p[1] <= maxy, (a, b) => _intersectY(a, b, maxy));
+  return pts;
+}
+
+// Clip a GeoJSON Polygon's rings ([outer, ...holes]) to the AOI bbox. Returns
+// null if the outer ring collapses (no area inside the bbox); holes that
+// collapse are dropped. The result is a valid [outer, ...holes] coordinate
+// array ready for polygonToCells.
+export function _clipPolygonToBbox(coords, minx, miny, maxx, maxy) {
+  const outer = _clipRingToBbox(coords[0], minx, miny, maxx, maxy);
+  if (outer.length < 3) return null;
+  const out = [outer];
+  for (let h = 1; h < coords.length; h++) {
+    const hole = _clipRingToBbox(coords[h], minx, miny, maxx, maxy);
+    if (hole.length >= 3) out.push(hole);
+  }
+  return out;
+}
+
 function getCachedPolyCells(coords) {
   // Fast bbox check: compute key only on cache miss (moved from top of function).
   // Include the H3 resolution in the key: the same geometry at a different
@@ -396,8 +464,9 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
     // the AOI bbox. This avoids the expensive polygonToCells / gridPathCells
     // calls for out-of-AOI features. Use the Mapbox pre-computed bbox when
     // available to skip the O(V) coordinate walk entirely.
+    let fBbox = null;
     if (hasAoiBbox) {
-      const fBbox = feature._bbox || (feature._bbox = computeFeatureBbox(feature.geometry, feature.bbox));
+      fBbox = feature._bbox || (feature._bbox = computeFeatureBbox(feature.geometry, feature.bbox));
       if (fBbox && !bboxesIntersect(fBbox, aoiBbox)) continue;
     }
 
@@ -411,7 +480,9 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
     const groupKey = `${layerKey}|${layerVal}`;
     let group = grouped[groupKey];
     if (!group) group = grouped[groupKey] = { layerKey, layerVal, geometries: [] };
-    group.geometries.push(feature.geometry);
+    // Carry the precomputed feature bbox so the rasterization pass can decide
+    // whether to clip the geometry to the AOI bbox (see _clipPolygonToBbox).
+    group.geometries.push({ geometry: feature.geometry, bbox: fBbox });
   }
 
   const multiFrictionEntries = Object.create(null);
@@ -427,8 +498,10 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
   for (const group of Object.values(grouped)) {
     const { layerKey, layerVal, geometries } = group;
     for (let g = 0; g < geometries.length; g++) {
-      const geometry = geometries[g];
+      const entry = geometries[g];
+      const geometry = entry && entry.geometry;
       if (!geometry || !geometry.coordinates) continue;
+      const fBbox = entry ? entry.bbox : null;
 
       // Rasterize the geometry to H3 cells by type:
       //  - LineString / MultiLineString: a CORRIDOR of cells along the line
@@ -451,9 +524,35 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
       } else {
         const coordsArray =
           geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+        // Clip each polygon to the AOI bbox when the feature spills past it. This
+        // shrinks the polygonToCells input for large features (water bodies,
+        // parks, landuse zones) so we rasterize only the in-AOI portion. It is
+        // exact: the AOI polygon is contained in its own bbox, so every AOI cell
+        // center lies inside the bbox; the inAoi filter afterwards keeps only AOI
+        // cells, so the result is identical to rasterizing the full geometry.
+        //
+        // The AOI bbox is derived from cell *centers*, but hexagon cells extend
+        // past their centers, so a cell whose center sits on the bbox edge can be
+        // dropped by polygonToCells when the polygon is clipped exactly to that
+        // edge. We pad the clip bbox by a small epsilon (well under one cell) so
+        // the clipped polygon still fully contains every AOI cell center. The pad
+        // only adds a thin margin to the rasterized area; the inAoi filter keeps
+        // only true AOI cells, so no extra cells leak into the result.
+        const clip = hasAoiBbox && fBbox && _extendsBeyond(fBbox, aoiBbox);
+        const CLIP_PAD = 1e-6; // ~0.11 m, smaller than a res-15 cell radius
         cells = [];
         for (let p = 0; p < coordsArray.length; p++) {
-          const polyCells = getCachedPolyCells(coordsArray[p]);
+          const polyCoords = clip
+            ? _clipPolygonToBbox(
+                coordsArray[p],
+                aoiBbox[0] - CLIP_PAD,
+                aoiBbox[1] - CLIP_PAD,
+                aoiBbox[2] + CLIP_PAD,
+                aoiBbox[3] + CLIP_PAD,
+              )
+            : coordsArray[p];
+          if (!polyCoords) continue;
+          const polyCells = getCachedPolyCells(polyCoords);
           if (!polyCells) continue;
           for (let c = 0; c < polyCells.length; c++) cells.push(polyCells[c]);
         }
