@@ -294,6 +294,7 @@ function classifyLandcover(cls, subclass) {
     'marsh',
     'mangrove',
     'reedbed',
+    'saltern',
     'saltmarsh',
     'tidalflat',
     'tundra',
@@ -311,6 +312,7 @@ function classifyLandcover(cls, subclass) {
     'beach',
     'dune',
     'fell',
+    'mud',
   ];
   if (heavySub.includes(subclass)) return 'HEAVY_GRASS';
   const lightSub = [
@@ -324,10 +326,21 @@ function classifyLandcover(cls, subclass) {
     'recreation_ground',
     'flowerbed',
     'wet_meadow',
+    // Allotments are subdivided plots threaded with walkable paths between
+    // beds — consistent with the other grass/park cases, so they are LIGHT_PARK
+    // rather than the harder managed-agriculture tier below.
+    'allotments',
   ];
   if (lightSub.includes(subclass)) return 'LIGHT_PARK';
-  const managedSub = ['farm', 'farmland', 'allotments', 'orchard', 'vineyard', 'plant_nursery'];
+  const managedSub = ['farm', 'farmland', 'orchard', 'vineyard', 'plant_nursery'];
   if (managedSub.includes(subclass)) return 'HEAVY_GRASS';
+
+  // Canonical-class fallback: handles features with an unknown or empty
+  // subclass by keying on the OpenMapTiles `landcover` class (farmland, ice,
+  // wood, rock, grass, wetland, sand) instead of returning null → PAVEMENT.
+  if (['ice', 'rock', 'wetland'].includes(cls)) return 'IMPASSABLE';
+  if (['wood', 'farmland', 'sand'].includes(cls)) return 'HEAVY_GRASS';
+  if (cls === 'grass') return 'LIGHT_PARK';
   return null;
 }
 
@@ -359,6 +372,13 @@ function classifyLanduse(cls) {
 
 /**
  * Check if a transportation class is a railway.
+ *
+ * OpenMapTiles emits railways as `class=rail`
+ * (rail/narrow_gauge/preserved/funicular) or `class=transit`
+ * (subway/light_rail/monorail/tram) — see `transportation/class.sql`
+ * `railway_class()`. The obsolete `class === 'railway'` string is never emitted,
+ * so we match on the real classes as well as the subclass for robustness.
+ * (The obsolete `railway` string is also accepted for backward compatibility.)
  */
 function isRailway(cls, subclass) {
   const rails = [
@@ -371,7 +391,93 @@ function isRailway(cls, subclass) {
     'monorail',
     'tram',
   ];
-  return cls === 'railway' || rails.includes(subclass);
+  return cls === 'rail' || cls === 'transit' || cls === 'railway' || rails.includes(subclass);
+}
+
+/**
+ * OpenMapTiles `transportation.surface` values that are effectively hard /
+ * paved. An explicit paved surface keeps the feature's base classification
+ * (a paved path stays PAVEMENT, a paved track stays LIGHT_PARK). Mirrors the
+ * `paved` group of `surface_value()` in transportation/class.sql.
+ */
+const PAVED_SURFACES = new Set([
+  'paved',
+  'asphalt',
+  'cobblestone',
+  'concrete',
+  'concrete:lanes',
+  'concrete:plates',
+  'metal',
+  'paving_stones',
+  'sett',
+  'unhewn_cobblestone',
+  'wood',
+  'grade1',
+]);
+
+/**
+ * OpenMapTiles `transportation.surface` values that are soft / unpaved and
+ * should make a feature harder to traverse than its base class implies. Mirrors
+ * the `unpaved` group of `surface_value()` in transportation/class.sql
+ * (`mulch` is retained as a sensible soft-substrate extra not in the schema).
+ */
+const SOFT_SURFACES = new Set([
+  'unpaved',
+  'compacted',
+  'dirt',
+  'earth',
+  'fine_gravel',
+  'grass',
+  'grass_paver',
+  'gravel',
+  'gravel_turf',
+  'ground',
+  'ice',
+  'mud',
+  'pebblestone',
+  'salt',
+  'sand',
+  'snow',
+  'woodchips',
+  'mulch',
+]);
+
+/**
+ * Bump a surface cost up one tier to reflect a softer substrate.
+ * PAVEMENT -> LIGHT_PARK -> HEAVY_GRASS; HEAVY_GRASS / IMPASSABLE unchanged.
+ */
+function bumpTier(costKey) {
+  if (costKey === 'PAVEMENT') return 'LIGHT_PARK';
+  if (costKey === 'LIGHT_PARK') return 'HEAVY_GRASS';
+  return costKey;
+}
+
+/**
+ * Soften a surface cost down one tier to reflect a hard/paved substrate.
+ * Only LIGHT_PARK -> PAVEMENT is meaningful here: the only LIGHT_PARK bases
+ * produced by the transportation branch are track / bridleway / cycleway, all
+ * of which become a paved path when explicitly paved. HEAVY_GRASS (steps,
+ * ford) and PAVEMENT / IMPASSABLE are left unchanged.
+ */
+function softenTier(costKey) {
+  if (costKey === 'LIGHT_PARK') return 'PAVEMENT';
+  return costKey;
+}
+
+/**
+ * Modulate a transportation feature's base cost by its `surface` tag.
+ *  - No surface tag: conservative — keep the base class (don't penalize).
+ *  - Explicit paved surface: soften one tier (a paved track/bridleway is a
+ *    paved path), otherwise keep the base class.
+ *  - Explicit soft/unpaved surface: bump up one tier.
+ *  - Unknown surface: conservative — keep the base class.
+ * IMPASSABLE is never softened (callers pass it through unmodulated).
+ */
+function modulateBySurface(costKey, surface) {
+  if (!surface) return costKey;
+  if (PAVED_SURFACES.has(surface)) return softenTier(costKey);
+  if (SOFT_SURFACES.has(surface)) return bumpTier(costKey);
+  return costKey;
 }
 
 // Lazy-populated friction classification cache (on-demand fills)
@@ -385,8 +491,8 @@ const MAX_SURFACE_CACHE = 2048;
 /**
  * Build a normalized cache key from feature properties.
  */
-function _makeSurfaceKey(layerId, cls, subclass, brunnel, foot, access, indoor) {
-  return `${layerId}|${cls ?? ''}|${subclass ?? ''}|${brunnel ?? ''}|${foot ?? ''}|${access ?? ''}|${indoor ?? ''}`;
+function _makeSurfaceKey(layerId, cls, subclass, brunnel, foot, access, indoor, surface, layer) {
+  return `${layerId}|${cls ?? ''}|${subclass ?? ''}|${brunnel ?? ''}|${foot ?? ''}|${access ?? ''}|${indoor ?? ''}|${surface ?? ''}|${layer ?? ''}`;
 }
 
 /**
@@ -407,29 +513,46 @@ function _classifySurface(feature) {
   // Transportation layer
   if (layerId === 'transportation') {
     const vLayer = resolveVerticalLayer(layer, brunnel);
+    const surface = props.surface;
 
     if (isFootRestricted(props)) return { cost: 'IMPASSABLE', layer: vLayer };
     if (cls.includes('_construction')) return { cost: 'IMPASSABLE', layer: vLayer };
 
-    if (cls === 'path') return { cost: classifyPathSubclass(sub), layer: vLayer };
-    if (brunnel === 'ford') return { cost: 'HEAVY_GRASS', layer: vLayer };
+    // Ferry routes (highway=shipway) are water crossings, and aerialways
+    // (cable cars / chairlifts) are aerial transport — neither is walkable.
+    if (cls === 'ferry' || cls === 'aerialway') return { cost: 'IMPASSABLE', layer: vLayer };
+
+    if (cls === 'pier') {
+      // Piers are walkable structures. They may be over water OR pedestrian
+      // areas in the middle of the city at ground layer 0, so classify as
+      // PAVEMENT at the feature's natural vertical layer (do not force a
+      // bridge-style lift to layer 1).
+      return { cost: modulateBySurface('PAVEMENT', surface), layer: vLayer };
+    }
+
+    if (cls === 'path') return { cost: modulateBySurface(classifyPathSubclass(sub), surface), layer: vLayer };
+    if (brunnel === 'ford') return { cost: modulateBySurface('HEAVY_GRASS', surface), layer: vLayer };
 
     const roadResult = classifyRoadHierarchy(cls);
-    if (roadResult !== null) return { cost: roadResult, layer: vLayer };
-    if (cls === 'track') return { cost: 'LIGHT_PARK', layer: vLayer };
+    if (roadResult !== null) return { cost: modulateBySurface(roadResult, surface), layer: vLayer };
+    if (cls === 'track') return { cost: modulateBySurface('LIGHT_PARK', surface), layer: vLayer };
     if (isRailway(cls, sub)) return { cost: 'IMPASSABLE', layer: vLayer };
 
-    return { cost: 'PAVEMENT', layer: vLayer };
+    return { cost: modulateBySurface('PAVEMENT', surface), layer: vLayer };
   }
 
   // Landcover
   if (layerId === 'landcover') {
+    // A private/restricted landcover (e.g. a private garden) is not walkable
+    // even though its class would otherwise be open terrain.
+    if (isFootRestricted(props)) return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
     const result = classifyLandcover(cls, sub);
     if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
 
   // Landuse
   if (layerId === 'landuse') {
+    if (isFootRestricted(props)) return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
     const result = classifyLanduse(cls);
     if (result) return { cost: result, layer: parseLayerValue(layer) };
   }
@@ -437,6 +560,36 @@ function _classifySurface(feature) {
   // Building / water → impassable
   if (layerId === 'building' || layerId === 'water') {
     return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
+  }
+
+  // Waterway (linear river/canal/stream/drain/ditch) → impassable barrier.
+  // Rasterized as a corridor of cells along the line (see collectFastScanEntries).
+  if (layerId === 'waterway') {
+    // A culverted / piped waterway (brunnel=tunnel) runs underground, so the
+    // ground surface above it is walkable. It must contribute NO barrier:
+    // returning null skips the feature entirely (getSurface → null →
+    // collectFastScanEntries `continue`), letting the cell fall back to the
+    // real ground feature or the PAVEMENT default. Note we cannot instead
+    // emit IMPASSABLE at vertical layer -1: deriveCellFrictionFromLayers takes
+    // the MIN across a cell's layers and a cell only defaults to PAVEMENT when
+    // it has NO entry at all, so an entry at layer -1 with nothing at ground
+    // level would still leave the cell impassable.
+    if (brunnel === 'tunnel') return null;
+    return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
+  }
+
+  // Aeroway → runways/taxiways/aprons and secured airport grounds are not
+  // walkable. All OpenMapTiles aeroway classes are treated as impassable.
+  if (layerId === 'aeroway') {
+    return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
+  }
+
+  // Park (national_park / nature_reserve / protected_area) → open terrain.
+  // LIGHT_PARK only fills otherwise-empty cells: any road (PAVEMENT) or
+  // building/water (IMPASSABLE) inside the polygon still wins via the
+  // MIN-across-layers merge in deriveCellFrictionFromLayers.
+  if (layerId === 'park') {
+    return { cost: 'LIGHT_PARK', layer: parseLayerValue(layer) };
   }
 
   // Default
@@ -460,7 +613,9 @@ export function getSurface(feature) {
     props.brunnel ?? '',
     props.foot ?? '',
     props.access ?? '',
-    props.indoor ?? ''
+    props.indoor ?? '',
+    props.surface ?? '',
+    props.layer ?? ''
   );
 
   let entry = _surfaceCache.get(key);

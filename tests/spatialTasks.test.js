@@ -5,6 +5,8 @@ import {
   computeImpassableBlurSnapshot,
   computeFastScanSnapshot,
   computeFastScanChunkSnapshot,
+  buildMappingGraph,
+  mergeCellsChunk,
 } from '../src/helpers/spatialTasks.js';
 import { latLngToCell, gridDisk, gridDistance } from 'h3-js';
 import { FRICTION_COSTS, classifyFrictionTier } from '../src/helpers/constants.js';
@@ -273,6 +275,78 @@ describe('computeFastScanSnapshot', () => {
     const result = computeFastScanSnapshot({ features, viewHexes });
     expect(result.multiFrictionEntries).toBeDefined();
   });
+
+  it('should classify a waterway line as IMPASSABLE (FAST_SCAN_LAYERS wiring)', () => {
+    // A river linestring passing through the AOI cell must produce an
+    // IMPASSABLE corridor. This guards that 'waterway' is scanned (in
+    // FAST_SCAN_LAYERS) and reaches the getSurface handler.
+    const viewHexes = gridDisk(h3Cell, 2);
+    const features = [
+      {
+        sourceLayer: 'waterway',
+        properties: { class: 'river' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [-3.7040, 40.4165],
+            [-3.7030, 40.4173],
+          ],
+        },
+      },
+    ];
+    const result = computeFastScanSnapshot({ features, viewHexes });
+    const values = Object.values(result.cellFrictionEntries);
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.every((v) => v === FRICTION_COSTS.IMPASSABLE)).toBe(true);
+  });
+
+  it('should NOT block the surface for a culverted waterway (brunnel=tunnel)', () => {
+    // A piped/tunneled waterway runs underground; the ground above stays
+    // walkable. It must contribute no cells (skipped), so no IMPASSABLE entries.
+    const viewHexes = gridDisk(h3Cell, 2);
+    const features = [
+      {
+        sourceLayer: 'waterway',
+        properties: { class: 'river', brunnel: 'tunnel' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [-3.7040, 40.4165],
+            [-3.7030, 40.4173],
+          ],
+        },
+      },
+    ];
+    const result = computeFastScanSnapshot({ features, viewHexes });
+    const values = Object.values(result.cellFrictionEntries);
+    expect(values.some((v) => v === FRICTION_COSTS.IMPASSABLE)).toBe(false);
+  });
+
+  it('should classify a park polygon as LIGHT_PARK (FAST_SCAN_LAYERS wiring)', () => {
+    const viewHexes = gridDisk(h3Cell, 2);
+    const features = [
+      {
+        sourceLayer: 'park',
+        properties: { class: 'national_park' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-3.7045, 40.4160],
+              [-3.7025, 40.4160],
+              [-3.7025, 40.4178],
+              [-3.7045, 40.4178],
+              [-3.7045, 40.4160],
+            ],
+          ],
+        },
+      },
+    ];
+    const result = computeFastScanSnapshot({ features, viewHexes });
+    const values = Object.values(result.cellFrictionEntries);
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.some((v) => v === FRICTION_COSTS.LIGHT_PARK)).toBe(true);
+  });
 });
 
 describe('computeFastScanChunkSnapshot', () => {
@@ -384,5 +458,34 @@ describe('computeImpassableBlurSnapshot error handling', () => {
     });
     expect(result.blurWeights).toBeDefined();
     expect(Array.isArray(result.updates)).toBe(true);
+  });
+});
+
+// --- 9. NO-FEATURE CELLS DEFAULT TO PAVEMENT (item 1) ---
+// A cell with no classified feature must resolve to PAVEMENT (1.0), not 0,
+// so the effective friction is consistent with the getSurface PAVEMENT default.
+describe('no-feature cells default to PAVEMENT', () => {
+  it('buildMappingGraph should assign PAVEMENT to a viewHex with no friction entry', () => {
+    const { frictionArr } = buildMappingGraph({
+      frictionEntries: {},
+      viewHexes: [h3Cell],
+    });
+    expect(frictionArr[0]).toBe(FRICTION_COSTS.PAVEMENT);
+  });
+
+  it('mergeCellsChunk should assign PAVEMENT to a cell absent from cellFrictionEntries', () => {
+    const { frictionArr } = mergeCellsChunk({
+      cells: [h3Cell],
+      cellFrictionEntries: Object.create(null),
+    });
+    expect(frictionArr[0]).toBe(FRICTION_COSTS.PAVEMENT);
+  });
+
+  it('mergeCellsChunk should preserve an explicit feature friction over the default', () => {
+    const { frictionArr } = mergeCellsChunk({
+      cells: [h3Cell],
+      cellFrictionEntries: { [h3Cell]: FRICTION_COSTS.HEAVY_GRASS },
+    });
+    expect(frictionArr[0]).toBe(FRICTION_COSTS.HEAVY_GRASS);
   });
 });

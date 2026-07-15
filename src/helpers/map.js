@@ -266,7 +266,7 @@ export function updateLayers(state, mapInstance) {
       const s = getPathScore(pathObj, h);
       const entry = state._flatPool[flatCount++];
       entry.hex = h;
-      entry.f = (frictionMap ? frictionMap.get(h) : undefined) ?? 0;
+      entry.f = (frictionMap ? frictionMap.get(h) : undefined) ?? FRICTION_COSTS.PAVEMENT;
       entry.s = s;
       entry.a = (useAffObj ? affObj[h] : affMap?.get(h)) ?? 0.1;
       if (s > 0) {
@@ -390,7 +390,7 @@ export function buildSimulationGeoJSON(state, mapInstance) {
     // Friction: the Map is canonical. Affordance: prefer the live sim working
     // copy `_affordanceObj` (accumulated wear) when present, else the Map.
     const affordanceObj = state._affordanceObj;
-    const friction = state.cellFrictionMap?.get(cell) ?? 0;
+    const friction = state.cellFrictionMap?.get(cell) ?? FRICTION_COSTS.PAVEMENT;
     // `_affordanceObj` is the canonical `affordanceMap` view (a FrictionArrayMap
     // in production, a Map in tests) — read it through the Map interface when
     // available, falling back to bracket access for any legacy plain-object

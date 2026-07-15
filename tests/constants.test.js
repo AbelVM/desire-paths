@@ -227,6 +227,30 @@ describe('getSurface', () => {
         expect(result.cost).toBe('IMPASSABLE');
       });
 
+      it('should return IMPASSABLE for rail class (OpenMapTiles canonical)', () => {
+        const result = getSurface({
+          properties: { layer: 'transportation', class: 'rail' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+
+      it('should return IMPASSABLE for transit class (OpenMapTiles canonical)', () => {
+        const result = getSurface({
+          properties: { layer: 'transportation', class: 'transit' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+
+      it('should return IMPASSABLE for transit class with tram subclass', () => {
+        const result = getSurface({
+          properties: { layer: 'transportation', class: 'transit', subclass: 'tram' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+
       it('should return IMPASSABLE for rail subclass', () => {
         const result = getSurface({
           properties: { layer: 'transportation', class: 'highway', subclass: 'rail' },
@@ -246,6 +270,61 @@ describe('getSurface', () => {
       it('should return IMPASSABLE for tram subclass', () => {
         const result = getSurface({
           properties: { layer: 'transportation', class: 'highway', subclass: 'tram' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+    });
+
+    describe('ferry / aerialway', () => {
+      it('should return IMPASSABLE for a ferry route', () => {
+        const result = getSurface({
+          properties: { layer: 'transportation', class: 'ferry' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+
+      it('should return IMPASSABLE for an aerialway', () => {
+        const result = getSurface({
+          properties: { layer: 'transportation', class: 'aerialway' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      });
+    });
+
+    describe('pier', () => {
+      it('should return PAVEMENT for a pier at ground layer 0', () => {
+        const result = getSurface({
+          properties: { layer: '0', class: 'pier' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('PAVEMENT');
+        expect(result.layer).toBe('0');
+      });
+
+      it('should return PAVEMENT for a pier with no layer tag (defaults to 0)', () => {
+        const result = getSurface({
+          properties: { class: 'pier' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('PAVEMENT');
+        expect(result.layer).toBe('0');
+      });
+
+      it('should respect an explicit pier layer (layer 2 stays 2)', () => {
+        const result = getSurface({
+          properties: { layer: '2', class: 'pier' },
+          sourceLayer: 'transportation',
+        });
+        expect(result.cost).toBe('PAVEMENT');
+        expect(result.layer).toBe('2');
+      });
+
+      it('should return IMPASSABLE for a foot=no pier', () => {
+        const result = getSurface({
+          properties: { layer: '0', class: 'pier', foot: 'no' },
           sourceLayer: 'transportation',
         });
         expect(result.cost).toBe('IMPASSABLE');
@@ -289,6 +368,7 @@ describe('getSurface', () => {
         'marsh',
         'mangrove',
         'reedbed',
+        'saltern',
         'saltmarsh',
         'tidalflat',
         'tundra',
@@ -357,6 +437,7 @@ describe('getSurface', () => {
         'recreation_ground',
         'flowerbed',
         'wet_meadow',
+        'allotments',
       ])('should return LIGHT_PARK for subclass %s', (subclass) => {
         const result = getSurface({
           properties: { layer: 'landcover', class: 'vegetation', subclass },
@@ -370,7 +451,6 @@ describe('getSurface', () => {
       it.each([
         'farm',
         'farmland',
-        'allotments',
         'orchard',
         'vineyard',
         'plant_nursery',
@@ -380,6 +460,46 @@ describe('getSurface', () => {
           sourceLayer: 'landcover',
         });
         expect(result.cost).toBe('HEAVY_GRASS');
+      });
+    });
+
+    describe('canonical-class fallback (unknown/empty subclass)', () => {
+      it.each(['ice', 'rock', 'wetland'])(
+        'should return IMPASSABLE for class %s with an unknown subclass',
+        (cls) => {
+          const result = getSurface({
+            properties: { layer: 'landcover', class: cls, subclass: 'mystery' },
+            sourceLayer: 'landcover',
+          });
+          expect(result.cost).toBe('IMPASSABLE');
+        },
+      );
+
+      it.each(['wood', 'farmland', 'sand'])(
+        'should return HEAVY_GRASS for class %s with an unknown subclass',
+        (cls) => {
+          const result = getSurface({
+            properties: { layer: 'landcover', class: cls, subclass: 'mystery' },
+            sourceLayer: 'landcover',
+          });
+          expect(result.cost).toBe('HEAVY_GRASS');
+        },
+      );
+
+      it('should return LIGHT_PARK for class grass with an unknown subclass', () => {
+        const result = getSurface({
+          properties: { layer: 'landcover', class: 'grass', subclass: 'mystery' },
+          sourceLayer: 'landcover',
+        });
+        expect(result.cost).toBe('LIGHT_PARK');
+      });
+
+      it('should return LIGHT_PARK for class grass with no subclass', () => {
+        const result = getSurface({
+          properties: { layer: 'landcover', class: 'grass' },
+          sourceLayer: 'landcover',
+        });
+        expect(result.cost).toBe('LIGHT_PARK');
       });
     });
   });
@@ -452,6 +572,57 @@ describe('getSurface', () => {
     });
   });
 
+  // --- 4b. RESTRICTED ACCESS on landcover / landuse ---
+  describe('restricted access on landcover / landuse', () => {
+    it('should return IMPASSABLE for a private landcover (access=private)', () => {
+      const result = getSurface({
+        properties: { layer: 'landcover', class: 'vegetation', subclass: 'garden', access: 'private' },
+        sourceLayer: 'landcover',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should return IMPASSABLE for a foot=no landcover', () => {
+      const result = getSurface({
+        properties: { layer: 'landcover', class: 'vegetation', subclass: 'park', foot: 'no' },
+        sourceLayer: 'landcover',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should still return LIGHT_PARK for a public garden (no access tag)', () => {
+      const result = getSurface({
+        properties: { layer: 'landcover', class: 'vegetation', subclass: 'garden' },
+        sourceLayer: 'landcover',
+      });
+      expect(result.cost).toBe('LIGHT_PARK');
+    });
+
+    it('should return IMPASSABLE for a private landuse (access=private)', () => {
+      const result = getSurface({
+        properties: { layer: 'landuse', class: 'residential', access: 'private' },
+        sourceLayer: 'landuse',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should return IMPASSABLE for a foot=no landuse', () => {
+      const result = getSurface({
+        properties: { layer: 'landuse', class: 'residential', foot: 'no' },
+        sourceLayer: 'landuse',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should still return PAVEMENT for a public residential landuse', () => {
+      const result = getSurface({
+        properties: { layer: 'landuse', class: 'residential' },
+        sourceLayer: 'landuse',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+  });
+
   // --- 5. LAYER: BUILDING / WATER ---
   it('should return IMPASSABLE for building layer', () => {
     const result = getSurface({
@@ -467,6 +638,69 @@ describe('getSurface', () => {
       sourceLayer: 'water',
     });
     expect(result.cost).toBe('IMPASSABLE');
+  });
+
+  // --- 5b. LAYER: WATERWAY / AEROWAY / PARK ---
+  describe('waterway layer', () => {
+    it.each(['stream', 'river', 'canal', 'drain', 'ditch'])(
+      'should return IMPASSABLE for waterway %s',
+      (cls) => {
+        const result = getSurface({
+          properties: { class: cls },
+          sourceLayer: 'waterway',
+        });
+        expect(result.cost).toBe('IMPASSABLE');
+      },
+    );
+
+    it('should still return IMPASSABLE for a waterway on a bridge (aqueduct)', () => {
+      const result = getSurface({
+        properties: { class: 'canal', brunnel: 'bridge' },
+        sourceLayer: 'waterway',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should skip (return null) a culverted waterway (brunnel=tunnel)', () => {
+      // A tunneled/piped waterway runs underground; the ground surface above it
+      // is walkable, so it must contribute no barrier (null → skipped upstream).
+      const result = getSurface({
+        properties: { class: 'river', brunnel: 'tunnel' },
+        sourceLayer: 'waterway',
+      });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('aeroway layer', () => {
+    it.each([
+      'runway',
+      'taxiway',
+      'apron',
+      'gate',
+      'aerodrome',
+      'heliport',
+      'helipad',
+    ])('should return IMPASSABLE for aeroway %s', (cls) => {
+      const result = getSurface({
+        properties: { class: cls },
+        sourceLayer: 'aeroway',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+  });
+
+  describe('park layer', () => {
+    it.each(['national_park', 'nature_reserve', 'protected_area'])(
+      'should return LIGHT_PARK for park %s',
+      (cls) => {
+        const result = getSurface({
+          properties: { class: cls },
+          sourceLayer: 'park',
+        });
+        expect(result.cost).toBe('LIGHT_PARK');
+      },
+    );
   });
 
   // --- 6. Default ---
@@ -500,5 +734,146 @@ describe('getSurface', () => {
     });
     // parseInt('abc', 10) returns NaN, now safely defaults to '0'
     expect(result.layer).toBe('0');
+  });
+});
+
+// --- 7. SURFACE-AWARE TRANSPORTATION MODULATION ---
+describe('getSurface surface modulation', () => {
+  describe('soft / unpaved surfaces bump the tier up', () => {
+    it('should return LIGHT_PARK for a grass footway (path + surface=grass)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway', surface: 'grass' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('LIGHT_PARK');
+    });
+
+    it('should return LIGHT_PARK for a dirt path (path + surface=dirt)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'path', surface: 'dirt' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('LIGHT_PARK');
+    });
+
+    it('should return HEAVY_GRASS for a grass track (track + surface=grass)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'track', surface: 'grass' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('HEAVY_GRASS');
+    });
+
+    it('should return HEAVY_GRASS for a grass bridleway (LIGHT_PARK + surface=grass)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'bridleway', surface: 'grass' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('HEAVY_GRASS');
+    });
+
+    it('should return LIGHT_PARK for a gravel secondary road (PAVEMENT + surface=gravel)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'secondary', surface: 'gravel' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('LIGHT_PARK');
+    });
+  });
+
+  describe('explicit paved surfaces keep the base class', () => {
+    it('should return PAVEMENT for an asphalt path', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway', surface: 'asphalt' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+
+    it('should return PAVEMENT for an asphalt track', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'track', surface: 'asphalt' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+
+    it('should return PAVEMENT for a paved bridleway (surface=paving_stones)', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'bridleway', surface: 'paving_stones' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+  });
+
+  describe('no / unknown surface is conservative (keeps base class)', () => {
+    it('should return PAVEMENT for a path with no surface tag', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+
+    it('should return PAVEMENT for a path with an unknown surface tag', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway', surface: 'mystery_surface' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('PAVEMENT');
+    });
+
+    it('should return LIGHT_PARK for a track with no surface tag', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'track' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('LIGHT_PARK');
+    });
+  });
+
+  describe('surface never softens an impassable feature', () => {
+    it('should return IMPASSABLE for a foot=no path even with surface=asphalt', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway', foot: 'no', surface: 'asphalt' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+
+    it('should return IMPASSABLE for a motorway even with surface=grass', () => {
+      const result = getSurface({
+        properties: { layer: 'transportation', class: 'motorway', surface: 'grass' },
+        sourceLayer: 'transportation',
+      });
+      expect(result.cost).toBe('IMPASSABLE');
+    });
+  });
+
+  describe('cache key distinguishes surface tuples', () => {
+    it('should classify the same path differently by surface', () => {
+      const base = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway' },
+        sourceLayer: 'transportation',
+      });
+      const grass = getSurface({
+        properties: { layer: 'transportation', class: 'path', subclass: 'footway', surface: 'grass' },
+        sourceLayer: 'transportation',
+      });
+      expect(base.cost).toBe('PAVEMENT');
+      expect(grass.cost).toBe('LIGHT_PARK');
+    });
+  });
+});
+
+// --- 8. LANDCOVER: mud ---
+describe('getSurface landcover mud', () => {
+  it('should return HEAVY_GRASS for subclass mud', () => {
+    const result = getSurface({
+      properties: { layer: 'landcover', class: 'vegetation', subclass: 'mud' },
+      sourceLayer: 'landcover',
+    });
+    expect(result.cost).toBe('HEAVY_GRASS');
   });
 });

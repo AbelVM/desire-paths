@@ -33,7 +33,16 @@ import {
 } from './constants.js';
 import { computeDijkstra, getGradientGraph, getGradientGraphFromArray } from './dijkstra.js';
 
-const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landcover', 'landuse']);
+const FAST_SCAN_LAYERS = new Set([
+  'transportation',
+  'building',
+  'water',
+  'landcover',
+  'landuse',
+  'park',
+  'waterway',
+  'aeroway',
+]);
 
 /**
  * Derive the effective per-cell friction from a per-layer friction map.
@@ -601,7 +610,7 @@ export function computeImpassableBlurSnapshot({
     const cell = vh[idx];
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
     blurWeights[cell] = weight;
-    const fr = Math.min(impassableLimit, (frictionLookup[cell] ?? 0) + weight * addFactor);
+    const fr = Math.min(impassableLimit, (frictionLookup[cell] ?? FRICTION_COSTS.PAVEMENT) + weight * addFactor);
     blurUpdateMap[cell] = fr;
     updates.push([cell, fr]);
   }
@@ -729,7 +738,7 @@ export function computePathBlurSnapshot({
               // Landcover gate: mark as seen but do not enqueue or accumulate
               if (prohibited[nc]) continue;
               genQ[qt++] = nc;
-              if ((frictionLookup[vh[nc]] ?? 0) < FRICTION_COSTS.IMPASSABLE) {
+              if ((frictionLookup[vh[nc]] ?? FRICTION_COSTS.PAVEMENT) < FRICTION_COSTS.IMPASSABLE) {
                 accum[nc] += w;
               }
             }
@@ -750,7 +759,7 @@ export function computePathBlurSnapshot({
     if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
 
     pathBlurWeights[cell] = weight;
-    const baseFriction = frictionLookup[cell] ?? 0;
+    const baseFriction = frictionLookup[cell] ?? FRICTION_COSTS.PAVEMENT;
     const reducedFriction = Math.max(FRICTION_COSTS.PAVEMENT, baseFriction - weight * frictionAdd);
     pathBlurUpdateMap[cell] = reducedFriction;
     updates.push([cell, reducedFriction, weight]);
@@ -906,7 +915,7 @@ export function buildMappingGraph({ frictionEntries, viewHexes, r1Adjacency } = 
   const latLngArr = new Float32Array(allocTransferBuffer(N * 8 * 4));
   for (let i = 0; i < N; i++) {
     const cell = viewHexes[i];
-    const f = frictionLookup[cell] ?? 0;
+    const f = frictionLookup[cell] ?? FRICTION_COSTS.PAVEMENT;
     frictionArr[i] = f < impassable ? f : -1; // -1 marks impassable / missing
     const ll = cellToLatLng(cell);
     const latRad = (ll[0] * Math.PI) / 180;
@@ -1255,7 +1264,7 @@ export function mergeCellsChunk({
     // across vertical layers of the per-layer MAX friction, computed once in the
     // fast-scan pass), so reuse it directly instead of re-reducing the layer map
     // here.
-    let fr = cellFrictionEntries[cell] ?? 0;
+    let fr = cellFrictionEntries[cell] ?? FRICTION_COSTS.PAVEMENT;
 
     // Apply the impassable blur friction override (nudge routing around obstacles).
     if (blurUpdateMap) {
