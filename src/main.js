@@ -7,7 +7,7 @@ import { latLngToCell } from 'h3-js';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 
 import { MAP_OPTIONS, FRICTION_COSTS, getSurface, SIMULATION_PARAMS } from './helpers/constants.js';
-import { getHexes, triggerFastScan, mapPolygonCells, mapLineCells } from './helpers/grid.js';
+import { getHexes, triggerFastScan } from './helpers/grid.js';
 import {
   renderInterfacePins,
   updateLayers,
@@ -237,12 +237,6 @@ class DesireMap {
   }
   triggerFastScan(...args) {
     return triggerFastScan(this._state, this, ...args);
-  }
-  mapPolygonCells(...args) {
-    return mapPolygonCells(this._state, this, ...args);
-  }
-  mapLineCells(...args) {
-    return mapLineCells(this._state, this, ...args);
   }
   renderInterfacePins(...args) {
     return renderInterfacePins(this._state, this, ...args);

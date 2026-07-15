@@ -1,5 +1,11 @@
 import { logger } from './logger.js';
-import { gridRingUnsafe, polygonToCells, cellToLatLng } from 'h3-js';
+import {
+  gridRingUnsafe,
+  polygonToCells,
+  cellToLatLng,
+  gridPathCells,
+  latLngToCell,
+} from 'h3-js';
 
 // NOTE: a previous module-level lat/lng cache (capped at 4096 entries) was
 // removed. `buildMappingGraph` iterates `viewHexes` in order and calls
@@ -16,6 +22,11 @@ import {
   IMPASSABLE_BLUR_SIGMA,
   IMPASSABLE_BLUR_FRICTION_ADD,
   IMPASSABLE_BLUR_AFFORDANCE_PENALTY,
+  PATH_BLUR_RADIUS,
+  PATH_BLUR_SIGMA,
+  PATH_BLUR_FRICTION_ADD,
+  PATH_BLUR_AFFORDANCE_BOOST,
+  PATH_BLUR_LANDCOVER_GATE,
   getSurface,
   POLY_CELLS_CACHE_MAX,
   classifyFrictionTier,
@@ -27,11 +38,13 @@ const FAST_SCAN_LAYERS = new Set(['transportation', 'building', 'water', 'landco
 /**
  * Derive the effective per-cell friction from a per-layer friction map.
  *
- * For each cell we take the MIN across its vertical layers of the per-layer MAX
- * friction. This means:
- *  - Overlapping features at the SAME level resolve to the HIGHEST (most
- *    restrictive) friction — e.g. a water fountain inside a pavement public
- *    space is impassable, never passable.
+ * For each cell we take the MIN across its vertical layers of the per-layer
+ * merged friction (see `mergeLayerFriction`). This means:
+ *  - An IMPASSABLE feature always wins at its level — e.g. a water fountain
+ *    inside a pavement public space is impassable, never passable.
+ *  - Among walkable surfaces, the HARDEST (lowest-friction) wins — e.g. a paved
+ *    footway (PAVEMENT) through a park (LIGHT_PARK) stays PAVEMENT, and a paved
+ *    plaza overrides the surrounding lawn.
  *  - Different vertical levels stay independent — a bridge (pavement, level 1)
  *    over a river (water, level 0) remains passable.
  *
@@ -55,6 +68,30 @@ export function deriveCellFrictionFromLayers(multiFrictionEntries) {
     if (isFinite(min)) cellFrictionEntries[cell] = min;
   }
   return cellFrictionEntries;
+}
+
+/**
+ * Merge two friction values for the SAME (cell, vertical layer) slot.
+ *
+ * Resolution order (order-independent):
+ *  - An IMPASSABLE value always wins — an obstacle blocks the cell.
+ *  - Among walkable surfaces, the HARDEST (lowest-friction) wins, so a paved
+ *    path/road overrides the softer ground it crosses (park lawn, grass).
+ *
+ * This replaces the old "per-layer MAX" rule, which correctly made an
+ * impassable obstacle win but also let a soft park (LIGHT_PARK) swallow a paved
+ * path (PAVEMENT) at the same level — the opposite of the desired behaviour.
+ *
+ * @param {number|undefined} current already-merged friction for the slot
+ * @param {number} next friction of the feature being merged in
+ * @returns {number} merged friction for the slot
+ */
+export function mergeLayerFriction(current, next) {
+  const IMPASSABLE = FRICTION_COSTS.IMPASSABLE;
+  if (next >= IMPASSABLE) return IMPASSABLE; // obstacle always wins
+  if (current === undefined) return next; // seed
+  if (current >= IMPASSABLE) return IMPASSABLE; // keep obstacle
+  return next < current ? next : current; // hardest walkable wins
 }
 // Emit lightweight progress messages when running inside a Worker.
 function emitProgress(phase, processed, total) {
@@ -154,6 +191,68 @@ function getCachedPolyCells(coords) {
   if (_polyCellsCacheOrder.length > POLY_CELLS_CACHE_MAX) {
     const old = _polyCellsCacheOrder.shift();
     delete _polyCellsCache[old];
+  }
+  return result;
+}
+
+// Cache gridPathCells results for line geometries (LineString / MultiLineString).
+// A line is rasterized as a CORRIDOR of H3 cells along the polyline (see
+// collectFastScanEntries), never as a filled area — passing a line's coordinates
+// to polygonToCells would wrongly fill the polygon enclosed by the line's
+// vertices (a ~10x over-coverage for a typical footway).
+const _lineCellsCache = Object.create(null);
+const _lineCellsCacheOrder = [];
+
+// Dedicated hash for line coordinates: each entry is a [lng, lat] PAIR, not a
+// ring of pairs, so the polygon hash (_hashCoords) cannot be reused here — it
+// would treat every vertex number as a nested coordinate and produce colliding
+// keys (and _computeBboxKey returns '' for lines).
+function _hashLineCoords(coords) {
+  if (!coords || !coords.length) return '';
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < coords.length; i++) {
+    const c = coords[i] || [0, 0];
+    h ^= Math.imul(Math.round((c[0] || 0) * 1e4), 16777619) >>> 0;
+    h = Math.imul(h, 16777619) >>> 0;
+    h ^= Math.imul(Math.round((c[1] || 0) * 1e4), 16777619) >>> 0;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(36);
+}
+
+function getCachedLineCells(coords) {
+  const res = SIMULATION_PARAMS.h3StrideResolution;
+  const key = _hashLineCoords(coords) + ':' + res;
+  const cached = _lineCellsCache[key];
+  if (cached) return cached;
+
+  // Raw 1-cell-wide corridor along the polyline. Widening is now handled by
+  // the accumulative gaussian path-blur (computePathBlurSnapshot) so the
+  // corridor stays a thin thread here and the blur produces a smooth falloff
+  // gated by landcover class.
+  const lineCells = new Set();
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = latLngToCell(coords[i][1], coords[i][0], res);
+    const b = latLngToCell(coords[i + 1][1], coords[i + 1][0], res);
+    if (!a || !b) continue;
+    let seg;
+    try {
+      seg = gridPathCells(a, b);
+    } catch (err) {
+      try {
+        logger.warn('computeFastScan: gridPathCells failed for segment', { key, err });
+      } catch (_e) {}
+      seg = [];
+    }
+    for (let k = 0; k < seg.length; k++) lineCells.add(seg[k]);
+  }
+
+  const result = Array.from(lineCells);
+  _lineCellsCache[key] = result;
+  _lineCellsCacheOrder.push(key);
+  if (_lineCellsCacheOrder.length > POLY_CELLS_CACHE_MAX) {
+    const old = _lineCellsCacheOrder.shift();
+    delete _lineCellsCache[old];
   }
   return result;
 }
@@ -269,36 +368,61 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   }
 
   const multiFrictionEntries = Object.create(null);
+  const lineCorridorCells = Object.create(null);
 
-  // Single accumulation pass: for every AOI cell a feature covers, keep the
-  // per-layer MAX (multi-friction layer map). The effective per-cell friction is
-  // derived afterwards from the merged layer map (see deriveCellFrictionFromLayers):
-  // MIN across vertical layers of the per-layer MAX friction. This makes
-  // overlapping same-level features resolve to the highest (most restrictive)
-  // friction instead of the cheapest, and is independent of feature order.
+  // Single accumulation pass: for every AOI cell a feature covers, merge into
+  // the per-layer slot via `mergeLayerFriction` (impassable wins, else hardest
+  // walkable). The effective per-cell friction is derived afterwards from the
+  // merged layer map (see deriveCellFrictionFromLayers): MIN across vertical
+  // layers. This makes overlapping same-level features resolve to the obstacle
+  // (if any) or the hardest walkable surface, and is independent of feature
+  // order / chunk sharding.
   for (const group of Object.values(grouped)) {
     const { layerKey, layerVal, geometries } = group;
     for (let g = 0; g < geometries.length; g++) {
       const geometry = geometries[g];
       if (!geometry || !geometry.coordinates) continue;
-      const coordsArray =
-        geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
-      for (let p = 0; p < coordsArray.length; p++) {
-        const cells = getCachedPolyCells(coordsArray[p]);
-        if (!cells) continue;
-        for (let c = 0; c < cells.length; c++) {
-          const cell = cells[c];
-          if (inAoi && !inAoi.has(cell)) continue; // outside AOI
-          let entry = multiFrictionEntries[cell];
-          if (!entry) {
-            entry = Object.create(null);
-            multiFrictionEntries[cell] = entry;
-          }
-          // Max-keeping per (cell, layer): highest friction wins for that slot.
-          if (entry[layerKey] === undefined || layerVal > entry[layerKey]) {
-            entry[layerKey] = layerVal;
-          }
+
+      // Rasterize the geometry to H3 cells by type:
+      //  - LineString / MultiLineString: a CORRIDOR of cells along the line
+      //    (gridPathCells between consecutive vertex cells). Passing a line's
+      //    coordinates to polygonToCells would wrongly fill the enclosed area.
+      //  - Polygon / MultiPolygon: the filled area (polygonToCells).
+      let cells;
+      let isLine = false;
+      if (geometry.type === 'LineString') {
+        cells = getCachedLineCells(geometry.coordinates);
+        isLine = true;
+      } else if (geometry.type === 'MultiLineString') {
+        cells = [];
+        const lines = geometry.coordinates;
+        for (let l = 0; l < lines.length; l++) {
+          const lineCells = getCachedLineCells(lines[l]);
+          for (let c = 0; c < lineCells.length; c++) cells.push(lineCells[c]);
         }
+        isLine = true;
+      } else {
+        const coordsArray =
+          geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+        cells = [];
+        for (let p = 0; p < coordsArray.length; p++) {
+          const polyCells = getCachedPolyCells(coordsArray[p]);
+          if (!polyCells) continue;
+          for (let c = 0; c < polyCells.length; c++) cells.push(polyCells[c]);
+        }
+      }
+
+      for (let c = 0; c < cells.length; c++) {
+        const cell = cells[c];
+        if (inAoi && !inAoi.has(cell)) continue; // outside AOI
+        if (isLine) lineCorridorCells[cell] = true;
+        let entry = multiFrictionEntries[cell];
+        if (!entry) {
+          entry = Object.create(null);
+          multiFrictionEntries[cell] = entry;
+        }
+        // Per (cell, layer) merge: impassable wins, else hardest walkable.
+        entry[layerKey] = mergeLayerFriction(entry[layerKey], layerVal);
       }
     }
   }
@@ -306,21 +430,31 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   // Effective per-cell friction: MIN across layers of the per-layer MAX friction.
   const cellFrictionEntries = deriveCellFrictionFromLayers(multiFrictionEntries);
 
-  return { multiFrictionEntries, cellFrictionEntries };
+  return { multiFrictionEntries, cellFrictionEntries, lineCorridorCells };
 }
 
 export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) {
   try {
-    const { multiFrictionEntries, cellFrictionEntries } = collectFastScanEntries({
+    const { multiFrictionEntries, cellFrictionEntries, lineCorridorCells } = collectFastScanEntries({
       features,
       viewHexes,
     });
     const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
+    const pathBlur = computePathBlurSnapshot({
+      corridorCells: Object.keys(lineCorridorCells),
+      multiFrictionEntries,
+      cellFrictionEntries,
+    });
     return {
       multiFrictionEntries,
       cellFrictionEntries,
+      lineCorridorCells,
       blurWeights: blur.blurWeights,
       blurUpdates: blur.updates,
+      blurUpdateMap: blur.blurUpdateMap,
+      pathBlurWeights: pathBlur.pathBlurWeights,
+      pathBlurUpdates: pathBlur.updates,
+      pathBlurUpdateMap: pathBlur.pathBlurUpdateMap,
     };
   } catch (err) {
     try {
@@ -333,8 +467,13 @@ export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) 
     return {
       multiFrictionEntries: Object.create(null),
       cellFrictionEntries: Object.create(null),
+      lineCorridorCells: Object.create(null),
       blurWeights: Object.create(null),
       blurUpdates: [],
+      blurUpdateMap: null,
+      pathBlurWeights: Object.create(null),
+      pathBlurUpdates: [],
+      pathBlurUpdateMap: null,
     };
   }
 }
@@ -350,7 +489,7 @@ export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } =
           featuresCount: (features && features.length) || 0,
         });
     } catch (_e) {}
-    return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null) };
+    return { multiFrictionEntries: Object.create(null), cellFrictionEntries: Object.create(null), lineCorridorCells: Object.create(null) };
   }
 }
 
@@ -469,6 +608,157 @@ export function computeImpassableBlurSnapshot({
 
   return { blurWeights, updates, blurUpdateMap };
 }
+
+/**
+ * Accumulative gaussian blur that widens a raw 1-cell line corridor into a
+ * smooth, landcover-gated path. Mirrors the BFS pattern of
+ * `computeImpassableBlurSnapshot` but reduces friction and boosts affordance
+ * (the opposite direction) so the widened corridor becomes more walkable.
+ *
+ * Landcover gating: cells classified as IMPASSABLE or HEAVY_GRASS by the
+ * fast-scan layer map are excluded from widening — the BFS does not propagate
+ * through them, so paths do not expand into bush / keep-off terrain.
+ *
+ * @param {string[]} corridorCells       raw 1-cell corridor from line features
+ * @param {Object}   multiFrictionEntries { cell: { layer: friction } } fast-scan layers
+ * @param {Object}   cellFrictionEntries { cell: number } effective per-cell friction
+ * @param {string[]} [viewHexes]         AOI cell list (defaults to friction keys)
+ * @param {Object}   [r1Adjacency]       shared r=1 CSR (built on fallback)
+ * @param {number}   [radius]            gaussian radius in H3 rings (default PATH_BLUR_RADIUS)
+ * @param {number}   [sigma]             gaussian sigma (default PATH_BLUR_SIGMA)
+ * @param {number}   [frictionAdd]       max friction reduction (default PATH_BLUR_FRICTION_ADD)
+ * @param {boolean}  [landcoverGate]     gate by landcover class (default PATH_BLUR_LANDCOVER_GATE)
+ *
+ * @returns {{ pathBlurWeights: Object, pathBlurUpdateMap: Object, updates: Array }}
+ */
+export function computePathBlurSnapshot({
+  corridorCells = [],
+  multiFrictionEntries = Object.create(null),
+  cellFrictionEntries = Object.create(null),
+  viewHexes,
+  r1Adjacency,
+  radius = PATH_BLUR_RADIUS,
+  sigma = PATH_BLUR_SIGMA,
+  frictionAdd = PATH_BLUR_FRICTION_ADD,
+  landcoverGate = PATH_BLUR_LANDCOVER_GATE,
+} = {}) {
+  const frictionLookup = normalizeFrictionEntries(cellFrictionEntries);
+
+  const vh = viewHexes && viewHexes.length ? viewHexes : Object.keys(frictionLookup);
+  let adj = r1Adjacency;
+  if (!adj || adj.N !== vh.length) {
+    try {
+      adj = buildR1Adjacency({ viewHexes: vh });
+    } catch (_e) {
+      return { pathBlurWeights: Object.create(null), pathBlurUpdateMap: Object.create(null), updates: [] };
+    }
+  }
+
+  if (!corridorCells.length || radius < 1)
+    return { pathBlurWeights: Object.create(null), pathBlurUpdateMap: Object.create(null), updates: [] };
+
+  // Build cell→index map for corridor lookup
+  const cellToIdx = Object.create(null);
+  for (let i = 0; i < vh.length; i++) cellToIdx[vh[i]] = i;
+
+  // Collect corridor source indices
+  const sources = [];
+  for (let s = 0; s < corridorCells.length; s++) {
+    const idx = cellToIdx[corridorCells[s]];
+    if (idx !== undefined) sources.push(idx);
+  }
+  if (sources.length === 0)
+    return { pathBlurWeights: Object.create(null), pathBlurUpdateMap: Object.create(null), updates: [] };
+
+  // Pre-compute gaussian weights per distance
+  const gaussianWeights = new Array(radius + 1);
+  for (let d = 1; d <= radius; d++) {
+    gaussianWeights[d] = Math.exp(-0.5 * Math.pow(d / sigma, 2));
+  }
+
+  // Landcover gating: mark cells prohibited by any layer (IMPASSABLE or HEAVY_GRASS)
+  const prohibited = new Int8Array(vh.length);
+  if (landcoverGate && multiFrictionEntries) {
+    for (let i = 0; i < vh.length; i++) {
+      const cell = vh[i];
+      const layers = multiFrictionEntries[cell];
+      if (!layers) continue;
+      const vals = Object.values(layers);
+      for (let l = 0; l < vals.length; l++) {
+        if (vals[l] >= FRICTION_COSTS.HEAVY_GRASS) {
+          prohibited[i] = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const pathBlurWeights = Object.create(null);
+  const pathBlurUpdateMap = Object.create(null);
+  const updates = [];
+
+  // Accumulate gaussian weight from EVERY corridor source within radius.
+  // A cell bordered by several path segments receives the SUM of their
+  // contributions and is widened more than a cell next to a single segment.
+  const { offsets, neighbors, N } = adj;
+  const accum = new Float32Array(N);
+  if (sources.length && radius >= 1) {
+    const seen = new Int32Array(N);
+    const genQ = new Int32Array(N);
+    let gen = 0;
+    for (let si = 0; si < sources.length; si++) {
+      const src = sources[si];
+      gen++;
+      let qh = 0;
+      let qt = 0;
+      seen[src] = gen;
+      genQ[qt++] = src;
+      let d = 0;
+      while (d < radius && qh < qt) {
+        const levelEnd = qt;
+        d++;
+        const w = gaussianWeights[d];
+        for (let i = qh; i < levelEnd; i++) {
+          const cell = genQ[i];
+          const s = offsets[cell];
+          const e = offsets[cell + 1];
+          for (let x = s; x < e; x++) {
+            const nc = neighbors[x];
+            if (seen[nc] !== gen) {
+              seen[nc] = gen;
+              // Landcover gate: mark as seen but do not enqueue or accumulate
+              if (prohibited[nc]) continue;
+              genQ[qt++] = nc;
+              if ((frictionLookup[vh[nc]] ?? 0) < FRICTION_COSTS.IMPASSABLE) {
+                accum[nc] += w;
+              }
+            }
+          }
+        }
+        qh = levelEnd;
+      }
+    }
+  }
+
+  // Build updates in a single pass. Corridor cells themselves (d=0) are not
+  // modified — they already carry the path's surface friction. Only neighbors
+  // reached by the BFS (d>=1) get the widening treatment.
+  for (let idx = 0; idx < N; idx++) {
+    const weight = accum[idx];
+    if (weight <= 0) continue;
+    const cell = vh[idx];
+    if (frictionLookup[cell] >= FRICTION_COSTS.IMPASSABLE) continue;
+
+    pathBlurWeights[cell] = weight;
+    const baseFriction = frictionLookup[cell] ?? 0;
+    const reducedFriction = Math.max(FRICTION_COSTS.PAVEMENT, baseFriction - weight * frictionAdd);
+    pathBlurUpdateMap[cell] = reducedFriction;
+    updates.push([cell, reducedFriction, weight]);
+  }
+
+  return { pathBlurWeights, pathBlurUpdateMap, updates };
+}
+
 /**
  * Compute visibility sets + bearing map for a (shard of) origin cells and
  * serialize the result to a flat CSR (compressed sparse row) layout.
@@ -943,6 +1233,8 @@ export function mergeCellsChunk({
   cellFrictionEntries = Object.create(null),
   blurUpdateMap = null,
   blurWeights = null,
+  pathBlurUpdateMap = null,
+  pathBlurWeights = null,
 } = {}) {
   const n = cells.length;
   // Float32 is ample: friction lives in [1, ~7] (+ blur) and affordance in
@@ -954,6 +1246,7 @@ export function mergeCellsChunk({
   const affArr = new Float32Array(n);
 
   const penalty = IMPASSABLE_BLUR_AFFORDANCE_PENALTY;
+  const affordanceBoost = PATH_BLUR_AFFORDANCE_BOOST;
 
   for (let i = 0; i < n; i++) {
     const cell = cells[i];
@@ -970,6 +1263,15 @@ export function mergeCellsChunk({
       if (blurred !== undefined) fr = blurred;
     }
 
+    // Apply the path blur friction reduction (widen the corridor into adjacent
+    // walkable cells, gated by landcover class in the BFS that produced
+    // `pathBlurUpdateMap`). Applied AFTER impassable blur so obstacle avoidance
+    // still wins when a path runs tight against a building.
+    if (pathBlurUpdateMap) {
+      const widened = pathBlurUpdateMap[cell];
+      if (widened !== undefined) fr = widened;
+    }
+
     // Affordance classification via the single canonical tier classifier.
     let aff = AFFORDANCE[classifyFrictionTier(fr).toUpperCase()];
 
@@ -977,6 +1279,14 @@ export function mergeCellsChunk({
     if (blurWeights) {
       const weight = blurWeights[cell];
       if (weight != null) aff = Math.max(0.0, aff - Math.min(aff, weight * penalty));
+    }
+
+    // Apply the path blur affordance boost (widened corridor cells are more
+    // attractive). Applied AFTER the impassable penalty so obstacle proximity
+    // still reduces attractiveness.
+    if (pathBlurWeights) {
+      const weight = pathBlurWeights[cell];
+      if (weight != null) aff = Math.min(1.0, aff + Math.min(1.0 - aff, weight * affordanceBoost));
     }
 
     frictionArr[i] = fr;

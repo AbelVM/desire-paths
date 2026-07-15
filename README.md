@@ -66,6 +66,7 @@ Click **"Reset Grid"** to clear all nodes, flows, and cached state. Start a new 
 - **Interactive H3 hex grid** — click to place origin/destination/dual nodes on a MapLibre GL map overlaid on real-world terrain
 - **Friction field visualization** — terrain surface costs rendered as a color-coded resistance heat map with collapsible legend
 - **Agent-based simulation** — synthetic agents use Dijkstra gradients + softmax sampling, leaving wear trails that create emergent desire paths via positive feedback
+- **Linear path rasterization** — footways, paths, and tracks are widened with a landcover-aware Gaussian blur (radius 1, σ=1.0) that smooths the corridor, improves path connectivity, and adds a realistic ~3 m path width without forcing paths through prohibited terrain like bush or keep-off areas
 - **Real-world geocoding** — search any location worldwide using OpenStreetMap Nominatim
 - **Node interaction** — drag to reposition, right-click for type/weight controls, left-click to increase weight
 - **GeoJSON export** — download flow networks for ArcGIS, QGIS, or other planning tools
@@ -79,7 +80,7 @@ Click **"Reset Grid"** to clear all nodes, flows, and cached state. Start a new 
 | Geocoding | OpenStreetMap Nominatim via MapLibre GL Geocoder |
 | Computation | Web Workers for parallel Dijkstra; custom min-heap; cooperative main-thread yielding (~45ms intervals) |
 | Build tooling | Vite 8, ES modules, Terser minification |
-| Testing | Vitest 4 with v8 coverage (341 tests) |
+| Testing | Vitest 4 with v8 coverage (371 tests) |
 
 ## Simulation Parameters
 
@@ -101,6 +102,10 @@ Click **"Reset Grid"** to clear all nodes, flows, and cached state. Start a new 
 | Dense vegetation (forest, scrub, brush) | 4.0 | Dark green | Thick tree cover, dense undergrowth |
 | Permeable greenspace (grass, meadow, park) | 2.5 | Light green | Open grassy areas, gardens |
 | Walkable baseline (paths, roads, sidewalks) | 1.0 | Blue tint | Paved surfaces, footways |
+
+## Linear Path Rasterization
+
+At H3 resolution 15 a single cell is only ~1 m across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a ~3 m-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays roughly constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough.
 
 ## Affordance Model
 

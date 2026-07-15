@@ -1,5 +1,5 @@
-import { polygonToCells, latLngToCell, gridPathCells } from 'h3-js';
-import { FRICTION_COSTS, AFFORDANCE, PATH_CACHE_MAX, POLY_CACHE_MAX, SIMULATION_PARAMS } from './constants.js';
+import { polygonToCells } from 'h3-js';
+import { FRICTION_COSTS, AFFORDANCE, SIMULATION_PARAMS } from './constants.js';
 import {
   runFastScanTask,
   runAoiHexesTask,
@@ -50,41 +50,6 @@ function _aoiKey(poly) {
   }
   if (!isFinite(minx)) return '';
   return `${minx.toFixed(6)}:${miny.toFixed(6)}:${maxx.toFixed(6)}:${maxy.toFixed(6)}`;
-}
-
-// Low-allocation polygon key: bounding box + point count + endpoints
-function _polyKey(coords) {
-  if (!coords || !coords.length) return '';
-  let minx = Infinity,
-    miny = Infinity,
-    maxx = -Infinity,
-    maxy = -Infinity;
-  let points = 0;
-  let firstLng = 0,
-    firstLat = 0,
-    lastLng = 0,
-    lastLat = 0;
-  for (let i = 0; i < coords.length; i++) {
-    const ring = coords[i] || [];
-    points += ring.length;
-    for (let j = 0; j < ring.length; j++) {
-      const coord = ring[j] || [0, 0];
-      const lng = coord[0];
-      const lat = coord[1];
-      if (lng < minx) minx = lng;
-      if (lng > maxx) maxx = lng;
-      if (lat < miny) miny = lat;
-      if (lat > maxy) maxy = lat;
-      if (i === 0 && j === 0) {
-        firstLng = lng;
-        firstLat = lat;
-      }
-      lastLng = lng;
-      lastLat = lat;
-    }
-  }
-  if (!isFinite(minx)) return '';
-  return `${minx.toFixed(6)}:${miny.toFixed(6)}:${maxx.toFixed(6)}:${maxy.toFixed(6)}:${points}:${firstLng.toFixed(6)}:${firstLat.toFixed(6)}:${lastLng.toFixed(6)}:${lastLat.toFixed(6)}`;
 }
 
 export function getHexes(state, _mapInstance) {
@@ -170,12 +135,10 @@ export async function triggerFastScan(state, mapInstance) {
   // from the fast-scan get an entry. Layer-less cells (default terrain) get NO
   // entry — previously EVERY viewHex was pre-populated with an empty layer-map
   // object (N wasted allocations, the largest object allocation in the mapping
-  // stage). The interactive obstacle drawer (mapCells) allocates a layer map on
-  // demand for any in-AOI cell, so drawing behavior is unchanged; nothing reads
-  // an empty layer map. AOI membership at draw time is defined by
-  // `cellFrictionMap` (populated for every viewHex below). The Map *object* is
-  // reused (cleared in place) when the AOI key is unchanged so consumers holding
-  // a reference stay valid.
+  // stage). AOI membership at draw time is defined by `cellFrictionMap`
+  // (populated for every viewHex below). The Map *object* is reused (cleared in
+  // place) when the AOI key is unchanged so consumers holding a reference stay
+  // valid.
   const aoiKey = state._cachedAoiKey ?? (state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '');
   if (!state.multiFrictionMap || state._lastViewHexesKey !== aoiKey) {
     state.multiFrictionMap = new Map();
@@ -189,6 +152,8 @@ export async function triggerFastScan(state, mapInstance) {
   // `blurUpdateMap` is returned by the worker (cell→blurred friction), so we use
   // it directly instead of rebuilding an equivalent object from `blurUpdates`.
   const blurUpdateMap = build.blurUpdateMap ?? null;
+  const pathBlurWeights = build.pathBlurWeights ?? Object.create(null);
+  const pathBlurUpdateMap = build.pathBlurUpdateMap ?? null;
 
   // M5: the per-cell `_cellState` object (N `{friction,affordance,desire,multi}`
   // entries) is NO LONGER built; every remaining `_cellState` consumer keeps its
@@ -242,6 +207,8 @@ export async function triggerFastScan(state, mapInstance) {
     cellFrictionEntries: build.cellFrictionEntries,
     blurUpdateMap,
     blurWeights,
+    pathBlurUpdateMap,
+    pathBlurWeights,
   });
   for (let i = 0; i < viewHexes.length; i++) {
     const cell = viewHexes[i];
@@ -328,131 +295,13 @@ export async function triggerFastScan(state, mapInstance) {
   mapInstance.updateLayers?.();
 }
 
-export function mapPolygonCells(state, mapInstance, coords, surface) {
-  // `coords` is GeoJSON ([lng, lat]) — pass isGeoJson = true
-  // Cache polygonToCells results per-feature if geometry unchanged
-  const key = _polyKey(coords);
-  if (!state._polyCache) state._polyCache = new Map();
-  let cells = state._polyCache.get(key);
-  if (cells) {
-    // Refresh LRU order
-    state._polyCache.delete(key);
-    state._polyCache.set(key, cells);
-  } else {
-    cells = polygonToCells(coords, SIMULATION_PARAMS.h3StrideResolution, true);
-    state._polyCache.set(key, cells);
-    // Evict oldest if over budget
-    if (state._polyCache.size > POLY_CACHE_MAX) {
-      const oldest = state._polyCache.keys().next().value;
-      state._polyCache.delete(oldest);
-    }
-  }
-  mapCells(state, cells, surface);
-  // Drawing obstacles mutates friction outside a remap. The gradient graph
-  // topology and per-target gradient cache are keyed by the (stable)
-  // cellFrictionMap reference / mapping generation, so drop them so the next
-  // run reflects the new barriers instead of reusing a stale gradient (C5).
-  invalidateGradientGraph();
-  clearGradientCache(state);
-}
-
-export function mapLineCells(state, mapInstance, coords, surface) {
-  const cLen = coords.length;
-  for (let i = 0; i < cLen - 1; i++) {
-    const c1 = latLngToCell(coords[i][1], coords[i][0], SIMULATION_PARAMS.h3StrideResolution);
-    const c2 = latLngToCell(
-      coords[i + 1][1],
-      coords[i + 1][0],
-      SIMULATION_PARAMS.h3StrideResolution
-    );
-    // Cache gridPathCells per segment to avoid duplicate expansion with LRU eviction
-    if (!state._pathCache) state._pathCache = new Map();
-    const segKey = c1 + '::' + c2;
-    let path = state._pathCache.get(segKey);
-    if (path) {
-      // Refresh LRU order: remove and re-insert
-      state._pathCache.delete(segKey);
-      state._pathCache.set(segKey, path);
-    } else {
-      path = gridPathCells(c1, c2);
-      state._pathCache.set(segKey, path);
-      // Evict oldest if over budget
-      if (state._pathCache.size > PATH_CACHE_MAX) {
-        const oldest = state._pathCache.keys().next().value;
-        state._pathCache.delete(oldest);
-      }
-    }
-    mapCells(state, path, surface);
-  }
-  // Drawing obstacles mutates friction outside a remap — drop the cached
-  // gradient graph topology and per-target gradient cache so the next run
-  // reflects the new barriers (C5).
-  invalidateGradientGraph();
-  clearGradientCache(state);
-}
-
-// Note: This function is designed to be used internally by the mapPolygonCells and mapLineCells functions,
-// which handle the geometry parsing and cell generation. It takes a list of cells and a surface type,
-// and updates the friction maps accordingly, ensuring that we account for the highest friction
-// per level
-function mapCells(state, cells, surface) {
-  const frictionMap = state.multiFrictionMap;
-  const cellFrictionMap = state.cellFrictionMap;
-  const frictionObj = state._frictionObj;
-  const layerKey = surface.layer;
-  const layerVal = FRICTION_COSTS[surface.cost];
-  for (let i = 0, cLen = cells.length; i < cLen; i++) {
-    const cell = cells[i];
-    let val = frictionMap.get(cell);
-    if (!val) {
-      // Lazy multiFrictionMap (P3): layer-less AOI cells have no entry until
-      // drawn on. Allocate a layer map on demand for in-AOI cells (membership
-      // defined by cellFrictionMap, populated for every viewHex at build time);
-      // cells with no cellFrictionMap entry are genuinely outside the AOI.
-      if (!cellFrictionMap || !cellFrictionMap.has(cell)) continue; // outside AOI
-      val = Object.create(null);
-      frictionMap.set(cell, val);
-    }
-    if (!Object.hasOwn(val, layerKey) || layerVal > val[layerKey]) {
-      val[layerKey] = layerVal;
-      // Track min friction incrementally (P3): we only increase layer values,
-      // so the min can only decrease. Update _min when the new value is lower.
-      if (val._min === undefined || layerVal < val._min) {
-        val._min = layerVal;
-      }
-    }
-    // Recompute the per-cell min friction (cellFrictionMap) from the updated
-    // layer map. The gradient graph / Dijkstra read cellFrictionMap (and its
-    // snapshot _frictionObj), so without this the drawn barrier is invisible to
-    // routing until a full remap (C5).
-    let min = val._min;
-    if (min === undefined) {
-      // Legacy layer map without _min: compute from scratch and cache.
-      min = Infinity;
-      for (const k in val) {
-        const v = val[k];
-        if (typeof v === 'number' && v < min) min = v;
-      }
-      val._min = min;
-    }
-    const fr = isFinite(min) ? min : 0;
-    if (cellFrictionMap) cellFrictionMap.set(cell, fr);
-    // `_frictionObj` is the canonical `cellFrictionMap` view (I, review11 §I), so
-    // this write is redundant when the alias is in place and a safe no-op when
-    // it is still null during mapping (the canonical `cellFrictionMap` write
-    // above already updates the single source of truth).
-    if (frictionObj) frictionObj.set(cell, fr);
-  }
-}
-
 // ─────────────────────────────────────────────────────────────
 // Surface Edition — complete friction override from painted polygons
 // ─────────────────────────────────────────────────────────────
 //
-// Unlike `mapCells` (which takes the MAX friction per layer and can only raise
-// resistance), Surface Edition *completely overrides* the underlying surface of
-// every H3 cell inside a painted polygon — even when the new surface is easier
-// to walk than what it covers (e.g. paving a path across a meadow, or carving a
+// Surface Edition *completely overrides* the underlying surface of every H3
+// cell inside a painted polygon — even when the new surface is easier to walk
+// than what it covers (e.g. paving a path across a meadow, or carving a
 // temporary path through a building). This is the core requirement: the drawn
 // polygon's surface class wins outright.
 //
@@ -502,10 +351,10 @@ export function applySurfaceEdits(state) {
   }
 
   // Friction changed outside a remap — drop the cached gradient graph/topology
-  // so the next run reflects the new barriers (mirrors mapCells, C5). Also drop
-  // the cached visibility/bearing CSR (review12 #6): a surface edit can flip a
-  // cell's impassability, which changes that origin's visibility row, so the
-  // cached CSR must be rebuilt on the next run.
+  // so the next run reflects the new barriers (C5). Also drop the cached
+  // visibility/bearing CSR (review12 #6): a surface edit can flip a cell's
+  // impassability, which changes that origin's visibility row, so the cached CSR
+  // must be rebuilt on the next run.
   invalidateGradientGraph();
   clearGradientCache(state);
   state._visibilityBearingCSR = null;

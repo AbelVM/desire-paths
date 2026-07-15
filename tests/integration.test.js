@@ -412,131 +412,6 @@ describe('grid.js', () => {
       }
     });
   });
-
-  describe('mapPolygonCells', () => {
-    it('should map cells from polygon coordinates', async () => {
-      const map = createMockMap();
-      const { mapPolygonCells } = await import('../src/helpers/grid.js');
-      const multiFrictionMap = new Map();
-      multiFrictionMap.set(mockHexes[0], { '0': 0 });
-      multiFrictionMap.set(mockHexes[1], { '0': 0 });
-      map.multiFrictionMap = multiFrictionMap;
-
-      const coords = [
-        [-3.7035, 40.4169],
-        [-3.7034, 40.4169],
-        [-3.7034, 40.417],
-        [-3.7035, 40.417],
-        [-3.7035, 40.4169],
-      ];
-      const surface = { layer: '0', cost: 'PAVEMENT' };
-      mapPolygonCells(map, map, coords, surface);
-      expect(map._polyCache).toBeDefined();
-    });
-
-    it('should cache polygon results and evict oldest', async () => {
-      const map = createMockMap();
-      const { mapPolygonCells } = await import('../src/helpers/grid.js');
-      map.multiFrictionMap = new Map();
-
-      for (let i = 0; i < 20; i++) {
-        const coords = [
-          [-3.7035 + i * 0.0001, 40.4169],
-          [-3.7034 + i * 0.0001, 40.4169],
-          [-3.7034 + i * 0.0001, 40.417],
-          [-3.7035 + i * 0.0001, 40.417],
-          [-3.7035 + i * 0.0001, 40.4169],
-        ];
-        mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      }
-      expect(map._polyCache.size).toBeLessThanOrEqual(2000);
-    });
-
-    it('should refresh LRU order on cache hit', async () => {
-      const map = createMockMap();
-      const { mapPolygonCells } = await import('../src/helpers/grid.js');
-      map.multiFrictionMap = new Map();
-
-      const coords = [
-        [-3.7035, 40.4169],
-        [-3.7034, 40.4169],
-        [-3.7034, 40.417],
-        [-3.7035, 40.417],
-        [-3.7035, 40.4169],
-      ];
-      mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      mapPolygonCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      // Cache should still have the entry
-      expect(map._polyCache.size).toBe(1);
-    });
-  });
-
-  describe('mapLineCells', () => {
-    it('should map cells from line coordinates', async () => {
-      const map = createMockMap();
-      const { mapLineCells } = await import('../src/helpers/grid.js');
-      const multiFrictionMap = new Map();
-      multiFrictionMap.set(mockHexes[0], { '0': 0 });
-      multiFrictionMap.set(mockHexes[1], { '0': 0 });
-      map.multiFrictionMap = multiFrictionMap;
-
-      const coords = [
-        [-3.7035, 40.4169],
-        [-3.7034, 40.417],
-      ];
-      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      expect(map._pathCache).toBeDefined();
-    });
-
-    it('should cache line segments and evict oldest', async () => {
-      const map = createMockMap();
-      const { mapLineCells } = await import('../src/helpers/grid.js');
-      // Pre-populate multiFrictionMap with some cells
-      for (const hex of mockHexes) {
-        map.multiFrictionMap.set(hex, { '0': 0 });
-      }
-
-      for (let i = 0; i < 20; i++) {
-        const coords = [
-          [-3.7035 + i * 0.0001, 40.4169],
-          [-3.7034 + i * 0.0001, 40.417],
-        ];
-        mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      }
-      expect(map._pathCache.size).toBeLessThanOrEqual(2000);
-    });
-
-    it('should refresh LRU order on path cache hit', async () => {
-      const map = createMockMap();
-      const { mapLineCells } = await import('../src/helpers/grid.js');
-      // Pre-populate multiFrictionMap with some cells
-      for (const hex of mockHexes) {
-        map.multiFrictionMap.set(hex, { '0': 0 });
-      }
-
-      const coords = [
-        [-3.7035, 40.4169],
-        [-3.7034, 40.417],
-      ];
-      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      expect(map._pathCache.size).toBe(1);
-    });
-
-    it('should handle single-point line (no segments)', async () => {
-      const map = createMockMap();
-      const { mapLineCells } = await import('../src/helpers/grid.js');
-      // Pre-populate multiFrictionMap with some cells
-      for (const hex of mockHexes) {
-        map.multiFrictionMap.set(hex, { '0': 0 });
-      }
-
-      const coords = [[-3.7035, 40.4169]];
-      mapLineCells(map, map, coords, { layer: '0', cost: 'PAVEMENT' });
-      // Single point = no segments, so _pathCache may not be created
-      expect(map._pathCache).toBeUndefined();
-    });
-  });
 });
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2188,8 +2063,6 @@ describe('main.js', () => {
         on: () => { },
         getHexes: () => mockHexes,
         triggerFastScan: async () => { },
-        mapPolygonCells: () => { },
-        mapLineCells: () => { },
         renderInterfacePins: () => { },
         updateLayers: () => { },
         clearLayers: () => { },
@@ -2203,12 +2076,6 @@ describe('main.js', () => {
       // getHexes
       const hexes = dm.getHexes();
       expect(Array.isArray(hexes)).toBe(true);
-
-      // mapPolygonCells
-      dm.mapPolygonCells([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], { layer: '0', cost: 'PAVEMENT' });
-
-      // mapLineCells
-      dm.mapLineCells([[0, 0], [1, 1]], { layer: '0', cost: 'PAVEMENT' });
 
       // renderInterfacePins
       dm.renderInterfacePins();

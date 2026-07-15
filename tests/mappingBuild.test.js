@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { latLngToCell, gridDisk, cellToLatLng } from 'h3-js';
+import { latLngToCell, gridDisk, gridPathCells, cellToLatLng } from 'h3-js';
 import {
   buildR1Adjacency,
   buildMappingGraph,
   mergeCellsChunk,
   collectFastScanEntries,
   computeImpassableBlurSnapshot,
+  computePathBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
 } from '../src/helpers/spatialTasks.js';
 import { runVisibilityBearingTask } from '../src/helpers/spatialWorker.js';
@@ -280,6 +281,37 @@ describe('collectFastScanEntries', () => {
     }
   });
 
+  it('lets a paved path win over the surrounding park at the same level (order-independent)', () => {
+    // A footway (PAVEMENT) crossing a park (LIGHT_PARK) at the SAME vertical
+    // layer must resolve to PAVEMENT, not be swallowed by the park's softer
+    // friction. This is the coplanar case the old per-layer MAX rule got wrong.
+    const poly = [
+      [
+        [-3.704, 40.416],
+        [-3.703, 40.416],
+        [-3.703, 40.417],
+        [-3.704, 40.417],
+        [-3.704, 40.416],
+      ],
+    ];
+    const park = {
+      sourceLayer: 'landcover',
+      properties: { class: 'vegetation', subclass: 'park' },
+      geometry: { type: 'Polygon', coordinates: poly },
+    };
+    const path = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: { type: 'Polygon', coordinates: poly },
+    };
+    const parkFirst = collectFastScanEntries({ features: [park, path], viewHexes });
+    const pathFirst = collectFastScanEntries({ features: [path, park], viewHexes });
+    for (const cell in parkFirst.cellFrictionEntries) {
+      expect(parkFirst.cellFrictionEntries[cell]).toBe(FRICTION_COSTS.PAVEMENT);
+      expect(pathFirst.cellFrictionEntries[cell]).toBe(FRICTION_COSTS.PAVEMENT);
+    }
+  });
+
   it('is independent of feature order (chunking-independent classification)', () => {
     // The effective friction must not depend on the order features are
     // processed in, which previously caused an intermittent pavement/impassable
@@ -307,6 +339,137 @@ describe('collectFastScanEntries', () => {
     for (const cell in a.multiFrictionEntries) {
       expect(a.cellFrictionEntries[cell]).toBe(FRICTION_COSTS.IMPASSABLE);
     }
+  });
+
+  it('rasterizes a LineString footway as a thin corridor, not a filled polygon', () => {
+    // A winding footway (LineString) through a park. The old code passed the
+    // line's coordinates straight to polygonToCells, which filled the polygon
+    // enclosed by the line's vertices (~10x over-coverage). It must instead be
+    // a corridor of cells along the line.
+    const line = [
+      [-3.704, 40.416],
+      [-3.703, 40.416],
+      [-3.703, 40.417],
+      [-3.704, 40.417],
+      [-3.7045, 40.4165],
+    ];
+    const footway = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: { type: 'LineString', coordinates: line },
+    };
+    const { cellFrictionEntries } = collectFastScanEntries({ features: [footway], viewHexes: [] });
+    const lineCount = Object.keys(cellFrictionEntries).length;
+    expect(lineCount).toBeGreaterThan(0);
+    // Every covered cell is the footway's PAVEMENT surface.
+    for (const cell in cellFrictionEntries) {
+      expect(cellFrictionEntries[cell]).toBe(FRICTION_COSTS.PAVEMENT);
+    }
+    // The same coordinates as a closed Polygon must cover FAR more cells. The
+    // bug made the LineString path match this filled-polygon count.
+    const poly = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: { type: 'Polygon', coordinates: [line] },
+    };
+    const { cellFrictionEntries: polyEntries } = collectFastScanEntries({
+      features: [poly],
+      viewHexes: [],
+    });
+    const polyCount = Object.keys(polyEntries).length;
+    expect(lineCount).toBeLessThan(polyCount / 2);
+  });
+
+  it('rasterizes a MultiLineString as the union of its line corridors', () => {
+    const multi = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [
+            [-3.704, 40.416],
+            [-3.703, 40.416],
+          ],
+          [
+            [-3.703, 40.417],
+            [-3.704, 40.417],
+          ],
+        ],
+      },
+    };
+    const { cellFrictionEntries } = collectFastScanEntries({ features: [multi], viewHexes: [] });
+    const count = Object.keys(cellFrictionEntries).length;
+    expect(count).toBeGreaterThan(0);
+    for (const cell in cellFrictionEntries) {
+      expect(cellFrictionEntries[cell]).toBe(FRICTION_COSTS.PAVEMENT);
+    }
+  });
+
+  it('returns a raw 1-cell corridor from a LineString (widening moved to path blur)', () => {
+    // A 1-cell-wide line at res 15 is only ~1m across. The raw corridor from
+    // `collectFastScanEntries` is now a thin thread; widening is handled by
+    // `computePathBlurSnapshot` (gaussian blur, radius=1).
+    const line = [
+      [-3.704, 40.416],
+      [-3.703, 40.416],
+    ];
+    const footway = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: { type: 'LineString', coordinates: line },
+    };
+    const { cellFrictionEntries, lineCorridorCells } = collectFastScanEntries({
+      features: [footway],
+      viewHexes: [],
+    });
+
+    // Raw 1-cell line for the same segment, computed directly.
+    const a = latLngToCell(line[0][1], line[0][0], 15);
+    const b = latLngToCell(line[1][1], line[1][0], 15);
+    const raw = gridPathCells(a, b).length;
+
+    // `collectFastScanEntries` now returns the raw corridor (no disk(1) halo).
+    expect(cellFrictionEntries).toBeDefined();
+    expect(Object.keys(cellFrictionEntries).length).toBe(raw);
+    expect(Object.keys(lineCorridorCells).length).toBe(raw);
+  });
+
+  it('widens a LineString via path blur (gaussian radius=1)', () => {
+    const line = [
+      [-3.704, 40.416],
+      [-3.703, 40.416],
+    ];
+    const footway = {
+      sourceLayer: 'transportation',
+      properties: { class: 'path', subclass: 'footway' },
+      geometry: { type: 'LineString', coordinates: line },
+    };
+    const { cellFrictionEntries, lineCorridorCells } = collectFastScanEntries({
+      features: [footway],
+      viewHexes: [],
+    });
+
+    const corridorCells = Object.keys(lineCorridorCells);
+    // Build viewHexes that includes corridor cells and their ring-1 neighbors
+    // so the BFS has somewhere to propagate to.
+    const viewHexesSet = new Set(corridorCells);
+    for (const cell of corridorCells) {
+      const disk = gridDisk(cell, 1);
+      for (let i = 0; i < disk.length; i++) viewHexesSet.add(disk[i]);
+    }
+    const viewHexes = Array.from(viewHexesSet);
+
+    const result = computePathBlurSnapshot({
+      corridorCells,
+      cellFrictionEntries,
+      viewHexes,
+    });
+
+    // Path blur should widen the corridor beyond the raw line cells.
+    const widened = Object.keys(result.pathBlurUpdateMap).length;
+    expect(widened).toBeGreaterThan(corridorCells.length);
+    expect(widened).toBeGreaterThan(0);
   });
 });
 

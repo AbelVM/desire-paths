@@ -5,6 +5,7 @@ import {
   computeFastScanSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
+  computePathBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
   buildMappingGraph,
   buildR1Adjacency,
@@ -43,6 +44,8 @@ self.onmessage = (event) => {
       return;
     } else if (data.kind === 'impassable-blur') {
       result = computeImpassableBlurSnapshot(data.payload || {});
+    } else if (data.kind === 'path-blur') {
+      result = computePathBlurSnapshot(data.payload || {});
     } else if (data.kind === 'visibility-bearing-indexed') {
       result = computeVisibilityBearingCSRIndexed(data.payload || {});
     } else if (data.kind === 'mapping-graph') {

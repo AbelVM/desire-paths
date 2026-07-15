@@ -221,6 +221,14 @@
             "@type": "Answer",
             "text": "This simulator extends the work of Bossowski et al. (2025): 'Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning,' published in Computer Environment and Urban Systems (CEUS). It builds on Ma et al.'s agent-based model, adding weighted preferences for route length versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system."
           }
+        },
+        {
+          "@type": "Question",
+          "name": "How are paths and linear features represented in the simulation grid?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough."
+          }
         }
       ]
     }
@@ -708,6 +716,11 @@
                     <strong>Grid resolution</strong> sets the H3 cell detail; <strong>Spontaneity</strong> adds chance
                     to route choice; <strong>Paths wear in</strong> lets used ground grow more inviting.
                   </p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>How are paths and linear features represented in the simulation grid?</strong></summary>
+                  <p>At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough.</p>
                 </details>
               </div>
 

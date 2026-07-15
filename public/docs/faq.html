@@ -194,6 +194,14 @@
             "@type": "Answer",
             "text": "The study of desire paths traces back to early 20th-century urban planning observations. The most famous example is Ohio State University's 'The Oval' campus (1914), where student-created shortcuts were incorporated into the final landscape design — a practice now called 'desire path acceptance.' Academic research accelerated in the late 20th century with computer simulations of pedestrian movement, including Helbing et al.'s 'active walkers' model (2001) and later agent-based approaches. The CEUS 2025 paper by Bossowski et al. represents a recent advancement combining weighted preference models with Dijkstra-based obstacle avoidance."
           }
+        },
+        {
+          "@type": "Question",
+          "name": "How are paths and linear features represented in the simulation grid?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough."
+          }
         }
       ]
     }
@@ -515,6 +523,11 @@
       <details class="faq-item">
         <summary><strong>What is the historical origin of desire path research?</strong></summary>
         <p>The study traces to early 20th-century urban planning. Ohio State University's "The Oval" campus (1914) famously incorporated student-created shortcuts into its final design. Academic research accelerated with Helbing et al.'s active walkers model (2001) and later agent-based approaches.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>How are paths and linear features represented in the grid?</strong></summary>
+        <p>At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough.</p>
       </details>
     </div>
 

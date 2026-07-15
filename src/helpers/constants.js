@@ -209,6 +209,17 @@ export const IMPASSABLE_BLUR_FRICTION_ADD = 3.0;
 // Maximum affordance penalty (absolute amount) applied proportionally to gaussian weight
 export const IMPASSABLE_BLUR_AFFORDANCE_PENALTY = 0.4;
 
+// Path widening blur configuration
+// Replaces the legacy gridDisk(1) corridor expansion with an accumulative
+// gaussian blur (same BFS pattern as the impassable blur). The blur widens
+// the raw 1-cell corridor with a smooth falloff and gates by landcover class
+// so paths do not expand into bush / keep-off terrain.
+export const PATH_BLUR_RADIUS = 1;             // H3 rings (d=1 reached)
+export const PATH_BLUR_SIGMA = 1.0;            // gaussian falloff (rings)
+export const PATH_BLUR_FRICTION_ADD = 1.5;     // max friction reduction (scaled by weight)
+export const PATH_BLUR_AFFORDANCE_BOOST = 0.3; // max affordance boost (scaled by weight)
+export const PATH_BLUR_LANDCOVER_GATE = true;  // gate widening by landcover class
+
 /**
  * Parse the vertical layer value safely.
  * Returns '0' for NaN or missing values.

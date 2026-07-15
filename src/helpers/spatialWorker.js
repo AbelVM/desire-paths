@@ -4,6 +4,7 @@ import {
   computeFastScanSnapshot,
   computeGradientBatch,
   computeImpassableBlurSnapshot,
+  computePathBlurSnapshot,
   computeVisibilityBearingCSRIndexed,
   buildMappingGraph,
   buildR1Adjacency,
@@ -11,6 +12,7 @@ import {
   normalizeFrictionEntries,
   computeAoiHexes,
   deriveCellFrictionFromLayers,
+  mergeLayerFriction,
 } from './spatialTasks.js';
 import { computeAgentBatch } from './agentTasks.js';
 import { SIMULATION_PARAMS, AGENTS_PER_DESTINATION } from './constants.js';
@@ -367,8 +369,7 @@ function mergeFastScanEntries(target, source) {
     for (let l = 0; l < layerKeys.length; l++) {
       const layer = layerKeys[l];
       const nextValue = sourceLayerMap[layer];
-      if (targetLayerMap[layer] === undefined || nextValue > targetLayerMap[layer])
-        targetLayerMap[layer] = nextValue;
+      targetLayerMap[layer] = mergeLayerFriction(targetLayerMap[layer], nextValue);
     }
   }
 }
@@ -378,6 +379,7 @@ function runLocally(kind, payload) {
   if (kind === 'fast-scan-chunk') return computeFastScanChunkSnapshot(payload);
   if (kind === 'gradient-batch') return computeGradientBatch(payload);
   if (kind === 'impassable-blur') return computeImpassableBlurSnapshot(payload);
+  if (kind === 'path-blur') return computePathBlurSnapshot(payload);
   if (kind === 'visibility-bearing-indexed') return computeVisibilityBearingCSRIndexed(payload);
   if (kind === 'mapping-graph') return buildMappingGraph(payload);
   if (kind === 'r1-adjacency') return buildR1Adjacency(payload);
@@ -1050,8 +1052,13 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
     return {
       multiFrictionEntries: Object.create(null),
       cellFrictionEntries: Object.create(null),
+      lineCorridorCells: Object.create(null),
       blurWeights: Object.create(null),
       blurUpdates: [],
+      blurUpdateMap: null,
+      pathBlurWeights: Object.create(null),
+      pathBlurUpdates: [],
+      pathBlurUpdateMap: null,
     };
   }
 
@@ -1112,8 +1119,9 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   );
 
   // Blur is computed once below from the fully-merged friction data (see
-  // runImpassableBlurTask). The earlier "partial blur" path computed a full blur
-  // on incomplete chunk data and discarded the result, so it is intentionally gone.
+  // runImpassableBlurTask / runPathBlurTask). The earlier "partial blur" path
+  // computed a full blur on incomplete chunk data and discarded the result, so
+  // it is intentionally gone.
   const results = await Promise.all(chunkTasks);
 
   if (t0) {
@@ -1122,35 +1130,55 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
       );
   }
 
-  // Merge all chunk results. The per-layer map merges with MAX per (cell, layer),
-  // which is correct for overlapping same-level features (highest friction wins).
+  // Merge all chunk results. The per-layer map merges with `mergeLayerFriction`
+  // per (cell, layer): an impassable obstacle wins, else the hardest walkable
+  // surface — so a paved path through a park stays pavement across chunks.
   const multiFrictionEntries = Object.create(null);
+  const lineCorridorCells = Object.create(null);
   for (let i = 0; i < results.length; i++) {
     const batch = results[i] ?? {};
     mergeFastScanEntries(multiFrictionEntries, batch.multiFrictionEntries ?? Object.create(null));
+    const batchCorridor = batch.lineCorridorCells;
+    if (batchCorridor) {
+      const keys = Object.keys(batchCorridor);
+      for (let k = 0; k < keys.length; k++) lineCorridorCells[keys[k]] = true;
+    }
   }
   // Derive the effective per-cell friction from the fully-merged layer map
-  // (MIN across layers of the per-layer MAX). This keeps the result independent
+  // (MIN across layers of the per-layer merged friction). This keeps the result independent
   // of how features were sharded across chunk workers — previously a flat min
   // within a chunk vs. a max-of-mins across chunks caused an intermittent
   // misclassification (e.g. a fountain inside a public space flipping between
   // pavement and impassable). We no longer merge the per-cell scalars directly.
   const cellFrictionEntries = deriveCellFrictionFromLayers(multiFrictionEntries);
 
-  // Run blur with complete data (re-run if early version already started).
+  // Run both blurs with complete data (re-run if early version already started).
   // Resolve the r1 adjacency promise here (it was launched in parallel with the
   // chunk computation above) so the blur BFS reuses the shared CSR.
   const r1 = r1Adjacency instanceof Promise ? await r1Adjacency : r1Adjacency;
-  const blur = await runImpassableBlurTask(cellFrictionEntries, {
-    viewHexes,
-    r1Adjacency: r1,
-  });
+  const [blur, pathBlur] = await Promise.all([
+    runImpassableBlurTask(cellFrictionEntries, {
+      viewHexes,
+      r1Adjacency: r1,
+    }),
+    runPathBlurTask({
+      corridorCells: Object.keys(lineCorridorCells),
+      multiFrictionEntries,
+      cellFrictionEntries,
+      viewHexes,
+      r1Adjacency: r1,
+    }),
+  ]);
   return {
     multiFrictionEntries,
     cellFrictionEntries,
+    lineCorridorCells,
     blurWeights: blur.blurWeights,
     blurUpdates: blur.updates,
     blurUpdateMap: blur.blurUpdateMap,
+    pathBlurWeights: pathBlur.pathBlurWeights,
+    pathBlurUpdates: pathBlur.updates,
+    pathBlurUpdateMap: pathBlur.pathBlurUpdateMap,
   };
 }
 
@@ -1174,6 +1202,22 @@ export async function runImpassableBlurTask(frictionSource, options = {}) {
       ? frictionSource
       : normalizeFrictionEntries(frictionSource);
   return runWorker('impassable-blur', { frictionEntries, ...options });
+}
+
+export async function runPathBlurTask({
+  corridorCells = [],
+  multiFrictionEntries = Object.create(null),
+  cellFrictionEntries = Object.create(null),
+  viewHexes,
+  r1Adjacency,
+} = {}) {
+  return runWorker('path-blur', {
+    corridorCells,
+    multiFrictionEntries,
+    cellFrictionEntries,
+    viewHexes,
+    r1Adjacency,
+  });
 }
 
 /**
@@ -1380,6 +1424,8 @@ export async function runMergeCellsTask({
   cellFrictionEntries,
   blurUpdateMap,
   blurWeights,
+  pathBlurUpdateMap,
+  pathBlurWeights,
 }) {
   if (!cells || cells.length === 0) {
     return {
@@ -1408,6 +1454,8 @@ export async function runMergeCellsTask({
     cellFrictionEntries,
     blurUpdateMap,
     blurWeights,
+    pathBlurUpdateMap,
+    pathBlurWeights,
   });
   return { frictionArr: result.frictionArr, affArr: result.affArr };
 }
