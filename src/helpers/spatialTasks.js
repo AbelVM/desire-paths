@@ -263,6 +263,92 @@ export function _clipPolygonToBbox(coords, minx, miny, maxx, maxy) {
   return out;
 }
 
+// Padding applied to the clip bbox (degrees). The AOI bbox is derived from cell
+// *centers*, but hexagon cells extend past their centers, so a cell whose center
+// sits on the bbox edge could be dropped by h3 when the geometry is clipped
+// exactly to that edge. A sub-cell pad keeps every AOI cell center strictly
+// inside the clipped geometry; the inAoi filter afterwards keeps only true AOI
+// cells, so no extra cells leak into the result.
+const CLIP_PAD_DEG = 1e-6; // ~0.11 m, smaller than a res-15 cell radius
+
+// Liang–Barsky clip of a single segment (x0,y0)-(x1,y1) to the axis-aligned
+// rectangle. Returns the two clipped endpoints [[cx0,cy0],[cx1,cy1]], or null
+// if the segment is fully outside the rectangle. Never throws.
+function _clipSegmentLB(x0, y0, x1, y1, minx, miny, maxx, maxy) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  // p/q for the four clip edges (left, right, bottom, top).
+  const p = [-dx, dx, -dy, dy];
+  const q = [x0 - minx, maxx - x0, y0 - miny, maxy - y0];
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return null; // parallel to the edge and outside it
+    } else {
+      const r = q[i] / p[i];
+      if (p[i] < 0) {
+        if (r > t1) return null;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return null;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  return [
+    [x0 + t0 * dx, y0 + t0 * dy],
+    [x0 + t1 * dx, y0 + t1 * dy],
+  ];
+}
+
+// Clip a polyline (array of [lng,lat]) to the AOI bbox. Returns an array of
+// clipped sub-polylines (each an array of [lng,lat]); a line that exits and
+// re-enters the bbox yields multiple disjoint sub-polylines. A line fully
+// outside returns []. Used to shrink gridPathCells input for long linear
+// features (rivers, motorways) that extend far past the AOI.
+export function _clipLineToBbox(line, minx, miny, maxx, maxy) {
+  if (!line || line.length < 2) return [];
+  const out = [];
+  let cur = null; // current (connected) clipped sub-polyline
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1];
+    const b = line[i];
+    const clipped = _clipSegmentLB(a[0], a[1], b[0], b[1], minx, miny, maxx, maxy);
+    if (!clipped) {
+      if (cur) {
+        out.push(cur);
+        cur = null;
+      }
+      continue;
+    }
+    const cb = clipped[1];
+    if (!cur) {
+      cur = [clipped[0], cb];
+    } else {
+      // Consecutive segments of a continuous polyline share endpoints, so the
+      // clipped start of this segment equals the previous clipped end; just
+      // append the new end to keep the sub-polyline connected.
+      cur.push(cb);
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// Rasterize an array of clipped sub-polylines (from _clipLineToBbox) into a flat
+// cell array, reusing the line-cell cache per sub-polyline.
+function _rasterizeClippedLines(clippedLines) {
+  const cells = [];
+  for (let i = 0; i < clippedLines.length; i++) {
+    const sub = clippedLines[i];
+    if (!sub || sub.length < 2) continue;
+    const lineCells = getCachedLineCells(sub);
+    for (let c = 0; c < lineCells.length; c++) cells.push(lineCells[c]);
+  }
+  return cells;
+}
+
 function getCachedPolyCells(coords) {
   // Fast bbox check: compute key only on cache miss (moved from top of function).
   // Include the H3 resolution in the key: the same geometry at a different
@@ -510,14 +596,35 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
       //  - Polygon / MultiPolygon: the filled area (polygonToCells).
       let cells;
       let isLine = false;
+      // Clip long linear features (rivers, motorways) to the AOI bbox when they
+      // spill past it, so gridPathCells only rasterizes the in-AOI segment. It is
+      // exact: AOI ⊂ bbox, so every AOI corridor cell on the original line is also
+      // on the clipped line; the inAoi filter afterwards keeps only AOI cells.
+      const clip = hasAoiBbox && fBbox && _extendsBeyond(fBbox, aoiBbox);
+      const clipBbox = clip
+        ? [
+            aoiBbox[0] - CLIP_PAD_DEG,
+            aoiBbox[1] - CLIP_PAD_DEG,
+            aoiBbox[2] + CLIP_PAD_DEG,
+            aoiBbox[3] + CLIP_PAD_DEG,
+          ]
+        : null;
       if (geometry.type === 'LineString') {
-        cells = getCachedLineCells(geometry.coordinates);
+        cells = clip
+          ? _rasterizeClippedLines(
+              _clipLineToBbox(geometry.coordinates, clipBbox[0], clipBbox[1], clipBbox[2], clipBbox[3]),
+            )
+          : getCachedLineCells(geometry.coordinates);
         isLine = true;
       } else if (geometry.type === 'MultiLineString') {
         cells = [];
         const lines = geometry.coordinates;
         for (let l = 0; l < lines.length; l++) {
-          const lineCells = getCachedLineCells(lines[l]);
+          const lineCells = clip
+            ? _rasterizeClippedLines(
+                _clipLineToBbox(lines[l], clipBbox[0], clipBbox[1], clipBbox[2], clipBbox[3]),
+              )
+            : getCachedLineCells(lines[l]);
           for (let c = 0; c < lineCells.length; c++) cells.push(lineCells[c]);
         }
         isLine = true;
@@ -539,16 +646,15 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
         // only adds a thin margin to the rasterized area; the inAoi filter keeps
         // only true AOI cells, so no extra cells leak into the result.
         const clip = hasAoiBbox && fBbox && _extendsBeyond(fBbox, aoiBbox);
-        const CLIP_PAD = 1e-6; // ~0.11 m, smaller than a res-15 cell radius
         cells = [];
         for (let p = 0; p < coordsArray.length; p++) {
           const polyCoords = clip
             ? _clipPolygonToBbox(
                 coordsArray[p],
-                aoiBbox[0] - CLIP_PAD,
-                aoiBbox[1] - CLIP_PAD,
-                aoiBbox[2] + CLIP_PAD,
-                aoiBbox[3] + CLIP_PAD,
+                aoiBbox[0] - CLIP_PAD_DEG,
+                aoiBbox[1] - CLIP_PAD_DEG,
+                aoiBbox[2] + CLIP_PAD_DEG,
+                aoiBbox[3] + CLIP_PAD_DEG,
               )
             : coordsArray[p];
           if (!polyCoords) continue;

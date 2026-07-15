@@ -9,6 +9,7 @@ import {
   buildMappingGraph,
   mergeCellsChunk,
   _clipPolygonToBbox,
+  _clipLineToBbox,
 } from '../src/helpers/spatialTasks.js';
 import { latLngToCell, gridDisk, gridDistance, cellToLatLng } from 'h3-js';
 import { FRICTION_COSTS, classifyFrictionTier } from '../src/helpers/constants.js';
@@ -404,6 +405,122 @@ describe('computeFastScanSnapshot', () => {
     );
     for (const cell of viewHexes) {
       expect(clipped.cellFrictionEntries[cell]).toBe(full.cellFrictionEntries[cell]);
+    }
+  });
+
+  it('clipping a long line to the AOI bbox yields identical AOI corridor cells', () => {
+    // A river (waterway) linestring far longer than the AOI, crossing it
+    // diagonally. Clipping it to the AOI bbox must produce exactly the same AOI
+    // corridor cells as clipping it to a larger bbox that still fully contains
+    // the AOI — both contain the AOI portion of the line, so the rasterized AOI
+    // cells are identical. This guards the Liang–Barsky line clipping speedup in
+    // collectFastScanEntries. (We compare against a larger clip bbox rather than
+    // the unclipped line because gridPathCells between two far-apart cell centers
+    // drifts off the true line and can miss AOI cells — clipping to a near-AOI
+    // bbox is in fact the more accurate rasterization.)
+    const viewHexes = gridDisk(h3Cell, 2);
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const cell of viewHexes) {
+      const [lat, lng] = cellToLatLng(cell);
+      if (lng < minx) minx = lng;
+      if (lng > maxx) maxx = lng;
+      if (lat < miny) miny = lat;
+      if (lat > maxy) maxy = lat;
+    }
+    const aoiBbox = [minx, miny, maxx, maxy];
+    const cx = (minx + maxx) / 2;
+    const cy = (miny + maxy) / 2;
+    // A long diagonal through the AOI center, extending ~0.1° (≈11 km) past it.
+    const line = [
+      [cx - 0.05, cy - 0.05],
+      [cx + 0.05, cy + 0.05],
+    ];
+    const lineBbox = [cx - 0.05, cy - 0.05, cx + 0.05, cy + 0.05];
+    const feature = {
+      sourceLayer: 'waterway',
+      properties: { class: 'river' },
+      geometry: { type: 'LineString', coordinates: line },
+      bbox: lineBbox,
+    };
+
+    // Clip to the AOI bbox.
+    const clipped = collectFastScanEntries({ features: [feature], viewHexes, aoiBbox });
+    // Clip to a 3x-larger bbox that still fully contains the AOI: pass it as the
+    // AOI bbox so the "extends beyond" test is false and the line is clipped to
+    // that larger box instead. inAoi is still the real AOI, so only AOI cells
+    // survive the filter.
+    const bigBbox = [
+      cx - (maxx - minx) * 1.5,
+      cy - (maxy - miny) * 1.5,
+      cx + (maxx - minx) * 1.5,
+      cy + (maxy - miny) * 1.5,
+    ];
+    const wide = collectFastScanEntries({ features: [feature], viewHexes, aoiBbox: bigBbox });
+
+    // lineCorridorCells is post-AOI-filter; both clip boxes contain the AOI, so
+    // the AOI corridor cells must be identical.
+    expect(Object.keys(clipped.lineCorridorCells).sort()).toEqual(
+      Object.keys(wide.lineCorridorCells).sort(),
+    );
+    for (const cell of viewHexes) {
+      expect(!!clipped.lineCorridorCells[cell]).toBe(!!wide.lineCorridorCells[cell]);
+    }
+  });
+});
+
+describe('_clipLineToBbox', () => {
+  it('returns the line unchanged when fully inside the bbox', () => {
+    const line = [
+      [3, 3],
+      [7, 3],
+      [7, 7],
+    ];
+    const out = _clipLineToBbox(line, 0, 0, 10, 10);
+    expect(out.length).toBe(1);
+    expect(out[0]).toEqual(line);
+  });
+
+  it('clips a line that crosses the bbox to the boundary', () => {
+    const line = [
+      [-5, 5],
+      [15, 5],
+    ];
+    const out = _clipLineToBbox(line, 0, 0, 10, 10);
+    expect(out.length).toBe(1);
+    // The clipped segment endpoints must lie on the bbox boundary (x in [0,10]).
+    expect(out[0][0][0]).toBeCloseTo(0, 6);
+    expect(out[0][1][0]).toBeCloseTo(10, 6);
+    expect(out[0][0][1]).toBeCloseTo(5, 6);
+    expect(out[0][1][1]).toBeCloseTo(5, 6);
+  });
+
+  it('returns [] when the line is completely outside the bbox', () => {
+    const line = [
+      [20, 20],
+      [30, 30],
+    ];
+    const out = _clipLineToBbox(line, 0, 0, 10, 10);
+    expect(out).toEqual([]);
+  });
+
+  it('splits a line that exits and re-enters into two sub-polylines', () => {
+    // Inside segment, then a fully-outside segment, then back inside: the outside
+    // segment must separate the two inside portions into disjoint sub-polylines.
+    const line = [
+      [5, 5],
+      [15, 5],
+      [15, 15],
+      [5, 5],
+    ];
+    const out = _clipLineToBbox(line, 0, 0, 10, 10);
+    expect(out.length).toBe(2);
+    for (const sub of out) {
+      for (const [x, y] of sub) {
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThanOrEqual(10);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(y).toBeLessThanOrEqual(10);
+      }
     }
   });
 });
