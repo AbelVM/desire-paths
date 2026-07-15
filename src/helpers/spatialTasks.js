@@ -47,20 +47,10 @@ const FAST_SCAN_LAYERS = new Set([
 /**
  * Derive the effective per-cell friction from a per-layer friction map.
  *
- * For each cell we take the MIN across its vertical layers of the per-layer
- * merged friction (see `mergeLayerFriction`). This means:
- *  - An IMPASSABLE feature always wins at its level — e.g. a water fountain
- *    inside a pavement public space is impassable, never passable.
- *  - Among walkable surfaces, the HARDEST (lowest-friction) wins — e.g. a paved
- *    footway (PAVEMENT) through a park (LIGHT_PARK) stays PAVEMENT, and a paved
- *    plaza overrides the surrounding lawn.
- *  - Different vertical levels stay independent — a bridge (pavement, level 1)
- *    over a river (water, level 0) remains passable.
- *
- * Deriving from the already-merged per-layer map (rather than a flat min across
- * all layer values) also makes the result independent of how features were
- * sharded across chunk workers, eliminating an intermittent misclassification
- * that previously flipped between pavement and impassable depending on chunking.
+ * Ground-surface classification uses ONLY the layer=0 entry. Bridges (layer=1)
+ * and tunnels/underground features (layer=-1) do not affect the walkable
+ * surface — a bridge over water stays passable, and an underground tunnel does
+ * not make the ground above it impassable.
  *
  * @param {Object} multiFrictionEntries cell -> { layerKey: friction }
  * @returns {Object} cell -> effective friction (number)
@@ -69,12 +59,8 @@ export function deriveCellFrictionFromLayers(multiFrictionEntries) {
   const cellFrictionEntries = Object.create(null);
   for (const cell in multiFrictionEntries) {
     const layerMap = multiFrictionEntries[cell];
-    let min = Infinity;
-    for (const k in layerMap) {
-      const v = layerMap[k];
-      if (typeof v === 'number' && v < min) min = v;
-    }
-    if (isFinite(min)) cellFrictionEntries[cell] = min;
+    const v = layerMap['0'];
+    if (typeof v === 'number' && isFinite(v)) cellFrictionEntries[cell] = v;
   }
   return cellFrictionEntries;
 }
@@ -434,10 +420,10 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
   // Single accumulation pass: for every AOI cell a feature covers, merge into
   // the per-layer slot via `mergeLayerFriction` (impassable wins, else hardest
   // walkable). The effective per-cell friction is derived afterwards from the
-  // merged layer map (see deriveCellFrictionFromLayers): MIN across vertical
-  // layers. This makes overlapping same-level features resolve to the obstacle
-  // (if any) or the hardest walkable surface, and is independent of feature
-  // order / chunk sharding.
+  // layer=0 entry only (see deriveCellFrictionFromLayers): bridges (layer=1)
+  // and tunnels (layer=-1) do not affect the ground surface. This makes
+  // overlapping same-level features resolve to the obstacle (if any) or the
+  // hardest walkable surface, and is independent of feature order / chunk sharding.
   for (const group of Object.values(grouped)) {
     const { layerKey, layerVal, geometries } = group;
     for (let g = 0; g < geometries.length; g++) {
@@ -488,7 +474,8 @@ export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox 
     }
   }
 
-  // Effective per-cell friction: MIN across layers of the per-layer MAX friction.
+  // Effective per-cell friction: layer=0 only (ground surface). Bridges and
+  // underground features do not affect the walkable surface.
   const cellFrictionEntries = deriveCellFrictionFromLayers(multiFrictionEntries);
 
   return { multiFrictionEntries, cellFrictionEntries, lineCorridorCells };
@@ -1270,7 +1257,7 @@ export function computeVisibilityBearingCSRIndexed({
  *
  * Mirrors the body of the old single-threaded merge loop in `triggerFastScan`:
  * for each cell it merges its multi-friction layer map, computes the effective
- * friction (min across layers, or the fast-scan fallback), applies the
+ * friction (layer=0 only, or the fast-scan fallback), applies the
  * impassable-blur friction update, classifies affordance (with the blur-weight
  * penalty), and produces the merged layer map. Cells are independent, so this
  * is embarrassingly parallel — the orchestrator shards `viewHexes` and merges

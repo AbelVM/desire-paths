@@ -1145,7 +1145,8 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency, aoiBbox 
     }
   }
   // Derive the effective per-cell friction from the fully-merged layer map
-  // (MIN across layers of the per-layer merged friction). This keeps the result independent
+  // using only layer=0 (ground surface). Bridges and underground features
+  // do not affect the walkable surface. This keeps the result independent
   // of how features were sharded across chunk workers — previously a flat min
   // within a chunk vs. a max-of-mins across chunks caused an intermittent
   // misclassification (e.g. a fountain inside a public space flipping between

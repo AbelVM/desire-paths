@@ -569,11 +569,7 @@ function _classifySurface(feature) {
     // ground surface above it is walkable. It must contribute NO barrier:
     // returning null skips the feature entirely (getSurface → null →
     // collectFastScanEntries `continue`), letting the cell fall back to the
-    // real ground feature or the PAVEMENT default. Note we cannot instead
-    // emit IMPASSABLE at vertical layer -1: deriveCellFrictionFromLayers takes
-    // the MIN across a cell's layers and a cell only defaults to PAVEMENT when
-    // it has NO entry at all, so an entry at layer -1 with nothing at ground
-    // level would still leave the cell impassable.
+    // real ground feature or the PAVEMENT default.
     if (brunnel === 'tunnel') return null;
     return { cost: 'IMPASSABLE', layer: parseLayerValue(layer) };
   }
@@ -586,8 +582,8 @@ function _classifySurface(feature) {
 
   // Park (national_park / nature_reserve / protected_area) → open terrain.
   // LIGHT_PARK only fills otherwise-empty cells: any road (PAVEMENT) or
-  // building/water (IMPASSABLE) inside the polygon still wins via the
-  // MIN-across-layers merge in deriveCellFrictionFromLayers.
+  // building/water (IMPASSABLE) at layer=0 inside the polygon still wins via
+  // mergeLayerFriction at the same layer.
   if (layerId === 'park') {
     return { cost: 'LIGHT_PARK', layer: parseLayerValue(layer) };
   }

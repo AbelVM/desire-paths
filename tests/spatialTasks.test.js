@@ -380,7 +380,7 @@ describe('computeFastScanChunkSnapshot', () => {
     expect(result.multiFrictionEntries).toBeDefined();
   });
 
-  it('should use non-ground layer when ground layer is absent', () => {
+  it('should ignore non-ground layer when ground layer is absent', () => {
     const viewHexes = [h3Cell];
     const features = [
       {
@@ -393,7 +393,9 @@ describe('computeFastScanChunkSnapshot', () => {
       },
     ];
     const result = computeFastScanSnapshot({ features, viewHexes });
-    expect(result.cellFrictionEntries[h3Cell]).toBe(FRICTION_COSTS.PAVEMENT);
+    // Layer=1 (bridge) should not affect ground surface classification.
+    // With no layer=0 entry, the cell has no effective friction here.
+    expect(result.cellFrictionEntries[h3Cell]).toBeUndefined();
   });
 
   it('should handle Polygon geometry with coordinates near the H3 cell', () => {
