@@ -1094,7 +1094,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     }
     map.affordanceMap?.clear();
     map.cellFrictionMap?.clear();
-    map.multiFrictionMap?.clear();
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
     map.mappingReady = false;
@@ -1107,7 +1106,6 @@ export function setupUI(map, { setMapCursor, setMapCursorWait } = {}) {
     map._lastViewHexesKey = undefined;
     map._frictionObj = undefined;
     map._affordanceObj = undefined;
-    map._multiFrictionObj = undefined;
     map._perTargetContribs = undefined;
     map._assignedCounts = undefined;
     map._targetWeights = undefined;

@@ -92,7 +92,6 @@ export function renderInterfacePins(state, mapInstance) {
     state._cachedViewHexes = undefined;
     state._cachedAoiKey = undefined;
     state._lastViewHexesKey = undefined;
-    state._multiFrictionObj = undefined;
     if (mapInstance.getSource('pins')) {
       mapInstance.getSource('pins').setData({ type: 'FeatureCollection', features: [] });
     }

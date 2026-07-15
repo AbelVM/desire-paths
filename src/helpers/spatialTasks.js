@@ -1475,12 +1475,11 @@ export function computeVisibilityBearingCSRIndexed({
  * @param blurUpdateMap    { cell: number } | null  blur friction overrides
  * @param blurWeights      { cell: number } | null  blur affordance penalties
  *
- * NOTE: the per-cell layer map (`multiFrictionMap` entry) is NOT handled here.
- * The merge worker never reads its contents — it only needs the already-reduced
- * min friction (`cellFrictionEntries`). Shipping the N layer-map objects to the
- * worker and back was pure structured-clone waste (P2-9); the main thread holds
- * `multiEntries` from the fast-scan pass and writes it into `multiFrictionMap`
- * directly. So this function returns only the typed friction/affordance arrays.
+ * NOTE: the per-cell layer map is NOT handled here. The merge worker never
+ * reads its contents — it only needs the already-reduced min friction
+ * (`cellFrictionEntries`). Shipping the N layer-map objects to the worker and
+ * back was pure structured-clone waste (P2-9). So this function returns only
+ * the typed friction/affordance arrays.
  */
 export function mergeCellsChunk({
   cells = [],

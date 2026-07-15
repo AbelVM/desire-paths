@@ -159,24 +159,6 @@ export async function triggerFastScan(state, mapInstance) {
   state._mappingGeneration = (state._mappingGeneration ?? 0) + 1;
   clearComputeCaches(state);
 
-  const multiEntries = build.multiFrictionEntries ?? Object.create(null);
-
-  // Lazy multiFrictionMap (P3): only cells that actually have friction layers
-  // from the fast-scan get an entry. Layer-less cells (default terrain) get NO
-  // entry — previously EVERY viewHex was pre-populated with an empty layer-map
-  // object (N wasted allocations, the largest object allocation in the mapping
-  // stage). AOI membership at draw time is defined by `cellFrictionMap`
-  // (populated for every viewHex below). The Map *object* is reused (cleared in
-  // place) when the AOI key is unchanged so consumers holding a reference stay
-  // valid.
-  const aoiKey = state._cachedAoiKey ?? (state.aoi_polygon ? _aoiKey(state.aoi_polygon) : '');
-  if (!state.multiFrictionMap || state._lastViewHexesKey !== aoiKey) {
-    state.multiFrictionMap = new Map();
-    state._lastViewHexesKey = aoiKey;
-  } else {
-    state.multiFrictionMap.clear();
-  }
-
   // Single-pass: merge multi-friction, build cellFrictionMap + affordanceMap
   const blurWeights = build.blurWeights ?? Object.create(null);
   // `blurUpdateMap` is returned by the worker (cell→blurred friction), so we use
@@ -194,8 +176,7 @@ export async function triggerFastScan(state, mapInstance) {
   // two hottest fields at N≈5e5) that lived forever even when no sim ran. The
   // Maps are now the single source of truth at mapping/render time; `_frictionObj`/
   // `_affordanceObj` are materialized lazily at sim start (compute.js) from the
-  // Maps and dropped by clearComputeCaches on the next remap. `multi` lives in
-  // `multiFrictionMap` (never read in the hot path).
+  // Maps and dropped by clearComputeCaches on the next remap.
 
   // Assemble per-cell mapping state (friction, affordance, multi-friction layers)
   // in a worker pool, sharded by cell. The heavy per-cell work (layer merge,
@@ -203,10 +184,8 @@ export async function triggerFastScan(state, mapInstance) {
   // thread in parallel; we only write the results into `state` here (O(N) assigns).
   // P2-9: the merge worker no longer ships the N layer-map objects to/from the
   // worker — it returns only the friction/affordance typed arrays (it never reads
-  // the layer-map contents). We write `multiFrictionMap` from the local
-  // `multiEntries` (from the fast-scan pass) directly, avoiding a 2× clone of N
-  // objects. We also iterate `viewHexes` by index instead of the worker's returned
-  // `cells` (N strings), avoiding a redundant clone.
+  // the layer-map contents). We also iterate `viewHexes` by index instead of the
+  // worker's returned `cells` (N strings), avoiding a redundant clone.
   //
   // P3.1: the canonical friction/affordance representation is now
   // `Float32Array(N)` indexed by `viewHexes` order, with `cellToIdx` as the only
@@ -244,10 +223,7 @@ export async function triggerFastScan(state, mapInstance) {
     const cell = viewHexes[i];
     const fr = merged.frictionArr[i];
     const aff = merged.affArr[i];
-    const target = multiEntries[cell];
     state.cellFrictionMap.set(cell, fr);
-    // Only cells with actual fast-scan layers get a multiFrictionMap entry.
-    if (target) state.multiFrictionMap.set(cell, target);
     state.affordanceMap.set(cell, aff);
   }
 
@@ -270,9 +246,6 @@ export async function triggerFastScan(state, mapInstance) {
   }
   if (!state.surfaceEdits) state.surfaceEdits = new Map();
   applySurfaceEdits(state);
-  // `_multiFrictionObj` is a view over `multiFrictionMap` (same references),
-  // so we don't hold a second N-entry container at steady state.
-  state._multiFrictionObj = state.multiFrictionMap;
 
   const visionDepth = state.simulationParams?.visionDepth ?? SIMULATION_PARAMS.visionDepth;
 

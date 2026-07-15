@@ -376,12 +376,6 @@ export async function computeDesirePaths(state, mapInstance, signal) {
   // mapping always reseeds them from the rebuilt maps.
   if (state.cellFrictionMap) state._frictionObj = state.cellFrictionMap;
   if (state.affordanceMap) state._affordanceObj = state.affordanceMap;
-  // `_multiFrictionObj` is a view over `multiFrictionMap` (same cell→layer-map
-  // references), not a second copy — this avoids holding N object references in
-  // a separate plain-object container at steady state.
-  if (!state._multiFrictionObj) {
-    state._multiFrictionObj = state.multiFrictionMap || Object.create(null);
-  }
 
   // Grass recovery between user-triggered simulation runs (not after wear in the
   // same pass). Iterate the canonical cell set — `cellFrictionMap` is always

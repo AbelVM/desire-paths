@@ -41,7 +41,6 @@ import { PowerDeadline } from 'performance-helpers/powerDeadline';
 // the Proxy ownKeys/getOwnPropertyDescriptor footgun from review12 #8.
 const KNOWN_STATE_KEYS = [
   'simulationNodes',
-  'multiFrictionMap',
   'cellFrictionMap',
   'pathDesireScores',
   'affordanceMap',
@@ -69,7 +68,6 @@ const KNOWN_STATE_KEYS = [
   '_lastViewHexesKey',
   '_frictionObj',
   '_affordanceObj',
-  '_multiFrictionObj',
   '_computePathCacheObj',
   '_computePathCacheOrder',
   '_computeDiskCacheObj',
@@ -316,7 +314,6 @@ const init = () => {
   const desireMap = new DesireMap(map);
   if (import.meta.env.DEV && typeof window !== 'undefined') window.__map = desireMap; // TEMP DEBUG
 
-  desireMap.multiFrictionMap = new Map();
   desireMap.cellFrictionMap = new Map();
   desireMap.pathDesireScores = new Map();
   desireMap.affordanceMap = new Map();

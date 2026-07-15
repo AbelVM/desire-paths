@@ -269,7 +269,6 @@ describe('runGradientBatches', () => {
 describe('runFastScanTask', () => {
   it('should return empty results for null viewHexes', async () => {
     const result = await runFastScanTask(null, []);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
     expect(result.blurWeights).toBeDefined();
     expect(result.blurUpdates).toEqual([]);
@@ -277,24 +276,22 @@ describe('runFastScanTask', () => {
 
   it('should return empty results for empty viewHexes', async () => {
     const result = await runFastScanTask([], []);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
   });
 
   it('should handle undefined viewHexes', async () => {
     const result = await runFastScanTask(undefined, []);
-    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
   });
 
   it('should handle empty features by treating as empty', async () => {
     const result = await runFastScanTask([h3Cell], []);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
   });
 
   it('should handle undefined features', async () => {
     const result = await runFastScanTask([h3Cell], undefined);
-    expect(result.multiFrictionEntries).toBeDefined();
+    expect(result.cellFrictionEntries).toBeDefined();
   });
 
   it('should handle single feature (run locally)', async () => {
@@ -309,7 +306,6 @@ describe('runFastScanTask', () => {
       },
     ];
     const result = await runFastScanTask([h3Cell], features);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
   });
 
@@ -333,7 +329,6 @@ describe('runFastScanTask', () => {
       },
     ];
     const result = await runFastScanTask([h3Cell], features);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
   });
 
@@ -346,7 +341,6 @@ describe('runFastScanTask', () => {
       },
     ];
     const result = await runFastScanTask([h3Cell], features);
-    expect(result.multiFrictionEntries).toBeDefined();
     expect(result.cellFrictionEntries).toBeDefined();
   });
 });

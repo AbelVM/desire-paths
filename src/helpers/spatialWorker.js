@@ -1061,7 +1061,6 @@ export async function runAgentBatches(
 export async function runFastScanTask(viewHexes, features, r1Adjacency, aoiBbox = null) {
   if (!viewHexes || viewHexes.length === 0) {
     return {
-      multiFrictionEntries: Object.create(null),
       cellFrictionEntries: Object.create(null),
       lineCorridorCells: Object.create(null),
       blurWeights: Object.create(null),
@@ -1182,7 +1181,6 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency, aoiBbox 
     }),
   ]);
   return {
-    multiFrictionEntries,
     cellFrictionEntries,
     lineCorridorCells,
     blurWeights: blur.blurWeights,
@@ -1423,10 +1421,9 @@ export async function runVisibilityBearingTask(graph, viewHexes, visionDepth) {
  * classification, blur application) and returns flat typed arrays. The
  * orchestrator returns them; the caller only does O(N) assignments into `state`
  * (no min-reduction / classification / object construction on the UI thread).
- * The per-cell layer maps are NOT returned — the caller writes
- * `multiFrictionMap` from its local `multiEntries` (P2-9), avoiding a 2× clone
- * of N objects. Falls back to a single local compute when Workers are
- * unavailable.
+  * The per-cell layer maps are NOT returned — the caller only consumes the
+  * reduced `cellFrictionEntries` (P2-9), avoiding a 2× clone of N objects. Falls
+  * back to a single local compute when Workers are unavailable.
  *
  * @returns { frictionArr: Float64Array, affArr: Float64Array }
  *          indexed in `viewHexes` (cell) order.
@@ -1455,12 +1452,11 @@ export async function runMergeCellsTask({
   // per-cell work. `runWorker` falls back to inline execution when Workers are
   // unavailable.
   //
-  // P2-9: the N layer-map objects (`multiEntries`) are NO LONGER shipped to the
-  // worker or back. The merge kernel never reads their contents (it only needs
-  // the already-reduced min friction in `cellFrictionEntries`), so the main
-  // thread writes `multiFrictionMap` from its local `multiEntries` directly,
-  // avoiding a 2× structured-clone of N objects. We also drop the returned
-  // `cells` (N strings) — the caller iterates `viewHexes` by index instead.
+  // P2-9: the N layer-map objects are NO LONGER shipped to the worker or back.
+  // The merge kernel never reads their contents (it only needs the already-reduced
+  // min friction in `cellFrictionEntries`), so the main thread consumes only the
+  // reduced entries, avoiding a 2× structured-clone of N objects. We also drop the
+  // returned `cells` (N strings) — the caller iterates `viewHexes` by index instead.
   const result = await runWorkerWithRetry('merge-cells', {
     cells,
     cellFrictionEntries,

@@ -80,8 +80,6 @@ describe('computeDesirePaths regression', () => {
     return {
       cellFrictionMap: new Map(Object.entries(frictionObj)),
       _frictionObj: frictionObj,
-      multiFrictionMap: new Map(),
-      _multiFrictionObj: Object.create(null),
       simulationNodes: {
         [originCell]: { type: 'origin', weight: 1 },
         [destCell]: { type: 'destination', weight: 1 },
@@ -176,8 +174,6 @@ describe('computeDesirePaths regression', () => {
     const ctx = {
       cellFrictionMap: new Map(),
       _frictionObj: Object.create(null),
-      multiFrictionMap: new Map(),
-      _multiFrictionObj: Object.create(null),
       simulationNodes: {
         [originCell]: { type: 'origin', weight: 1 },
         [destCell]: { type: 'destination', weight: 1 },
@@ -227,8 +223,6 @@ describe('computeDesirePaths regression', () => {
     const ctx = {
       cellFrictionMap: new Map(Object.entries(frictionObj)),
       _frictionObj: frictionObj,
-      multiFrictionMap: new Map(),
-      _multiFrictionObj: Object.create(null),
       simulationNodes: {
         [h3]: { type: 'both', weight: 1 },
       },
@@ -259,8 +253,6 @@ describe('computeDesirePaths regression', () => {
     const ctx = {
       cellFrictionMap: frictionMap,
       // _frictionObj is NOT set
-      multiFrictionMap: new Map(),
-      _multiFrictionObj: Object.create(null),
       simulationNodes: {
         [pathCells[0]]: { type: 'origin', weight: 1 },
         [pathCells[pathCells.length - 1]]: { type: 'destination', weight: 1 },
@@ -289,8 +281,6 @@ describe('computeDesirePaths regression', () => {
     const ctx = {
       cellFrictionMap: new Map(Object.entries(frictionObj)),
       _frictionObj: frictionObj,
-      multiFrictionMap: new Map(),
-      _multiFrictionObj: Object.create(null),
       simulationNodes: {
         [pathCells[0]]: { type: 'origin', weight: 1 },
         [pathCells[pathCells.length - 1]]: { type: 'destination', weight: 1 },

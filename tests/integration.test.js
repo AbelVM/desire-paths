@@ -143,16 +143,14 @@ vi.mock('../src/helpers/spatialWorker.js', () => ({
     return { N, offsets: new Int32Array(N + 1), neighbors: new Int32Array(0) };
   }),
   runFastScanTask: vi.fn(async (viewHexes, _features) => {
-    const multiFrictionEntries = Object.create(null);
     const cellFrictionEntries = Object.create(null);
     const blurWeights = Object.create(null);
     const blurUpdates = [];
     for (const hex of viewHexes) {
       cellFrictionEntries[hex] = 1;
-      multiFrictionEntries[hex] = { '0': 1 };
       blurWeights[hex] = 0;
     }
-    return { multiFrictionEntries, cellFrictionEntries, blurWeights, blurUpdates };
+    return { cellFrictionEntries, blurWeights, blurUpdates };
   }),
   runGradientBatches: vi.fn(async (targets, _frictionSource) => {
     const result = Object.create(null);
@@ -223,7 +221,6 @@ function createMockMap(extra = {}) {
       [originCell]: { type: 'origin', weight: 1 },
       [destCell]: { type: 'destination', weight: 1 },
     },
-    multiFrictionMap: new Map(),
     cellFrictionMap: new Map(),
     pathDesireScores: new Map(),
     affordanceMap: new Map(),
@@ -247,7 +244,6 @@ function createMockMap(extra = {}) {
     _lastViewHexesKey: undefined,
     _frictionObj: undefined,
     _affordanceObj: undefined,
-    _multiFrictionObj: undefined,
     _cellState: undefined,
     _computePathCacheObj: undefined,
     _computePathCacheOrder: undefined,
@@ -355,7 +351,6 @@ describe('grid.js', () => {
       const { triggerFastScan } = await import('../src/helpers/grid.js');
       await triggerFastScan(map, map);
       expect(map.cellFrictionMap.size).toBeGreaterThan(0);
-      expect(map.multiFrictionMap.size).toBeGreaterThan(0);
       expect(map.affordanceMap.size).toBeGreaterThan(0);
     });
 
@@ -365,19 +360,9 @@ describe('grid.js', () => {
       await triggerFastScan(map, map);
       expect(map._frictionObj).toBeDefined();
       expect(map._affordanceObj).toBeDefined();
-      expect(map._multiFrictionObj).toBeDefined();
       // M5: the per-cell `_cellState` object is no longer built; friction/affordance
       // live in the flat `_frictionObj`/`_affordanceObj` snapshots the sim reads.
       expect(map._cellState == null).toBe(true);
-    });
-
-    it('should reuse multiFrictionMap when AOI key unchanged', async () => {
-      const map = createMockMap();
-      const { triggerFastScan } = await import('../src/helpers/grid.js');
-      await triggerFastScan(map, map);
-      const firstMap = map.multiFrictionMap;
-      await triggerFastScan(map, map);
-      expect(map.multiFrictionMap).toBe(firstMap);
     });
 
     it('should apply blur weights to affordance', async () => {
@@ -495,7 +480,6 @@ describe('map.js', () => {
         _cachedViewHexes: ['hex1'],
         _cachedAoiKey: 'key',
         _lastViewHexesKey: 'key',
-        _multiFrictionObj: { a: 1 },
       });
       map.clearLayers = vi.fn();
       const { renderInterfacePins } = await import('../src/helpers/map.js');
@@ -503,7 +487,6 @@ describe('map.js', () => {
       expect(map._cachedViewHexes).toBeUndefined();
       expect(map._cachedAoiKey).toBeUndefined();
       expect(map._lastViewHexesKey).toBeUndefined();
-      expect(map._multiFrictionObj).toBeUndefined();
     });
   });
 
@@ -1195,7 +1178,6 @@ describe('ui.js', () => {
     map.pathDesireScores = new Map([['hex1', 5]]);
     map.affordanceMap = new Map([['hex1', 0.5]]);
     map.cellFrictionMap = new Map([['hex1', 1]]);
-    map.multiFrictionMap = new Map([['hex1', { '0': 1 }]]);
     map.globalPeakFlow = 10;
     map.readyToCompute = true;
     map.mappingReady = true;
@@ -1206,7 +1188,6 @@ describe('ui.js', () => {
     map.pathDesireScores?.clear();
     map.affordanceMap?.clear();
     map.cellFrictionMap?.clear();
-    map.multiFrictionMap?.clear();
     map.globalPeakFlow = 1;
     map.readyToCompute = false;
     map.mappingReady = false;
@@ -1219,7 +1200,6 @@ describe('ui.js', () => {
     map._lastViewHexesKey = undefined;
     map._frictionObj = undefined;
     map._affordanceObj = undefined;
-    map._multiFrictionObj = undefined;
     map._cellState = undefined;
     map._computePathCacheObj = undefined;
     map._computePathCacheOrder = undefined;
@@ -1465,7 +1445,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1489,7 +1468,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -1518,7 +1496,6 @@ describe('main.js', () => {
       };
       const dm = new DesireMap(mockMap);
       expect(dm.simulationNodes).toEqual({});
-      expect(dm.multiFrictionMap).toBeInstanceOf(Map);
       expect(dm.cellFrictionMap).toBeInstanceOf(Map);
       expect(dm.pathDesireScores).toBeInstanceOf(Map);
       expect(dm.affordanceMap).toBeInstanceOf(Map);
@@ -1534,7 +1511,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1558,7 +1534,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -1587,7 +1562,6 @@ describe('main.js', () => {
       };
       const dm = new DesireMap(mockMap);
       dm.simulationNodes = { hex1: { type: 'origin', weight: 1 } };
-      dm.multiFrictionMap = new Map([['hex1', { '0': 1 }]]);
       dm.cellFrictionMap = new Map([['hex1', 1]]);
       dm.pathDesireScores = new Map([['hex1', 5]]);
       dm.affordanceMap = new Map([['hex1', 0.5]]);
@@ -1607,7 +1581,6 @@ describe('main.js', () => {
       dm._lastViewHexesKey = 'key';
       dm._frictionObj = { hex1: 1 };
       dm._affordanceObj = { hex1: 0.5 };
-      dm._multiFrictionObj = { hex1: { '0': 1 } };
       dm._computePathCacheObj = {};
       dm._computePathCacheOrder = [];
       dm._computeDiskCacheObj = {};
@@ -1635,7 +1608,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1659,7 +1631,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -1703,7 +1674,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1727,7 +1697,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -1783,7 +1752,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1807,7 +1775,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -1870,9 +1837,6 @@ describe('main.js', () => {
       dm._affordanceObj = { hex1: 0.5 };
       expect(dm._affordanceObj).toEqual({ hex1: 0.5 });
 
-      dm._multiFrictionObj = { hex1: { '0': 1 } };
-      expect(dm._multiFrictionObj).toEqual({ hex1: { '0': 1 } });
-
       dm._computePathCacheObj = { a: { b: ['c'] } };
       expect(dm._computePathCacheObj).toEqual({ a: { b: ['c'] } });
 
@@ -1923,7 +1887,6 @@ describe('main.js', () => {
 
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -1947,7 +1910,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
@@ -2011,7 +1973,6 @@ describe('main.js', () => {
       const { DesireMap } = await import('../src/main.js');
       const mockMap = {
         simulationNodes: {},
-        multiFrictionMap: new Map(),
         cellFrictionMap: new Map(),
         pathDesireScores: new Map(),
         affordanceMap: new Map(),
@@ -2035,7 +1996,6 @@ describe('main.js', () => {
         _lastViewHexesKey: undefined,
         _frictionObj: undefined,
         _affordanceObj: undefined,
-        _multiFrictionObj: undefined,
         _cellState: undefined,
         _computePathCacheObj: undefined,
         _computePathCacheOrder: undefined,
