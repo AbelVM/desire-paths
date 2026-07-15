@@ -1,0 +1,817 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Desire Paths — see where people naturally walk</title>
+  <meta name="description"
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
+  <meta name="keywords"
+    content="desire paths, desire lines, walkability, pedestrian movement, permeability, urban design, agent-based modeling, H3 hex grid, walking resistance, pathfinding, GIS, walkability analysis" />
+  <link rel="canonical" href="https://abelvm.github.io/desire-paths/" />
+
+  <meta name="theme-color" content="#0a0e17" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/png" href="./favicon.png" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://abelvm.github.io/desire-paths/" />
+  <meta property="og:title" content="Desire Paths — read where people choose to walk" />
+  <meta property="og:description"
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
+  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Desire Paths simulator showing pedestrian flow heatmap on a city map" />
+  <meta property="og:site_name" content="Desire Paths" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Desire Paths — read where people choose to walk" />
+  <meta name="twitter:description"
+    content="Drop start and end points on real streets and parks, then see where pedestrians naturally walk — and why the plan fights their instincts." />
+  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+
+  <!-- Open Graph / Facebook -->
+
+  <!-- Additional SEO meta tags for GEO/AEO -->
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <meta name="language" content="English" />
+  <meta name="revisit-after" content="7 days" />
+
+  <!-- Breadcrumbs structured data -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://abelvm.github.io/desire-paths/"
+        }
+      ]
+    }
+  </script>
+
+  <!-- SoftwareSourceCode structured data for GEO (AI engines cite code repos) -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareSourceCode",
+      "name": "Desire Paths — Agent-Based Pedestrian Flow Simulator",
+       "description": "An interactive simulator that reveals where pedestrians naturally walk across real streets and parks, using H3 hex grids, a walking-resistance surface, and real map data.",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "codeRepository": "https://github.com/abelvm/desire-paths",
+      "issueTracker": "https://github.com/abelvm/desire-paths/issues",
+      "programmingLanguage": {
+        "@type": "ComputerLanguage",
+        "name": "JavaScript"
+      },
+      "operatingSystem": "Any",
+      "applicationCategory": "VisualizationApplication",
+       "keywords": ["desire paths", "desire lines", "walkability", "pedestrian movement", "permeability", "urban design", "agent-based modeling", "H3 hex grid", "walking resistance", "pathfinding", "GIS", "affordance theory"],
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05",
+      "citation": {
+        "@type": "ScholarlyArticle",
+        "name": "Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning",
+        "author": [
+          {"@type": "Person", "name": "Józef Bossowski"},
+          {"@type": "Person", "name": "Tomasz Szandała"},
+          {"@type": "Person", "name": "Jacek Mazurkiewicz"}
+        ],
+        "publisher": {
+          "@type": "Organization",
+          "name": "Computer Environment and Urban Systems (CEUS)"
+        },
+        "datePublished": "2025"
+      }
+    }
+  </script>
+
+
+
+  <!-- FAQPage structured data for AEO (AI engines extract from FAQ markup) -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What are desire paths?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Desire paths (also called desire lines, social trails, or goat tracks) are informal routes created by people repeatedly choosing a path that better matches convenience, comfort, or directness than planned infrastructure. They emerge when official paths force detours, cross green spaces, or don't align with natural movement patterns."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do desire paths form?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Desire paths form through a positive feedback loop: the first few pedestrians take a shortcut, wearing down vegetation or soil. This worn surface becomes easier to walk on, encouraging more people to follow. Over time, repeated use solidifies the informal route into a visible path. Factors like terrain slope, existing infrastructure quality, and destination proximity influence where desire paths emerge."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is agent-based modeling for pedestrian simulation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Agent-based modeling (ABM) simulates the actions and decisions of individual agents (in this case, virtual pedestrians) to understand how collective behavior emerges. Each agent follows simple rules — choosing paths based on terrain resistance, route efficiency, and accumulated wear from other agents. The simulation produces emergent desire path networks that mirror real-world pedestrian routing behavior."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How can urban planners use desire path simulations?",
+          "acceptedAnswer": {
+            "text": "Urban planners can use desire path simulations to predict where pedestrians will create new routes before they exist. This helps in designing park layouts that align with natural foot traffic, identifying walkable versus impassable zones around facilities, and deciding where to build official paths to prevent environmental degradation from informal trails."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the H3 hex grid system?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "H3 is a hexagonal hierarchical spatial indexing system developed by Uber. It divides the globe into hexagons at multiple resolution levels. In this simulator, H3 resolution 15 provides approximately 0.88-meter spacing, creating a fine-grained grid for precise pedestrian flow simulation over real-world terrain data."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is affordance theory in pedestrian movement?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Affordance theory, coined by psychologist James Gibson, refers to the action possibilities that an environment offers an organism. In pedestrian simulation, paved surfaces have high affordance (agents prefer them naturally), while grass and vegetation start lower but accumulate wear over time. The model tracks how traversed cells become more attractive — creating emergent desire paths through positive feedback."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I export simulation results for use in GIS tools?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The simulator exports flow networks as GeoJSON files containing hex cells with desireScore values. These can be imported directly into QGIS, ArcGIS, or other GIS tools for further spatial analysis, cartographic rendering, or integration with urban planning workflows."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does the Dijkstra gradient algorithm work in this simulator?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator uses Dijkstra's shortest-path algorithm to compute distance gradients from each destination node across all accessible cells. During simulation, agents don't navigate directly toward their goal — instead, they rotate toward the neighboring cell with the lowest gradient value (i.e., closest to the destination). This strategic obstacle-aware navigation allows agents to plan routes around buildings and barriers while still considering local affordance preferences when choosing among equally viable forward steps."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What simulation parameters can be adjusted?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator offers several adjustable parameters: Affordance Weight (1–8) controls how strongly agents prefer worn or comfortable surfaces; Distance Penalty (1–8) determines the trade-off between route length and surface quality; Vision Depth (5–30) sets how far ahead each agent evaluates candidate cells; Field of View (30°–360°) defines the agent's angular perception cone; Crowd size / Agents per Weight Unit (25–500) scales sample size; Temperature (0–2) controls stochastic randomness in route choice; Grid resolution (0–15) sets H3 cell detail; and Emergent Wear toggles positive feedback reinforcement on traversed cells. (In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution.)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What are the limitations of this desire path simulation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Current limitations include: (1) The model operates at a neighborhood scale rather than city-wide; (2) Weather conditions, time of day, and seasonal variations are not modeled; (3) Social influences like group behavior or cultural norms are not captured; (4) Obstacle avoidance uses strategic (pre-planned) navigation rather than dynamic real-time reaction; (5) The friction cost model simplifies real-world terrain into discrete surface categories; (6) Validation has been limited to specific geographic contexts. Future improvements could incorporate real-time GPS tracking data, multi-agent social dynamics, and graduated footprint visibility models."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the historical origin of desire path research?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The study of desire paths traces back to early 20th-century urban planning observations. The most famous example is Ohio State University's 'The Oval' campus (1914), where student-created shortcuts were incorporated into the final landscape design — a practice now called 'desire path acceptance.' Academic research accelerated in the late 20th century with computer simulations of pedestrian movement, including Helbing et al.'s 'active walkers' model (2001) and later agent-based approaches. The CEUS 2025 paper by Bossowski et al. represents a recent advancement combining weighted preference models with Dijkstra-based obstacle avoidance."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What research is this simulator based on?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "This simulator extends the work of Bossowski et al. (2025): 'Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning,' published in Computer Environment and Urban Systems (CEUS). It builds on Ma et al.'s agent-based model, adding weighted preferences for route length versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How are paths and linear features represented in the simulation grid?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough."
+          }
+        }
+      ]
+    }
+  </script>
+
+  <!-- Existing WebApplication schema -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Desire Paths",
+       "description": "An interactive tool that reveals where pedestrians naturally walk across real places. Drop start and end points on the map, then watch desire lines form and foot-traffic patterns emerge.",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "applicationCategory": "VisualizationApplication",
+      "about": [
+        {"@type": "Thing", "name": "Desire paths"},
+        {"@type": "Thing", "name": "Pedestrian flow simulation"},
+        {"@type": "Thing", "name": "Urban planning"},
+        {"@type": "Thing", "name": "Agent-based modeling"}
+      ],
+      "applicationSubCategory": "Urban Planning Simulation",
+      "operatingSystem": "Any",
+      "browserRequirements": "Requires JavaScript. Requires WebGL 2.0 support.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+       "keywords": "desire paths, desire lines, walkability, pedestrian movement, permeability, urban design, agent-based modeling, H3 hex grid, walking resistance, pathfinding, GIS",
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05"
+    }
+  </script>
+
+  <!-- WebSite schema with searchAction for AEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Desire Paths",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "description": "Interactive agent-based pedestrian flow simulator that models desire path formation across terrain using H3 hex grids and real-world map data.",
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://abelvm.github.io/desire-paths/?search={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
+
+  <!-- HowTo schema for the onboarding steps -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to use the Desire Paths Simulator",
+      "description": "Step-by-step guide to running a desire path simulation on real-world maps using agent-based modeling.",
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "totalTime": "PT5M",
+      "estimatedCost": {
+        "@type": "MonetaryCost",
+        "currency": "USD",
+        "value": "0"
+      },
+      "supply": [
+        {"@type": "HowToSupply", "name": "A modern web browser with JavaScript enabled"},
+        {"@type": "HowToSupply", "name": "WebGL 2.0 support (for GPU-accelerated rendering)"}
+      ],
+      "tool": [
+        {"@type": "HowToTool", "name": "Desire Paths Simulator"},
+        {"@type": "HowToTool", "name": "MapLibre GL map interface"},
+        {"@type": "HowToTool", "name": "H3 hex grid engine"}
+      ],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Choose a location",
+          "text": "Open the simulator and use the search bar to find any city, park, or neighborhood worldwide. The map loads centered on Madrid by default."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Place origin and destination nodes",
+          "text": "Select Origin, Destination, or Dual mode from the panel, then click on walkable areas of the map to place nodes. Adjust Pull strength (1–10) with the slider before placing."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Run the simulation",
+          "text": "Click 'Reveal desire lines'. The app builds a friction map from terrain data, classifies surfaces into walkable and impassable zones, then runs hundreds of synthetic agents through the terrain."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Explore results",
+          "text": "View the flow network as a heat map on the hex grid. Toggle the friction resistance overlay, hover cells for details, and click 'Export GeoJSON' to download results."
+        }
+      ]
+    }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+
+  <!-- COI service worker registration script for cross-origin isolation and SharedArrayBuffer support. See https://web.dev/coop-coep/ -->
+  <script src="coi-serviceworker.js"></script>
+
+  <script type="module" crossorigin src="./assets/index-DyQxMSJI.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-CXovTp-X.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-BOha0JuT.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-maplibre-DUV1S9kb.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-deckgl-B3UmQ3wq.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-performance-helpers-WOMK3C3Q.js">
+  <link rel="stylesheet" crossorigin href="./assets/vendor-maplibre-DHorWGt0.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-BYVLA1oA.css">
+</head>
+
+<body>
+
+  <div class="loading">
+    <div class="spinner">
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div></div>
+    </div>
+  </div>
+
+  <div id="app-alert" class="alert-card" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+    <div class="alert-card-copy">
+      <div id="app-alert-title" class="alert-card-title">Notice</div>
+      <div id="app-alert-message" class="alert-card-message"></div>
+    </div>
+    <button id="app-alert-dismiss" class="alert-card-dismiss" type="button">
+      Dismiss
+    </button>
+  </div>
+
+  <div class="panel-container">
+    <div class="panel-inner">
+      <h1 class="visually-hidden">Desire Paths — see where people naturally walk</h1>
+      <div class="sheet-grip" id="sheet-grip" role="button" tabindex="0" aria-label="Collapse or expand the panel">
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-kicker">Walking instinct lab</div>
+            <h2>Desire Paths</h2>
+          </div>
+          <div class="panel-orb" aria-hidden="true"></div>
+        </div>
+
+        <div class="panel-tabs" role="tablist" aria-label="Panel sections">
+          <button id="tab-intro" class="panel-tab-btn is-active" type="button" role="tab" aria-selected="true"
+            aria-controls="panel-intro" data-tab-target="panel-intro">
+            <i data-lucide="sparkles" aria-hidden="true"></i>
+            <span>Intro</span>
+          </button>
+          <button id="tab-simulation" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
+            aria-controls="panel-simulation" data-tab-target="panel-simulation" tabindex="-1">
+            <i data-lucide="footprints" aria-hidden="true"></i>
+            <span>Simulate</span>
+          </button>
+          <button id="tab-more-info" class="panel-tab-btn" type="button" role="tab" aria-selected="false"
+            aria-controls="panel-more-info" data-tab-target="panel-more-info" tabindex="-1">
+            <i data-lucide="book-open-text" aria-hidden="true"></i>
+            <span>More info</span>
+          </button>
+        </div>
+
+        <div class="panel-tab-content">
+          <section id="panel-intro" class="panel-tab-panel is-active" role="tabpanel" aria-labelledby="tab-intro"
+            tabindex="0">
+            <div class="panel-text">
+              <p>
+                Desire Paths is a pedestrian simulator for open spaces. It reveals
+                where people naturally choose to walk when the planned paths don't
+                fit — across parks, plazas, and campuses.
+              </p>
+              <p>
+                A desire path is the unplanned trail worn by repeated walking: the
+                city's honest feedback on how people really move. This simulator
+                models that instinct and turns it into visible flow lines you can
+                explore and export.
+                <a href="https://en.wikipedia.org/wiki/Desire_path" target="_blank" rel="noopener noreferrer">Learn
+                  more</a>.
+              </p>
+              <p class="intro-hook">
+                Every desire line is the map arguing with the plan.
+              </p>
+            </div>
+            <div class="onboarding-card intro-card">
+              <div class="onboarding-step active" data-step="1">
+                <span class="step-number">1</span>
+                <span class="step-text">In the Simulate tab, pick start or end, then drop a start and an end (or both
+                  at once) on the map. Pull strength sets how strongly each one draws walkers.</span>
+              </div>
+              <div class="onboarding-step active" data-step="2">
+                <span class="step-number">2</span>
+                <span class="step-text">Use the surface painter (bottom of the map) to draw polygons, freehand,
+                  circles, or rectangles that reshape walkability.</span>
+              </div>
+              <div class="onboarding-step active" data-step="3">
+                <span class="step-number">3</span>
+                <span class="step-text">Back in the Simulate tab, tune the sliders, reveal the desire lines, then
+                  export as GeoJSON.</span>
+              </div>
+            </div>
+          </section>
+
+          <section id="panel-simulation" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-simulation"
+            tabindex="0" hidden>
+            <div class="panel-meta">
+              <div id="mode-status" class="mode-indicator mode-origin">
+                Starts placed: 0
+              </div>
+              <div id="node-count-chip" class="count-chip">
+                <span class="count-chip-origins">0</span><span class="count-chip-sep"> / </span><span
+                  class="count-chip-dests">0</span> <span class="count-chip-label"> points</span>
+              </div>
+            </div>
+
+            <div class="panel-section">
+              <div class="section-label">Add points</div>
+              <div class="placement-mode-group" role="group" aria-label="Placement mode">
+                <button class="btn btn-segment is-active" id="btn-mode-origin" type="button"
+                  data-placement-mode="origin" aria-pressed="true" data-tooltip="Start point — where the walk begins"><i
+                    data-lucide="log-out"></i></button>
+                <button class="btn btn-segment" id="btn-mode-destination" type="button"
+                  data-placement-mode="destination" aria-pressed="false"
+                  data-tooltip="End point — where the walk ends"><i data-lucide="log-in"></i></button>
+                <button class="btn btn-segment" id="btn-mode-both" type="button" data-placement-mode="dual"
+                  aria-pressed="false" data-tooltip="Both ends — start and end at once"><i data-lucide="log-in"></i><i
+                    data-lucide="log-out"></i></button>
+              </div>
+              <div class="weight-control">
+                <div class="weight-control-head">
+                  <span class="weight-label">
+                    Pull strength
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Pull strength help"
+                      data-tooltip="How strongly this place draws walkers. Higher = a more important destination or a busier origin. Right-click a placed point to change its pull, role, or remove it.">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <output id="node-weight-readout" for="node-weight">1</output>
+                </div>
+                <input id="node-weight" type="range" min="1" max="10" step="1" value="1" />
+                <div class="weight-scale" aria-hidden="true">
+                  <span>1</span>
+                  <span>10</span>
+                </div>
+              </div>
+            </div>
+
+            <details class="panel-section panel-disclosure" id="simulation-params-disclosure">
+              <summary class="panel-disclosure-summary">
+                <span class="section-label">Walking behaviour</span>
+                <span class="panel-disclosure-meta">Fine-tune the model</span>
+              </summary>
+              <div class="param-list panel-disclosure-body">
+                <label class="param-item" for="sim-param-wa">
+                  <span class="param-item-head">Comfort preference
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Comfort preference help"
+                      data-tooltip="How much walkers favour ground that is already easy or worn-in, over a harder shortcut. (Paper term: Affordance Weight)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-wa-value">1</span>
+                  <input id="sim-param-wa" type="range" min="1" max="8" step="1" value="1" />
+                </label>
+
+                <label class="param-item" for="sim-param-wd">
+                  <span class="param-item-head">Shortcut preference
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Shortcut preference help"
+                      data-tooltip="How much walkers trade a direct line for an easier surface. Low = they'll detour for comfort; high = they go straight. (Paper term: Distance Penalty)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-wd-value">4</span>
+                  <input id="sim-param-wd" type="range" min="1" max="8" step="1" value="4" />
+                </label>
+
+                <label class="param-item" for="sim-param-vision-depth">
+                  <span class="param-item-head">Look-ahead
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Look-ahead help"
+                      data-tooltip="How far a walker scans ahead for options before committing to a step. (Paper term: Vision Depth)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-vision-depth-value">15</span>
+                  <input id="sim-param-vision-depth" type="range" min="5" max="30" step="5" value="15" />
+                </label>
+
+                <label class="param-item" for="sim-param-fov">
+                  <span class="param-item-head">Viewing arc
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Viewing arc help"
+                      data-tooltip="The slice of ground ahead a walker can see and consider — narrow = tunnel vision, wide = scans everywhere. (Paper term: Field of View)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-fov-value">120°</span>
+                  <input id="sim-param-fov" type="range" min="30" max="360" step="30" value="120" />
+                </label>
+
+                <label class="param-item" for="sim-param-agents-per-weight">
+                  <span class="param-item-head">Crowd size
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Crowd size help"
+                      data-tooltip="How many virtual walkers set out from each weighted place. More = smoother, more confident paths. (Paper term: Agents per Weight Unit)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-agents-per-weight-value">100</span>
+                  <input id="sim-param-agents-per-weight" type="range" min="25" max="500" step="5" value="100" />
+                </label>
+
+                <label class="param-item" for="sim-param-temperature">
+                  <span class="param-item-head">Spontaneity
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Spontaneity help"
+                      data-tooltip="How much chance overrides habit. Zero = everyone rational; high = some wander. (Paper term: Temperature)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-temperature-value">0.50</span>
+                  <input id="sim-param-temperature" type="range" min="0" max="2" step="0.25" value="0.5" />
+                </label>
+
+                <label class="param-item" for="sim-param-h3-stride">
+                  <span class="param-item-head">Grid resolution
+                    <span class="help-tip" tabindex="0" role="button" aria-label="Grid resolution help"
+                      data-tooltip="H3 grid detail for the simulation. Higher = finer cells and more precise paths, but heavier compute. 0 is coarsest, 15 is finest. (Paper term: H3 resolution)">
+                      <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                  <span class="param-item-value" id="sim-param-h3-stride-value">15</span>
+                  <input id="sim-param-h3-stride" type="range" min="0" max="15" step="1" value="15" />
+                </label>
+
+                <label class="param-toggle" for="sim-param-emergent-wear">
+                  <input id="sim-param-emergent-wear" type="checkbox" checked />
+                  <span>Paths wear in</span>
+                  <span class="help-tip" tabindex="0" role="button" aria-label="Paths wear in help"
+                    data-tooltip="Ground that gets used becomes more inviting — the feedback loop that turns a faint track into a real path.">
+                    <i data-lucide="circle-help" class="param-help" aria-hidden="true"></i>
+                  </span>
+                </label>
+
+                <button class="btn btn-ghost btn-wide" id="btn-reset-sim-params" type="button">
+                  Reset to defaults
+                </button>
+              </div>
+            </details>
+
+            <div class="panel-section panel-section--run">
+              <div class="section-label">Run</div>
+              <div class="btn-group">
+                <button class="btn btn-accent" id="btn-compute" type="button">Reveal desire lines</button>
+                <button class="btn btn-ghost" id="btn-export-geojson" type="button">Export GeoJSON</button>
+                <button class="btn btn-danger" id="btn-clear">Clear map</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="panel-more-info" class="panel-tab-panel" role="tabpanel" aria-labelledby="tab-more-info"
+            tabindex="0" hidden>
+            <article class="info-content">
+
+              <h3>Research &amp; citations</h3>
+              <p>Based on Bossowski et al. (CEUS 2025): <em>Predicting Desire Paths: Agent-Based Simulation for
+                  Neighbourhood Route Planning</em>. Read the full paper and model comparison at the <a
+                  href="/docs/research.html">Research page</a>.</p>
+
+              <h3>Code repository</h3>
+              <p><a href="https://github.com/abelvm/desire-paths" target="_blank"
+                  rel="noopener noreferrer">github.com/abelvm/desire-paths</a></p>
+
+              <h3>Author</h3>
+              <p><a href="https://www.linkedin.com/in/abelvazquez/" target="_blank"
+                  rel="noopener noreferrer">Abel Vázquez Montoro</a></p>
+
+              <h3>Frequently asked questions</h3>
+              <div class="faq-list" aria-label="Frequently asked questions about desire paths and the simulator">
+                <details class="faq-item">
+                  <summary><strong>What are desire paths?</strong></summary>
+                  <p>Desire paths (also called desire lines, social trails, or goat tracks) are informal routes created
+                    by people repeatedly choosing a path that better matches convenience, comfort, or directness than
+                    planned infrastructure. They emerge when official paths force detours, cross green spaces, or don't
+                    align with natural movement patterns.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>How do desire paths form?</strong></summary>
+                  <p>Desire paths form through a positive feedback loop: the first few pedestrians take a shortcut,
+                    wearing down vegetation or soil. This worn surface becomes easier to walk on, encouraging more
+                    people to follow. Over time, repeated use solidifies the informal route into a visible path. Factors
+                    like terrain slope, existing infrastructure quality, and destination proximity influence where
+                    desire paths emerge.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>What is agent-based modeling for pedestrian simulation?</strong></summary>
+                  <p>Agent-based modeling (ABM) simulates the actions and decisions of individual agents — in this case,
+                    virtual pedestrians — to understand how collective behavior emerges. Each agent follows simple
+                    rules: choosing paths based on terrain resistance, route efficiency, and accumulated wear from other
+                    agents. The simulation produces emergent desire path networks that mirror real-world pedestrian
+                    routing behavior.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>How can urban planners use desire path simulations?</strong></summary>
+                  <p>Urban planners can use desire path simulations to predict where pedestrians will create new routes
+                    before they exist. This helps in designing park layouts that align with natural foot traffic,
+                    identifying walkable versus impassable zones around facilities, and deciding where to build official
+                    paths to prevent environmental degradation from informal trails. A dense desire-line network signals
+                    high pedestrian permeability; gaps show where connections are severed.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>What is the H3 hex grid system?</strong></summary>
+                  <p>H3 is a hexagonal hierarchical spatial indexing system developed by Uber. It divides the globe into
+                    hexagons at multiple resolution levels. In this simulator, H3 resolution 15 provides approximately
+                    0.88-meter spacing, creating a fine-grained grid for precise pedestrian flow simulation over
+                    real-world terrain data.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>What is affordance theory in pedestrian movement?</strong></summary>
+                  <p>Affordance theory, coined by psychologist James Gibson, refers to the action possibilities that an
+                    environment offers an organism. In pedestrian simulation, paved surfaces have high affordance
+                    (agents prefer them naturally), while grass and vegetation start lower but accumulate wear over
+                    time. The model tracks how traversed cells become more attractive — creating emergent desire paths
+                    through positive feedback.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>Can I export simulation results for use in GIS tools?</strong></summary>
+                  <p>Yes. The simulator exports flow networks as GeoJSON files containing hex cells with desireScore
+                    values. These can be imported directly into QGIS, ArcGIS, or other GIS tools for further spatial
+                    analysis, cartographic rendering, or integration with urban planning workflows.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>What research is this simulator based on?</strong></summary>
+                  <p>This simulator extends the work of Bossowski et al. (2025): "Predicting Desire Paths: Agent-Based
+                    Simulation for Neighbourhood Route Planning," published in Computer Environment and Urban Systems
+                    (CEUS). It builds on Ma et al.'s agent-based model, adding weighted preferences for route length
+                    versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system.</p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>How do simulation parameters affect results?</strong></summary>
+                  <p>Adjustable in the Walking behaviour tab: <strong>Comfort preference</strong> biases walkers toward
+                    worn-in ground; <strong>Shortcut preference</strong> trades a direct line for an easier surface;
+                    <strong>Look-ahead</strong> and <strong>Viewing arc</strong> set how far and wide a walker scans;
+                    <strong>Crowd size</strong> sets how many virtual walkers set out from each place;
+                    <strong>Grid resolution</strong> sets the H3 cell detail; <strong>Spontaneity</strong> adds chance
+                    to route choice; <strong>Paths wear in</strong> lets used ground grow more inviting.
+                  </p>
+                </details>
+
+                <details class="faq-item">
+                  <summary><strong>How are paths and linear features represented in the simulation grid?</strong></summary>
+                  <p>At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough.</p>
+                </details>
+              </div>
+
+
+
+            </article>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <button id="btn-panel-toggle" type="button" class="panel-toggle-btn" aria-label="Show panel" aria-pressed="false">
+      <span class="toggle-icon" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+    </button>
+  </div>
+
+  <div class="legend">
+    <div class="legend-title-row">
+      <div class="legend-title">Walking resistance</div>
+      <button id="btn-toggle-friction" class="legend-icon-button legend-toggle-btn" type="button"
+        aria-label="Hide walking-resistance legend" aria-pressed="true">
+        <span class="toggle-icon"><i data-lucide="eye" aria-hidden="true"></i></span>
+      </button>
+    </div>
+    <div id="friction-legend-body">
+      <div class="legend-item">
+        <span class="legend-color" style="background: #e74c3c"></span>
+        Barrier — can't cross
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #27ae60"></span>
+        Dense planting
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #a6d854"></span>
+        Lawn / soft
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background: #0096ff"></span>
+        Pavement / easy walking
+      </div>
+      <p class="legend-note">Walking resistance is the friction cost of each surface.</p>
+    </div>
+
+    <div class="legend-title legend-title-spaced">Where people choose to walk</div>
+    <div class="legend-gradient"></div>
+    <div class="legend-labels">
+      <span>Quiet</span>
+      <span id="legend-max-label">Busiest</span>
+    </div>
+  </div>
+
+  <!-- Map-level placement/status badge (review15 A1/A2): mirrors the Surface
+       Edition mode badge so phone users always know what a tap will do and what
+       to do next, without opening the panel. -->
+  <div id="placement-badge" class="placement-badge" role="status" aria-live="polite" hidden></div>
+
+  <!-- Persistent mobile action bar (review15 M2): keeps the core loop — pick a
+       placement mode and reveal — always on screen on phones, so the user never
+       has to open the (collapsible) parameter panel to drop a point or run the
+       simulation. Hidden on desktop/tablet where the panel carries these. -->
+  <div class="mobile-action-bar" id="mobile-action-bar" role="group" aria-label="Place points and reveal desire lines">
+    <div class="mobile-action-modes">
+      <button class="btn btn-segment" id="btn-mode-origin-mobile" type="button" data-placement-mode="origin"
+        aria-pressed="false" data-tooltip="Start point — where the walk begins"><i data-lucide="log-out"></i></button>
+      <button class="btn btn-segment" id="btn-mode-destination-mobile" type="button" data-placement-mode="destination"
+        aria-pressed="false" data-tooltip="End point — where the walk ends"><i data-lucide="log-in"></i></button>
+      <button class="btn btn-segment" id="btn-mode-both-mobile" type="button" data-placement-mode="dual"
+        aria-pressed="false" data-tooltip="Both ends — start and end at once"><i data-lucide="log-in"></i><i
+          data-lucide="log-out"></i></button>
+    </div>
+    <button class="btn btn-accent mobile-action-reveal" id="btn-compute-mobile" type="button">Reveal desire
+      lines</button>
+    <button class="btn mobile-action-edit" id="btn-edit-surface-mobile" type="button" aria-pressed="false"
+      aria-label="Show surface edition tools" data-tooltip="Show or hide the surface edition toolbox"><i
+        data-lucide="pencil" aria-hidden="true"></i></button>
+  </div>
+
+  <div id="hex-tooltip" class="hex-tooltip" hidden></div>
+
+  <div id="map"></div>
+
+</body>
+
+</html>

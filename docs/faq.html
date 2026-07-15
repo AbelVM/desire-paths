@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Desire Paths — FAQ &amp; Research Guide | Agent-Based Pedestrian Flow Simulator</title>
+  <meta name="description"
+    content="Frequently asked questions about desire paths, agent-based pedestrian simulation, H3 hex grids, affordance theory, and how the Desire Paths simulator predicts emergent foot traffic patterns." />
+  <meta name="keywords"
+    content="desire paths FAQ, what are desire paths, agent-based modeling, pedestrian simulation, urban planning tools, H3 grid, affordance theory, Bossowski CEUS 2025, Dijkstra pathfinding, walkability analysis, GeoJSON export, walkability analysis tool, pedestrian flow prediction, desire path mapping" />
+  <link rel="canonical" href="https://abelvm.github.io/desire-paths/docs/faq.html" />
+  <link rel="icon" href="/favicon.png" type="image/png" />
+
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
+  <meta name="language" content="English" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://abelvm.github.io/desire-paths/docs/faq.html" />
+  <meta property="og:title" content="Desire Paths — FAQ &amp; Research Guide" />
+  <meta property="og:description"
+    content="Comprehensive FAQ about desire paths, agent-based pedestrian simulation methods, and the research behind the Desire Paths interactive simulator." />
+  <meta property="og:site_name" content="Desire Paths" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Desire Paths simulator showing pedestrian flow heatmap on a city map" />
+  <meta property="article:modified_time" content="2026-07-05T00:00:00Z" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Desire Paths — FAQ &amp; Research Guide" />
+  <meta name="twitter:description"
+    content="Comprehensive FAQ about desire paths, agent-based pedestrian simulation methods, and the research behind the Desire Paths simulator." />
+  <meta name="twitter:image" content="https://abelvm.github.io/desire-paths/og-image.png" />
+
+  <!-- Breadcrumbs -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://abelvm.github.io/desire-paths/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "FAQ & Research Guide",
+          "item": "https://abelvm.github.io/desire-paths/docs/faq.html"
+        }
+      ]
+    }
+  </script>
+
+  <!-- Article schema for the FAQ page content -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Desire Paths: FAQ & Research Guide",
+      "description": "Comprehensive FAQ about desire paths, agent-based pedestrian simulation methods, and the research behind the Desire Paths interactive simulator.",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      },
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "url": "https://abelvm.github.io/desire-paths/docs/faq.html",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      }
+    }
+  </script>
+
+  <!-- FAQPage structured data — primary AEO signal for AI engines -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What are desire paths?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Desire paths (also called desire lines, social trails, or goat tracks) are informal routes created by people repeatedly choosing a path that better matches convenience, comfort, or directness than planned infrastructure. They emerge when official paths force detours, cross green spaces, or don't align with natural movement patterns between destinations."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do desire paths form in urban environments?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Desire paths form through a positive feedback loop. When the first few pedestrians take a shortcut across grass or soil, they wear down the surface. This worn surface becomes easier and more comfortable to walk on than the surrounding terrain, encouraging more people to follow the same route. Over time, repeated use solidifies the informal path into a visible trail. Key factors include: terrain slope (steeper shortcuts are preferred), existing infrastructure quality (poor sidewalks create more desire paths), destination proximity (direct routes between high-traffic points), and social proof (people follow where others have walked)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is agent-based modeling in the context of pedestrian simulation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Agent-based modeling (ABM) is a computational approach that simulates the actions and interactions of autonomous individual agents to assess their effects on the system as a whole. In pedestrian simulation, each agent represents a virtual person making route decisions based on simple rules: terrain resistance (grass vs pavement), distance to destination, and accumulated wear from previous agents. Despite these simple individual rules, complex emergent behavior arises — desire path networks that closely mirror real-world pedestrian routing patterns."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the H3 hex grid system used in this simulator?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "H3 is a hexagonal hierarchical spatial indexing system developed by Uber Technologies. It divides the globe into hexagons at multiple resolution levels (0–15), where higher resolutions produce smaller hexagons. This simulator uses H3 resolution 15, which provides approximately 0.88-meter spacing between cell centers — fine enough to capture detailed pedestrian flow patterns across urban environments while remaining computationally efficient for real-time simulation."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is affordance theory and how does it apply to desire paths?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Affordance theory was introduced by psychologist James J. Gibson in the 1970s. An affordance is what the environment offers, provides, or furnishes to an individual — essentially, the action possibilities available. In pedestrian movement, paved surfaces offer high walking affordance (comfortable, easy), while grass offers lower initial affordance. However, as agents traverse grass and leave wear traces, its affordance increases over time through positive feedback. This dynamic affordance model is central to desire path formation: worn paths become more attractive than unworn alternatives."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does the Dijkstra gradient algorithm work in this simulator?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator uses Dijkstra's shortest-path algorithm to compute distance gradients from each destination node across all accessible cells. During simulation, agents don't navigate directly toward their goal — instead, they rotate toward the neighboring cell with the lowest gradient value (i.e., closest to the destination). This strategic obstacle-aware navigation allows agents to plan routes around buildings and barriers while still considering local affordance preferences when choosing among equally viable forward steps."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What simulation parameters can be adjusted?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The simulator offers several adjustable parameters: Affordance Weight (1–8) controls how strongly agents prefer worn or comfortable surfaces; Distance Penalty (1–8) determines the trade-off between route length and surface quality; Vision Depth (5–30) sets how far ahead each agent evaluates candidate cells; Field of View (30°–360°) defines the agent's angular perception cone; Crowd size / Agents per Weight Unit (25–500) scales sample size; Temperature (0–2) controls stochastic randomness in route choice; Grid resolution (0–15) sets H3 cell detail; and Emergent Wear toggles positive feedback reinforcement on traversed cells. (In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution.)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How can urban planners use desire path simulations?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Urban planners can leverage desire path simulations in several ways: (1) Predictive design — anticipate where pedestrians will create new routes before construction begins; (2) Park and landscape architecture — design layouts that naturally align with expected foot traffic, reducing maintenance costs from informal trail creation; (3) Accessibility analysis — identify walkable versus impassable zones around critical facilities like hospitals or transit stations; (4) Environmental protection — plan official paths to divert pedestrian flow away from sensitive ecological areas; (5) GIS integration — export simulation results as GeoJSON for spatial analysis in ArcGIS or QGIS."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What research is this simulator based on?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "This simulator extends the framework described by Bossowski, Szandała, and Mazurkiewicz (2025) in 'Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning,' published in Computer Environment and Urban Systems (CEUS). The original research builds on Ma et al.'s agent-based model, adding two key innovations: a weighted preferences model that accounts for varied pedestrian priorities beyond simple shortest-path routing (balancing affordance against distance), and an obstacle avoidance model using Dijkstra gradients that achieves approximately 60% accuracy in replicating real-world desire paths. This web implementation uses H3 hex grids instead of the original Unity3D square grid, enabling direct integration with real-world map data."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I export simulation results for use in GIS software?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The simulator includes a GeoJSON export feature that downloads the complete flow network as a standard GeoJSON file. Each hex cell contains its geographic coordinates and a desireScore property indicating flow intensity. These files can be imported directly into QGIS, ArcGIS Pro, or any GIS platform that supports GeoJSON for further spatial analysis, thematic cartography, or integration with existing urban planning datasets."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What are the limitations of this desire path simulation?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Current limitations include: (1) The model operates at a neighborhood scale rather than city-wide; (2) Weather conditions, time of day, and seasonal variations are not modeled; (3) Social influences like group behavior or cultural norms are not captured; (4) Obstacle avoidance uses strategic (pre-planned) navigation rather than dynamic real-time reaction; (5) The friction cost model simplifies real-world terrain into discrete surface categories; (6) Validation has been limited to specific geographic contexts. Future improvements could incorporate real-time GPS tracking data, multi-agent social dynamics, and graduated footprint visibility models."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the historical origin of desire path research?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The study of desire paths traces back to early 20th-century urban planning observations. The most famous example is Ohio State University's 'The Oval' campus (1914), where student-created shortcuts were incorporated into the final landscape design — a practice now called 'desire path acceptance.' Academic research accelerated in the late 20th century with computer simulations of pedestrian movement, including Helbing et al.'s 'active walkers' model (2001) and later agent-based approaches. The CEUS 2025 paper by Bossowski et al. represents a recent advancement combining weighted preference models with Dijkstra-based obstacle avoidance."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How are paths and linear features represented in the simulation grid?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough."
+          }
+        }
+      ]
+    }
+  </script>
+
+  <!-- HowTo structured data for the simulator guide -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to use the Desire Paths Simulator",
+      "description": "Step-by-step guide to running a desire path simulation on real-world maps using agent-based modeling.",
+      "datePublished": "2025-06-01",
+      "dateModified": "2026-07-05",
+      "author": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro",
+        "url": "https://www.linkedin.com/in/abelvazquez/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Desire Paths",
+        "url": "https://abelvm.github.io/desire-paths/"
+      },
+      "totalTime": "PT5M",
+      "estimatedCost": {
+        "@type": "MonetaryCost",
+        "currency": "USD",
+        "value": "0"
+      },
+      "supply": [
+        {"@type": "HowToSupply", "name": "A modern web browser with JavaScript enabled"},
+        {"@type": "HowToSupply", "name": "WebGL 2.0 support (for GPU-accelerated rendering)"}
+      ],
+      "tool": [
+        {"@type": "HowToTool", "name": "Desire Paths Simulator"},
+        {"@type": "HowToTool", "name": "MapLibre GL map interface"},
+        {"@type": "HowToTool", "name": "H3 hex grid engine"}
+      ],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Choose a location",
+          "text": "Open the simulator and use the search bar to find any city, park, or neighborhood worldwide. The map loads centered on Madrid by default."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Place origin and destination nodes",
+          "text": "Select Origin, Destination, or Dual mode from the panel, then click on walkable areas of the map to place nodes. Adjust Pull strength (1–10) with the slider before placing."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Run the simulation",
+          "text": "Click 'Reveal desire lines'. The app builds a friction map from terrain data, classifies surfaces into walkable and impassable zones, then runs hundreds of synthetic agents through the terrain."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Explore results",
+          "text": "View the flow network as a heat map on the hex grid. Toggle the friction resistance overlay, hover cells for details, and click 'Export GeoJSON' to download results."
+        }
+      ]
+    }
+  </script>
+
+  <!-- WebPage + speakable for voice-search AEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "Desire Paths — FAQ & Research Guide",
+      "url": "https://abelvm.github.io/desire-paths/docs/faq.html",
+      "datePublished": "2025-01-01",
+      "dateModified": "2026-07-05",
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": ["h1", ".faq-list"]
+      }
+    }
+  </script>
+
+  <!-- Organization schema for GEO -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Desire Paths",
+      "url": "https://abelvm.github.io/desire-paths/",
+      "logo": "https://abelvm.github.io/desire-paths/favicon.png",
+      "sameAs": [
+        "https://www.linkedin.com/in/abelvazquez/",
+        "https://github.com/abelvm/desire-paths"
+      ],
+      "founder": {
+        "@type": "Person",
+        "name": "Abel Vázquez Montoro"
+      }
+    }
+  </script>
+
+  <!-- Person schema for author credibility -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Person",
+      "name": "Abel Vázquez Montoro",
+      "url": "https://www.linkedin.com/in/abelvazquez/",
+      "jobTitle": "Software Engineer & Urban Planning Researcher"
+    }
+  </script>
+
+  <link rel="stylesheet" href="/docs/docs.css" />
+
+  <!-- Lucide icons (static pages) -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+</head>
+
+<body>
+  <div class="container">
+
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a href="/">Home</a> &rsaquo; FAQ &amp; Research Guide
+    </nav>
+
+    <!-- Header -->
+    <header class="page-header">
+      <span class="eyebrow">
+        <i data-lucide="book-open-text" aria-hidden="true"></i>
+        Research Guide
+      </span>
+      <h1>Desire Paths: FAQ &amp; Research Guide</h1>
+      <p class="subtitle">Everything you need to know about desire paths, agent-based pedestrian simulation methods, and how this interactive simulator works.</p>
+    </header>
+
+    <!-- Quick Links -->
+    <section aria-label="Quick links">
+      <div class="links-grid">
+        <a class="link-card" href="/">
+          <span class="link-icon"><i data-lucide="compass" aria-hidden="true"></i></span>
+          <span class="link-card-title">Try the Simulator</span>
+          <span class="link-card-desc">Run desire path simulations on real-world maps</span>
+        </a>
+        <a class="link-card" href="/docs/paper.md">
+          <span class="link-icon"><i data-lucide="file-text" aria-hidden="true"></i></span>
+          <span class="link-card-title">Research Paper</span>
+          <span class="link-card-desc">Bossowski et al. (CEUS 2025) full text</span>
+        </a>
+        <a class="link-card" href="/docs/research.html">
+          <span class="link-icon"><i data-lucide="book-open" aria-hidden="true"></i></span>
+          <span class="link-card-title">Research Summary</span>
+          <span class="link-card-desc">Model comparison, metrics &amp; key findings</span>
+        </a>
+        <a class="link-card" href="https://github.com/abelvm/desire-paths">
+          <span class="link-icon"><i data-lucide="code" aria-hidden="true"></i></span>
+          <span class="link-card-title">Source Code</span>
+          <span class="link-card-desc">Open-source on GitHub (MIT License)</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- What Are Desire Paths -->
+    <h2>What are desire paths?</h2>
+
+    <p>A <strong>desire path</strong> (also called a <em>desire line</em>, <em>social trail</em>, or <em>goat track</em>) is an informal route created by people repeatedly choosing a path that better matches convenience, comfort, or directness than planned infrastructure.</p>
+
+    <p>Desire paths emerge when official paths force detours, cross green spaces, or don't align with natural movement patterns. They are visible evidence of the gap between designed and used space — one of the most common observations in landscape architecture and urban planning.</p>
+
+    <!-- How They Form -->
+    <h2>How do desire paths form?</h2>
+
+    <p>Desire path formation follows a well-documented positive feedback loop:</p>
+
+    <ol class="step-list">
+      <li class="step-item">
+        <strong>Pioneer steps</strong>
+        <p>The first few pedestrians take a shortcut across grass or soil, creating an initial worn trace.</p>
+      </li>
+      <li class="step-item">
+        <strong>Surface degradation</strong>
+        <p>The worn surface becomes easier and more comfortable to walk on than the surrounding terrain — higher affordance for future walkers.</p>
+      </li>
+      <li class="step-item">
+        <strong>Social proof effect</strong>
+        <p>People naturally follow paths others have created. The visible trail signals that this route is safe and efficient.</p>
+      </li>
+      <li class="step-item">
+        <strong>Path solidification</strong>
+        <p>Over time, repeated use creates a distinct, well-defined path — sometimes permanent even if the surrounding landscape changes.</p>
+      </li>
+    </ol>
+
+    <h3>Key factors influencing desire path formation</h3>
+    <ul class="contributions-list">
+      <li><strong>Terrain slope:</strong> Steeper shortcuts are strongly preferred, even if longer</li>
+      <li><strong>Infrastructure quality:</strong> Poor sidewalks and broken paths create more desire alternatives</li>
+      <li><strong>Destination proximity:</strong> Direct routes between high-traffic points (bus stops, entrances)</li>
+      <li><strong>Surface resistance:</strong> Grass, gravel, and dirt surfaces are more easily worn than pavement</li>
+    </ul>
+
+    <p><strong>Agent-based modeling (ABM)</strong> is a computational approach that simulates the actions and interactions of autonomous individual agents to assess their effects on the system as a whole. In the context of desire path research:</p>
+
+    <ul class="contributions-list">
+      <li><strong>Each agent</strong> represents a virtual pedestrian making route decisions based on simple rules</li>
+      <li><strong>Terrain resistance</strong> varies by surface type (pavement = low cost, grass = higher cost)</li>
+      <li><strong>Route efficiency</strong> is balanced against comfort through weighted preference parameters</li>
+      <li><strong>Emergent wear</strong> means traversed cells become more attractive over time — mirroring real path formation</li>
+    </ul>
+
+    <p>The key insight of ABM is that complex, realistic desire path networks emerge from simple individual rules — no top-down design required. This mirrors how actual desire paths form in the real world.</p>
+
+    <!-- Technical Details -->
+    <h2><i data-lucide="cpu" aria-hidden="true"></i> Technical details</h2>
+
+    <h3>H3 Hex Grid System</h3>
+    <p>The simulator uses Uber's <a href="https://uber.github.io/h3/" target="_blank" rel="noopener noreferrer">H3 hexagonal hierarchical spatial indexing system</a> at resolution 15, providing approximately 0.88-meter spacing between cell centers. This creates a fine-grained grid suitable for detailed pedestrian flow simulation over real-world terrain data.</p>
+
+    <h3>Friction Cost Model</h3>
+    <table class="model-table">
+      <thead>
+        <tr>
+          <th>Surface Type</th>
+          <th>Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Barrier (buildings, water)</td>
+          <td style="color: var(--danger);">&#8734; (impassable)</td>
+        </tr>
+        <tr>
+          <td>Dense planting</td>
+          <td>4.0</td>
+        </tr>
+        <tr>
+          <td>Lawn / soft</td>
+          <td>2.5</td>
+        </tr>
+        <tr>
+          <td>Pavement / easy walking</td>
+          <td>1.0</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Research -->
+    <h2><i data-lucide="book-open" aria-hidden="true"></i> Research &amp; citations</h2>
+
+    <p>This simulator extends the framework described in:</p>
+
+    <blockquote class="citation-block">
+      Bossowski, J., Szandała, T., &amp; Mazurkiewicz, J. (2025). Predicting Desire Paths: Agent-Based Simulation for Neighbourhood Route Planning. <em>Computer Environment and Urban Systems (CEUS)</em>.
+    </blockquote>
+
+    <p>The work builds on Ma et al.'s agent-based model, adding weighted preferences for route length versus affordance trade-offs, and an obstacle-aware Dijkstra gradient pathfinding system.</p>
+
+    <!-- FAQ Section -->
+    <h2><i data-lucide="message-circle-question" aria-hidden="true"></i> Frequently asked questions</h2>
+
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary><strong>What are desire paths?</strong></summary>
+        <p>Desire paths (also called desire lines, social trails, or goat tracks) are informal routes created by people repeatedly choosing a path that better matches convenience, comfort, or directness than planned infrastructure. They emerge when official paths force detours, cross green spaces, or don't align with natural movement patterns between destinations.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>How do desire paths form in urban environments?</strong></summary>
+        <p>Desire paths form through a positive feedback loop. When the first few pedestrians take a shortcut across grass or soil, they wear down the surface. This worn surface becomes easier and more comfortable to walk on than the surrounding terrain, encouraging more people to follow the same route. Over time, repeated use solidifies the informal path into a visible trail.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What is agent-based modeling in the context of pedestrian simulation?</strong></summary>
+        <p>Agent-based modeling (ABM) simulates individual autonomous agents to assess their collective effects. In pedestrian simulation, each agent represents a virtual person making route decisions based on terrain resistance, distance to destination, and accumulated wear from previous agents — producing emergent desire path networks.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What is the H3 hex grid system used in this simulator?</strong></summary>
+        <p>H3 is a hexagonal hierarchical spatial indexing system developed by Uber. This simulator uses resolution 15, providing approximately 0.88-meter spacing — fine enough to capture detailed pedestrian flow patterns while remaining computationally efficient for real-time simulation.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What is affordance theory and how does it apply?</strong></summary>
+        <p>Affordance theory (Gibson, 1977) describes the action possibilities an environment offers. Paved surfaces offer high walking affordance; grass offers lower initial affordance that increases as agents leave wear traces — creating the positive feedback loop essential to desire path formation.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>How does Dijkstra's algorithm work in this simulator?</strong></summary>
+        <p>The simulator uses Dijkstra's shortest-path algorithm to compute distance gradients from each destination across all accessible cells. Agents navigate toward the neighboring cell with the lowest gradient value, enabling strategic obstacle-aware routing around buildings and barriers.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What simulation parameters can be adjusted?</strong></summary>
+        <p>The simulator offers: Affordance Weight (1–8), Distance Penalty (1–8), Vision Depth (5–30), Field of View (30°–360°), Crowd size / Agents per Weight Unit (25–500), Temperature (0–2), Grid resolution (0–15), and Emergent Wear toggle. In the app these appear as Comfort preference, Shortcut preference, Look-ahead, Viewing arc, Crowd size, Spontaneity, and Grid resolution. Each parameter controls a different aspect of agent behavior.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>How can urban planners use desire path simulations?</strong></summary>
+        <p>Urban planners can predict where pedestrians will create new routes, design park layouts aligned with natural foot traffic, identify walkable zones around facilities, plan paths to protect sensitive areas, and export results as GeoJSON for GIS analysis.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What research is this simulator based on?</strong></summary>
+        <p>This simulator extends Bossowski et al. (2025) published in CEUS, building on Ma et al.'s agent-based model with weighted preferences and Dijkstra-based obstacle avoidance. The web implementation uses H3 hex grids for real-world map integration.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>Can I export simulation results for GIS software?</strong></summary>
+        <p>Yes. The simulator exports flow networks as GeoJSON files with desireScore values per hex cell, importable into QGIS, ArcGIS Pro, or any platform supporting GeoJSON.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What are the limitations of this simulation?</strong></summary>
+        <p>The model operates at neighborhood scale. Weather, time of day, group behavior, and cultural norms are not modeled. Obstacle avoidance uses strategic pre-planned navigation rather than dynamic reaction. Future improvements include real-time GPS data integration and multi-agent social dynamics.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>What is the historical origin of desire path research?</strong></summary>
+        <p>The study traces to early 20th-century urban planning. Ohio State University's "The Oval" campus (1914) famously incorporated student-created shortcuts into its final design. Academic research accelerated with Helbing et al.'s active walkers model (2001) and later agent-based approaches.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><strong>How are paths and linear features represented in the grid?</strong></summary>
+        <p>At H3 resolution 15 a single cell is only about 1 meter across — thinner than a real footway and narrow enough that adjacent path cells can become disconnected. To keep linear features (footways, paths, tracks) connected and realistically wide, they are rasterized as a corridor widened by a landcover-aware Gaussian blur (radius 1, σ=1.0) around each cell along the line. The blur accumulates weight from every corridor source within radius, producing a smooth falloff that yields a roughly 3-meter-wide path — equivalent to a single resolution-14 cell — and improves path connectivity. The BFS does not propagate through cells with friction ≥ dense vegetation (4.0), so paths respect landcover boundaries and do not force walkers through bush or keep-off terrain. The widening radius is derived from a target path width and the resolution's cell spacing, so it stays approximately constant across resolutions: radius 1 at res 15, and 0 at coarser resolutions where one cell is already wide enough.</p>
+      </details>
+    </div>
+
+    <!-- Footer -->
+    <footer class="page-footer">
+      <p>Desire Paths Simulator &middot; MIT License &middot; Abel V&aacute;zquez Montoro</p>
+    </footer>
+
+  </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+
+</html>
