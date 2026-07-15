@@ -659,4 +659,6 @@ export const PATH_CACHE_MAX = 2000;
 export const POLY_CACHE_MAX = 2000;
 
 // Cache size limit for poly cells cache (used in spatial operations)
-export const POLY_CELLS_CACHE_MAX = 512;
+// City-scale maps surface thousands of unique landuse/landcover polygons, so
+// 2048 covers the realistic distinct-geometry space with negligible memory cost.
+export const POLY_CELLS_CACHE_MAX = 2048;

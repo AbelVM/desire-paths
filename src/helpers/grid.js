@@ -52,6 +52,29 @@ function _aoiKey(poly) {
   return `${minx.toFixed(6)}:${miny.toFixed(6)}:${maxx.toFixed(6)}:${maxy.toFixed(6)}`;
 }
 
+// Compute AOI bbox as [minx, miny, maxx, maxy] for feature pre-filtering.
+function _aoiBbox(poly) {
+  if (!poly || !poly.length) return null;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const ring = poly[i] || [];
+    for (let j = 0; j < ring.length; j++) {
+      const coord = ring[j] || [0, 0];
+      const lng = coord[0];
+      const lat = coord[1];
+      if (lng < minx) minx = lng;
+      if (lng > maxx) maxx = lng;
+      if (lat < miny) miny = lat;
+      if (lat > maxy) maxy = lat;
+    }
+  }
+  if (!isFinite(minx)) return null;
+  return [minx, miny, maxx, maxy];
+}
+
 export function getHexes(state, _mapInstance) {
   // No AOI yet (e.g. surface polygons drawn before any start/end node exists) —
   // nothing to generate hexes for. Return an empty array so callers skip
@@ -121,10 +144,17 @@ export async function triggerFastScan(state, mapInstance) {
         type: feat.geometry.type,
         coordinates: feat.geometry.coordinates,
       },
+      // Preserve Mapbox pre-computed bbox so the worker can skip the O(V)
+      // coordinate walk when the tile source already provides one.
+      bbox: feat.bbox || null,
     });
   }
 
-  const build = await runFastScanTask(viewHexes, buildFeatures, r1AdjacencyPromise);
+  // Compute AOI bbox once for feature pre-filtering in the worker. This avoids
+  // rasterizing features that are completely outside the AOI.
+  const aoiBbox = _aoiBbox(aoiPolygon);
+
+  const build = await runFastScanTask(viewHexes, buildFeatures, r1AdjacencyPromise, aoiBbox);
 
   state._mappingGeneration = (state._mappingGeneration ?? 0) + 1;
   clearComputeCaches(state);

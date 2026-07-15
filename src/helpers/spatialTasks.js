@@ -172,6 +172,43 @@ function _computeBboxKey(coords) {
   return `${minx.toFixed(4)}:${miny.toFixed(4)}:${maxx.toFixed(4)}:${maxy.toFixed(4)}:${coords.length}`;
 }
 
+// Compute the bounding box of a feature's geometry coordinates.
+// Accepts an optional pre-computed bbox (e.g. from Mapbox vector tile features)
+// to skip the O(V) coordinate walk when the source already provides one.
+// Returns null if the geometry is empty/invalid, otherwise [minx, miny, maxx, maxy].
+function computeFeatureBbox(geometry, precomputedBbox) {
+  if (precomputedBbox && Array.isArray(precomputedBbox) && precomputedBbox.length === 4) {
+    return [precomputedBbox[0], precomputedBbox[1], precomputedBbox[2], precomputedBbox[3]];
+  }
+  if (!geometry || !geometry.coordinates) return null;
+  const coords = geometry.coordinates;
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity;
+  const walk = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      const c = arr[i];
+      if (typeof c[0] === 'number') {
+        if (c[0] < minx) minx = c[0];
+        if (c[0] > maxx) maxx = c[0];
+        if (c[1] < miny) miny = c[1];
+        if (c[1] > maxy) maxy = c[1];
+      } else {
+        walk(c);
+      }
+    }
+  };
+  walk(coords);
+  if (!isFinite(minx)) return null;
+  return [minx, miny, maxx, maxy];
+}
+
+// Fast bbox intersection test: returns true if a and b overlap.
+function bboxesIntersect(a, b) {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
 function getCachedPolyCells(coords) {
   // Fast bbox check: compute key only on cache miss (moved from top of function).
   // Include the H3 resolution in the key: the same geometry at a different
@@ -341,7 +378,7 @@ export function computeGradientBatch({ frictionEntries, targets, r1Adjacency, vi
   return gradients;
 }
 
-export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
+export function collectFastScanEntries({ features = [], viewHexes = [], aoiBbox = null } = {}) {
   // AOI membership filter. `queryRenderedFeatures` returns geometries that can
   // spill past the AOI hexes, so we keep only cells inside `viewHexes`. A single
   // O(N) Set is the only per-cell auxiliary structure we allocate — the previous
@@ -353,6 +390,12 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   // caller actually consumes.
   const inAoi = viewHexes.length ? new Set(viewHexes) : null;
 
+  // Pre-filter features by AOI bbox to skip expensive polygonToCells / gridPathCells
+  // for geometries that are completely outside the AOI. The bbox check is O(1) per
+  // feature vs O(V) for rasterization, so this is a net win whenever the viewport
+  // is larger than the AOI (the common case after panning/zooming).
+  const hasAoiBbox = Array.isArray(aoiBbox) && aoiBbox.length === 4;
+
   // Group features by surface classification tuple to enable batch processing.
   // Key: "layerKey|layerVal" → array of {geometry}. Distinct (layerKey, layerVal)
   // pairs are bounded by the number of surface types (a handful), so grouping is
@@ -362,6 +405,15 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
     const feature = features[i];
     if (!feature || !feature.geometry) continue;
     if (!FAST_SCAN_LAYERS.has(feature.sourceLayer)) continue;
+
+    // Bbox pre-filter: skip features whose geometry bbox does not intersect
+    // the AOI bbox. This avoids the expensive polygonToCells / gridPathCells
+    // calls for out-of-AOI features. Use the Mapbox pre-computed bbox when
+    // available to skip the O(V) coordinate walk entirely.
+    if (hasAoiBbox) {
+      const fBbox = feature._bbox || (feature._bbox = computeFeatureBbox(feature.geometry, feature.bbox));
+      if (fBbox && !bboxesIntersect(fBbox, aoiBbox)) continue;
+    }
 
     const surface = getSurface(feature);
     if (!surface || !surface.layer || !surface.cost) continue;
@@ -442,11 +494,12 @@ export function collectFastScanEntries({ features = [], viewHexes = [] } = {}) {
   return { multiFrictionEntries, cellFrictionEntries, lineCorridorCells };
 }
 
-export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) {
+export function computeFastScanSnapshot({ features = [], viewHexes = [], aoiBbox = null } = {}) {
   try {
     const { multiFrictionEntries, cellFrictionEntries, lineCorridorCells } = collectFastScanEntries({
       features,
       viewHexes,
+      aoiBbox,
     });
     const blur = computeImpassableBlurSnapshot({ frictionEntries: cellFrictionEntries });
     const pathBlur = computePathBlurSnapshot({
@@ -487,9 +540,9 @@ export function computeFastScanSnapshot({ features = [], viewHexes = [] } = {}) 
   }
 }
 
-export function computeFastScanChunkSnapshot({ features = [], viewHexes = [] } = {}) {
+export function computeFastScanChunkSnapshot({ features = [], viewHexes = [], aoiBbox = null } = {}) {
   try {
-    return collectFastScanEntries({ features, viewHexes });
+    return collectFastScanEntries({ features, viewHexes, aoiBbox });
   } catch (err) {
     try {
       console.error &&

@@ -1047,7 +1047,7 @@ export async function runAgentBatches(
   }
 }
 
-export async function runFastScanTask(viewHexes, features, r1Adjacency) {
+export async function runFastScanTask(viewHexes, features, r1Adjacency, aoiBbox = null) {
   if (!viewHexes || viewHexes.length === 0) {
     return {
       multiFrictionEntries: Object.create(null),
@@ -1063,11 +1063,11 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   }
 
   const featureCount = features?.length ?? 0;
-  if (featureCount <= 1) return runWorker('fast-scan', { viewHexes, features });
+  if (featureCount <= 1) return runWorker('fast-scan', { viewHexes, features, aoiBbox });
 
   const workerCount = Math.min(MAX_FASTSCAN_WORKERS, featureCount);
   const chunks = splitIntoBalancedChunks(features, workerCount, featureVertexCost);
-  if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features });
+  if (chunks.length <= 1) return runWorker('fast-scan', { viewHexes, features, aoiBbox });
 
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   logger.debug(
@@ -1082,7 +1082,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
   // not pass an attemptTimeout here.
   const chunkTasks = chunks.map((chunk, chunkIndex) =>
     PowerRetry.run(
-      () => runWorker('fast-scan-chunk', { viewHexes, features: chunk }),
+      () => runWorker('fast-scan-chunk', { viewHexes, features: chunk, aoiBbox }),
       {
         maxAttempts: 3,
         baseDelay: 200,
@@ -1105,7 +1105,7 @@ export async function runFastScanTask(viewHexes, features, r1Adjacency) {
       try {
         // Fallback: compute the chunk locally on the main thread to avoid
         // incomplete results when all worker attempts fail.
-        return runLocally('fast-scan-chunk', { viewHexes, features: chunk });
+        return runLocally('fast-scan-chunk', { viewHexes, features: chunk, aoiBbox });
       } catch (localErr) {
         try {
           logger.error('spatialWorker: fast-scan-chunk local fallback failed', {
